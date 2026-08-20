@@ -320,7 +320,7 @@ app.get('/jobs', (_req, res) => res.json(db.get('jobs').value()));
 // set up, or to try again after a failed generation. Reusable any time you
 // want fresh visuals for a given product, without creating a new product.
 // Usage: POST /manual/generate/<numeric-product-id>
-app.post('/manual/generate/:productId', async (req, res) => {
+app.all('/manual/generate/:productId', async (req, res) => {
   const numericId = req.params.productId;
   const productGid = `gid://shopify/Product/${numericId}`;
   try {
