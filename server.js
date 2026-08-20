@@ -315,6 +315,32 @@ app.post('/webhooks/higgsfield', async (req, res) => {
 app.get('/health', (_req, res) => res.send('ok'));
 app.get('/jobs', (_req, res) => res.json(db.get('jobs').value()));
 
+// Debug helper: ask Higgsfield what an image/video generation would cost for
+// THIS account, without actually generating anything. Safe to call anytime.
+app.get('/debug/estimate', async (_req, res) => {
+  try {
+    const authHeader = `Key ${HIGGSFIELD_API_KEY_ID}:${HIGGSFIELD_API_KEY_SECRET}`;
+    const [imageRes, videoRes] = await Promise.all([
+      fetch(`${HIGGSFIELD_API_BASE}/estimate${HIGGSFIELD_IMAGE_ENDPOINT}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        body: JSON.stringify({ prompt: `${BRAND_STYLE_PROMPT || 'clean studio product shot, dramatic lighting, high detail, 4k'}` }),
+      }).then(async (r) => ({ status: r.status, body: await r.text() })),
+      fetch(`${HIGGSFIELD_API_BASE}/estimate${HIGGSFIELD_VIDEO_ENDPOINT}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        body: JSON.stringify({
+          image_url: 'https://cdn.shopify.com/s/files/1/0916/8214/4590/files/UseAIImageAug6_2026_20_47_32.png',
+          prompt: 'smooth product showcase, slow rotation',
+        }),
+      }).then(async (r) => ({ status: r.status, body: await r.text() })),
+    ]);
+    res.json({ image: imageRes, video: videoRes });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Higgsfield <-> Shopify automation server listening on port ${PORT}`);
 });
