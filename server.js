@@ -158,21 +158,104 @@ const CREATE_MEDIA_MUTATION = /* GraphQL */ `
   }
 `;
 
+const STAGED_UPLOADS_CREATE_MUTATION = /* GraphQL */ `
+  mutation stagedUploadsCreate($input: [StagedUploadInput!]!) {
+    stagedUploadsCreate(input: $input) {
+      stagedTargets {
+        url
+        resourceUrl
+        parameters { name value }
+      }
+      userErrors { field message }
+    }
+  }
+`;
+
+/**
+ * Downloads a file from `sourceUrl` and re-uploads it to Shopify's staged
+ * upload storage, returning a Shopify-hosted resourceUrl that
+ * productCreateMedia will always accept. Used as a fallback for hosts whose
+ * URLs Shopify's own fetcher rejects (e.g. some CDNs fail Shopify's HEAD
+ * pre-check even though a normal GET works fine).
+ */
+async function stageExternalFile(sourceUrl, filename, mimeType, resourceType) {
+  const fileRes = await fetch(sourceUrl);
+  if (!fileRes.ok) {
+    throw new Error(`Failed to download ${sourceUrl}: ${fileRes.status}`);
+  }
+  const buffer = Buffer.from(await fileRes.arrayBuffer());
+
+  const stagedData = await shopifyGraphQL(STAGED_UPLOADS_CREATE_MUTATION, {
+    input: [
+      {
+        resource: resourceType, // 'IMAGE' or 'VIDEO'
+        filename,
+        mimeType,
+        fileSize: String(buffer.length),
+        httpMethod: 'POST',
+      },
+    ],
+  });
+  const stagedErrors = stagedData.stagedUploadsCreate.userErrors;
+  if (stagedErrors && stagedErrors.length) {
+    throw new Error(`Shopify stagedUploadsCreate error: ${JSON.stringify(stagedErrors)}`);
+  }
+  const target = stagedData.stagedUploadsCreate.stagedTargets[0];
+
+  // Use Node's native fetch (not the node-fetch package imported above) so
+  // the multipart/form-data body is built the standard WHATWG way — the
+  // node-fetch v2 package doesn't understand native FormData/Blob bodies.
+  const nativeFetch = globalThis.fetch;
+  const form = new FormData();
+  for (const { name, value } of target.parameters) form.append(name, value);
+  form.append('file', new Blob([buffer], { type: mimeType }), filename);
+
+  const uploadRes = await nativeFetch(target.url, { method: 'POST', body: form });
+  if (!uploadRes.ok) {
+    throw new Error(`Staged upload failed: ${uploadRes.status} ${await uploadRes.text()}`);
+  }
+  return target.resourceUrl;
+}
+
 /**
  * Attaches an already-hosted image or video (by URL) to a Shopify product.
- * NOTE: Shopify fetches the file from `originalSource` itself, so that URL
- * must be public and reachable by Shopify's servers (no auth headers).
- * For video files over ~1GB or if Shopify can't fetch the URL directly,
- * switch to the `stagedUploadsCreate` + upload flow instead.
+ * Tries Shopify's direct `originalSource` fetch first (fast, no extra
+ * bandwidth through us); if Shopify rejects the URL (some CDNs fail its
+ * validation, especially for video), falls back to downloading the file
+ * ourselves and re-uploading it via Shopify's staged upload flow.
  */
 async function attachMediaToProduct(productGid, sourceUrl, contentType, alt) {
   const data = await shopifyGraphQL(CREATE_MEDIA_MUTATION, {
     productId: productGid,
     media: [{ originalSource: sourceUrl, mediaContentType: contentType, alt }],
   });
-  const errors = data.productCreateMedia.mediaUserErrors;
+  let errors = data.productCreateMedia.mediaUserErrors;
   if (errors && errors.length) {
-    throw new Error(`Shopify media error: ${JSON.stringify(errors)}`);
+    const isInvalidUrl = errors.some((e) => /invalid .* url/i.test(e.message));
+    if (!isInvalidUrl) {
+      throw new Error(`Shopify media error: ${JSON.stringify(errors)}`);
+    }
+    console.warn(
+      `[media] Shopify rejected direct URL for ${productGid}, falling back to staged upload:`,
+      JSON.stringify(errors)
+    );
+    const ext = contentType === 'VIDEO' ? 'mp4' : 'jpg';
+    const mimeType = contentType === 'VIDEO' ? 'video/mp4' : 'image/jpeg';
+    const resourceUrl = await stageExternalFile(
+      sourceUrl,
+      `higgsfield-${Date.now()}.${ext}`,
+      mimeType,
+      contentType
+    );
+    const retryData = await shopifyGraphQL(CREATE_MEDIA_MUTATION, {
+      productId: productGid,
+      media: [{ originalSource: resourceUrl, mediaContentType: contentType, alt }],
+    });
+    errors = retryData.productCreateMedia.mediaUserErrors;
+    if (errors && errors.length) {
+      throw new Error(`Shopify media error (after staged upload retry): ${JSON.stringify(errors)}`);
+    }
+    return retryData.productCreateMedia.media;
   }
   return data.productCreateMedia.media;
 }
