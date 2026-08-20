@@ -315,6 +315,49 @@ app.post('/webhooks/higgsfield', async (req, res) => {
 app.get('/health', (_req, res) => res.send('ok'));
 app.get('/jobs', (_req, res) => res.json(db.get('jobs').value()));
 
+// Manual trigger: (re)generate an image (and, once that finishes, a video)
+// for an EXISTING product — for products created before the webhook was
+// set up, or to try again after a failed generation. Reusable any time you
+// want fresh visuals for a given product, without creating a new product.
+// Usage: POST /manual/generate/<numeric-product-id>
+app.post('/manual/generate/:productId', async (req, res) => {
+  const numericId = req.params.productId;
+  const productGid = `gid://shopify/Product/${numericId}`;
+  try {
+    const data = await shopifyGraphQL(
+      `query($id: ID!) { product(id: $id) { title descriptionHtml } }`,
+      { id: productGid }
+    );
+    if (!data.product) return res.status(404).json({ error: 'Product not found' });
+
+    const title = data.product.title || '';
+    const description = (data.product.descriptionHtml || '').replace(/<[^>]+>/g, ' ').trim();
+
+    const { jobId, requestId, prompt } = await requestImageGeneration({
+      productGid,
+      title,
+      description,
+    });
+    db.get('jobs')
+      .push({
+        jobId,
+        type: 'image',
+        productGid,
+        title,
+        requestId,
+        prompt,
+        status: 'requested',
+        createdAt: new Date().toISOString(),
+      })
+      .write();
+    console.log(`[manual] image requested for ${title} (${productGid}), job ${jobId}`);
+    res.json({ ok: true, jobId, requestId, productGid, title });
+  } catch (err) {
+    console.error(`[manual] failed to request generation for ${productGid}:`, err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Debug helper: ask Higgsfield what an image/video generation would cost for
 // THIS account, without actually generating anything. Safe to call anytime.
 app.get('/debug/estimate', async (_req, res) => {
