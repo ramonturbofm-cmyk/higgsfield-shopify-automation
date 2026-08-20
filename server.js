@@ -17,14 +17,14 @@
  *   24/7 (e.g. Render, Railway, Fly.io, a small VPS). It can NOT run inside
  *   a Claude session — those are ephemeral and are not reachable from the
  *   internet, so they can't receive Shopify/Higgsfield webhooks.
- * - Higgsfield's public docs don't publish an exact webhook payload schema
- *   or signing scheme at the time this was written. The parsing in
- *   `extractHiggsfieldResult()` below and the shared-secret check in
- *   `verifyHiggsfieldWebhook()` are best-effort based on their documented
- *   /v1/generations endpoint — check the "Webhooks" section of your own
- *   Higgsfield dashboard/docs and adjust those two functions if the real
- *   payload looks different. Everything else (Shopify side) is based on
- *   Shopify's current Admin GraphQL API and should work as-is.
+ * - Higgsfield auth uses an API Key ID + Secret pair (from
+ *   cloud.higgsfield.ai/api-keys), sent as `Authorization: Key {ID}:{SECRET}`
+ *   — not a single Bearer token. The webhook is registered via an
+ *   `hf_webhook` query parameter on the generation request URL (not a JSON
+ *   body field), and Higgsfield POSTs back
+ *   `{ request_id, status: "completed"|"failed"|"nsfw", error, payload }`
+ *   where `payload.images[0].url` (image) or `payload.video.url` (video)
+ *   holds the finished asset. See docs.higgsfield.ai/docs.
  * - Uses a local JSON file (jobs.json, via lowdb) purely as a simple job
  *   log/lookup so retries and debugging are easier. Fine for one store;
  *   swap for a real database if you scale this up.
@@ -42,10 +42,11 @@ const {
   SHOPIFY_ADMIN_ACCESS_TOKEN,
   SHOPIFY_API_VERSION = '2024-10',
   SHOPIFY_WEBHOOK_SECRET,
-  HIGGSFIELD_API_KEY,
-  HIGGSFIELD_API_BASE = 'https://cloud.higgsfield.ai',
-  HIGGSFIELD_IMAGE_MODEL = 'flux',
-  HIGGSFIELD_VIDEO_MODEL = 'default-video-model',
+  HIGGSFIELD_API_KEY_ID,
+  HIGGSFIELD_API_KEY_SECRET,
+  HIGGSFIELD_API_BASE = 'https://platform.higgsfield.ai',
+  HIGGSFIELD_IMAGE_ENDPOINT = '/higgsfield-ai/soul/standard',
+  HIGGSFIELD_VIDEO_ENDPOINT = '/higgsfield-ai/dop/standard',
   HIGGSFIELD_WEBHOOK_SHARED_SECRET,
   PUBLIC_BASE_URL,
   BRAND_STYLE_PROMPT = '',
@@ -54,7 +55,7 @@ const {
 
 for (const [name, val] of Object.entries({
   SHOPIFY_STORE_DOMAIN, SHOPIFY_ADMIN_ACCESS_TOKEN, SHOPIFY_WEBHOOK_SECRET,
-  HIGGSFIELD_API_KEY, HIGGSFIELD_WEBHOOK_SHARED_SECRET, PUBLIC_BASE_URL,
+  HIGGSFIELD_API_KEY_ID, HIGGSFIELD_API_KEY_SECRET, HIGGSFIELD_WEBHOOK_SHARED_SECRET, PUBLIC_BASE_URL,
 })) {
   if (!val) console.warn(`[config] Warning: ${name} is not set — server will not work correctly until it is.`);
 }
@@ -147,24 +148,26 @@ async function attachMediaToProduct(productGid, sourceUrl, contentType, alt) {
 // ---------------------------------------------------------------------
 
 function verifyHiggsfieldWebhook(req) {
-  // Best-effort check via a shared secret we control (see .env.example).
-  // Replace with real signature verification if/when Higgsfield documents one.
+  // Higgsfield doesn't document signature verification, so we protect the
+  // callback with a shared secret we control, appended to the hf_webhook URL.
   return req.query.secret === HIGGSFIELD_WEBHOOK_SHARED_SECRET;
 }
 
-async function higgsfieldRequest(path, body) {
-  const res = await fetch(`${HIGGSFIELD_API_BASE}${path}`, {
+async function higgsfieldRequest(endpointPath, body, webhookUrl) {
+  const url = new URL(`${HIGGSFIELD_API_BASE}${endpointPath}`);
+  url.searchParams.set('hf_webhook', webhookUrl);
+  const res = await fetch(url.toString(), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${HIGGSFIELD_API_KEY}`,
+      Authorization: `Key ${HIGGSFIELD_API_KEY_ID}:${HIGGSFIELD_API_KEY_SECRET}`,
     },
     body: JSON.stringify(body),
   });
   if (!res.ok) {
     throw new Error(`Higgsfield API error ${res.status}: ${await res.text()}`);
   }
-  return res.json();
+  return res.json(); // { status: "queued", request_id, status_url, cancel_url }
 }
 
 function buildWebhookUrl(type, productGid, jobId) {
@@ -179,46 +182,32 @@ function buildWebhookUrl(type, productGid, jobId) {
 function requestImageGeneration({ productGid, title, description }) {
   const jobId = crypto.randomUUID();
   const prompt = [title, description, BRAND_STYLE_PROMPT].filter(Boolean).join('. ');
-  return higgsfieldRequest('/v1/generations', {
-    task: 'text-to-image',
-    model: HIGGSFIELD_IMAGE_MODEL,
-    prompt,
-    width: 1536,
-    height: 1536,
-    webhook_url: buildWebhookUrl('image', productGid, jobId),
-  }).then((res) => ({ jobId, generationId: res.id, prompt }));
+  return higgsfieldRequest(
+    HIGGSFIELD_IMAGE_ENDPOINT,
+    { prompt },
+    buildWebhookUrl('image', productGid, jobId)
+  ).then((res) => ({ jobId, requestId: res.request_id, prompt }));
 }
 
 function requestVideoGeneration({ productGid, imageUrl, title }) {
   const jobId = crypto.randomUUID();
   const prompt = [title, BRAND_STYLE_PROMPT].filter(Boolean).join('. ');
-  return higgsfieldRequest('/v1/generations', {
-    task: 'image-to-video',
-    model: HIGGSFIELD_VIDEO_MODEL,
-    input_image: imageUrl,
-    duration: 6,
-    fps: 24,
-    motion_intensity: 'medium',
-    prompt,
-    webhook_url: buildWebhookUrl('video', productGid, jobId),
-  }).then((res) => ({ jobId, generationId: res.id, prompt }));
+  return higgsfieldRequest(
+    HIGGSFIELD_VIDEO_ENDPOINT,
+    { image_url: imageUrl, prompt },
+    buildWebhookUrl('video', productGid, jobId)
+  ).then((res) => ({ jobId, requestId: res.request_id, prompt }));
 }
 
 /**
- * Higgsfield's exact completion payload isn't publicly documented in detail.
- * This tries a few plausible shapes so you only have to fix ONE place once
- * you've seen a real payload (log it — see the /webhooks/higgsfield handler).
+ * Higgsfield's webhook POSTs:
+ *   { request_id, status: "completed" | "failed" | "nsfw", error, payload }
+ * where payload.images[0].url holds the image, payload.video.url the video.
+ * (docs.higgsfield.ai/docs/how-to/webhooks)
  */
 function extractHiggsfieldResult(body) {
-  const assetUrl =
-    body.result?.url ||
-    body.output?.url ||
-    body.asset_url ||
-    body.url ||
-    (Array.isArray(body.outputs) && body.outputs[0]?.url) ||
-    null;
-  const status = body.status || body.state || 'unknown';
-  return { assetUrl, status };
+  const assetUrl = body.payload?.images?.[0]?.url || body.payload?.video?.url || null;
+  return { assetUrl, status: body.status || 'unknown', error: body.error || null };
 }
 
 // ---------------------------------------------------------------------
@@ -240,7 +229,7 @@ app.post('/webhooks/shopify/products-create', async (req, res) => {
   res.status(200).send('ok');
 
   try {
-    const { jobId, generationId, prompt } = await requestImageGeneration({
+    const { jobId, requestId, prompt } = await requestImageGeneration({
       productGid,
       title,
       description,
@@ -251,7 +240,7 @@ app.post('/webhooks/shopify/products-create', async (req, res) => {
         type: 'image',
         productGid,
         title,
-        generationId,
+        requestId,
         prompt,
         status: 'requested',
         createdAt: new Date().toISOString(),
@@ -276,17 +265,12 @@ app.post('/webhooks/higgsfield', async (req, res) => {
   const { type, productId: productGid, jobId } = req.query;
   console.log(`[higgsfield webhook] type=${type} product=${productGid} job=${jobId}`, JSON.stringify(req.body));
 
-  const { assetUrl, status } = extractHiggsfieldResult(req.body);
+  const { assetUrl, status, error } = extractHiggsfieldResult(req.body);
   const job = db.get('jobs').find({ jobId }).value();
 
-  if (status !== 'completed' && status !== 'succeeded' && !assetUrl) {
-    // Not done yet, or failed — log and bail. Adjust the status strings
-    // above once you've confirmed Higgsfield's real status values.
-    if (job) db.get('jobs').find({ jobId }).assign({ status, updatedAt: new Date().toISOString() }).write();
-    return;
-  }
-  if (!assetUrl) {
-    console.error(`[higgsfield webhook] no asset URL found in payload for job ${jobId}`);
+  if (status === 'failed' || status === 'nsfw' || !assetUrl) {
+    console.error(`[higgsfield webhook] job ${jobId} did not complete: status=${status} error=${error}`);
+    if (job) db.get('jobs').find({ jobId }).assign({ status, error, updatedAt: new Date().toISOString() }).write();
     return;
   }
 
@@ -308,7 +292,7 @@ app.post('/webhooks/higgsfield', async (req, res) => {
           type: 'video',
           productGid,
           title: job?.title,
-          generationId: video.generationId,
+          requestId: video.requestId,
           prompt: video.prompt,
           status: 'requested',
           createdAt: new Date().toISOString(),
