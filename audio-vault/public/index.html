@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Audio Vault</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --line: #e3e3de;
+    --accent: #2f5bd3; --accent-text: #ffffff; --danger: #b3261e; --ok: #1f7a3f; --chip: #eef1fb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #141413; --panel: #1e1e1c; --text: #ececea; --muted: #a0a09a; --line: #33332f;
+      --accent: #7f9cf5; --accent-text: #10131c; --danger: #f2827a; --ok: #6fcf97; --chip: #262b3a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; }
+  nav { display: flex; gap: 4px; flex: 1; flex-wrap: wrap; }
+  nav button { background: none; border: 0; padding: 6px 12px; border-radius: 6px; color: var(--muted); cursor: pointer; font: inherit; }
+  nav button.active { background: var(--chip); color: var(--text); font-weight: 600; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 120px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; margin-bottom: 16px; }
+  .narrow { max-width: 420px; margin: 60px auto; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  h3 { font-size: 14px; margin: 18px 0 6px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+  input, select, textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
+  button.btn { padding: 8px 14px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; font: inherit; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  button.danger { color: var(--danger); }
+  button.small { padding: 3px 9px; font-size: 13px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .grow { flex: 1; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .error { color: var(--danger); min-height: 1.2em; font-size: 14px; }
+  .layout { display: grid; grid-template-columns: 230px 1fr; gap: 16px; }
+  @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } }
+  .collections > button { display: flex; justify-content: space-between; width: 100%; text-align: left; background: none; border: 0; padding: 7px 10px; border-radius: 6px; color: var(--text); cursor: pointer; font: inherit; }
+  .collections > button.active { background: var(--chip); font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { font-size: 12px; color: var(--muted); font-weight: 500; }
+  td.num { font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+  .table-wrap { overflow-x: auto; }
+  .drop { border: 2px dashed var(--line); border-radius: 10px; padding: 18px; text-align: center; color: var(--muted); cursor: pointer; }
+  .drop.over { border-color: var(--accent); color: var(--text); }
+  code, .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; background: var(--chip); padding: 2px 6px; border-radius: 4px; word-break: break-all; }
+  .copy { display: flex; gap: 8px; align-items: center; margin: 4px 0; }
+  .copy input { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+  .chip { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px; background: var(--chip); }
+  .access-grid { display: grid; grid-template-columns: 1fr auto auto; gap: 4px 14px; align-items: center; font-size: 14px; margin-top: 8px; }
+  .access-grid input { width: auto; }
+  .player { position: fixed; bottom: 0; left: 0; right: 0; background: var(--panel); border-top: 1px solid var(--line); padding: 10px 16px; display: none; gap: 12px; align-items: center; }
+  .player.on { display: flex; }
+  .player audio { flex: 1; min-width: 0; }
+  ol li { margin-bottom: 6px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="player" id="player"><strong id="now-playing" class="grow" style="flex:0 1 auto;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></strong><audio id="audio" controls></audio></div>
+
+<script>
+const $app = document.getElementById('app');
+const state = { me: null, tab: 'library', collections: [], files: [], selected: null, q: '', token: sessionStorage.getItem('av_token') };
+
+function h(tag, attrs = {}, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v === false || v === null || v === undefined) continue;
+    if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (k === 'class') el.className = v;
+    else if (k === 'value') el.value = v;
+    else if (k === 'checked') el.checked = v;
+    else el.setAttribute(k, v === true ? '' : v);
+  }
+  for (const c of children.flat(Infinity)) if (c !== null && c !== undefined && c !== false) el.append(c.nodeType ? c : String(c));
+  return el;
+}
+
+async function api(method, url, body) {
+  const opts = { method, headers: {} };
+  if (body instanceof FormData) opts.body = body;
+  else if (body !== undefined) { opts.body = JSON.stringify(body); opts.headers['Content-Type'] = 'application/json'; }
+  const res = await fetch(url, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Fout ${res.status}`);
+  return data;
+}
+
+const fmtDuration = (s) => (s == null ? '–' : `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`);
+const fmtSize = (b) => (b > 1e6 ? `${(b / 1e6).toFixed(1)} MB` : `${Math.round(b / 1e3)} kB`);
+const isAdmin = () => state.me && (state.me.role === 'owner' || state.me.role === 'admin');
+const roleLabel = { owner: 'eigenaar', admin: 'beheerder', member: 'lid' };
+
+function copyField(value) {
+  const input = h('input', { value, readonly: true, onclick: (e) => e.target.select() });
+  return h('div', { class: 'copy' }, input, h('button', { class: 'btn small', onclick: async (e) => {
+    await navigator.clipboard.writeText(value).catch(() => input.select());
+    e.target.textContent = 'Gekopieerd'; setTimeout(() => (e.target.textContent = 'Kopieer'), 1500);
+  } }, 'Kopieer'));
+}
+
+function form(fields, submitLabel, onSubmit) {
+  const err = h('div', { class: 'error' });
+  const inputs = {};
+  const el = h('form', { onsubmit: async (e) => {
+    e.preventDefault(); err.textContent = '';
+    const values = Object.fromEntries(Object.entries(inputs).map(([k, i]) => [k, i.value]));
+    try { await onSubmit(values); } catch (ex) { err.textContent = ex.message; }
+  } },
+  fields.map(([name, label, type = 'text', options]) => {
+    inputs[name] = type === 'select'
+      ? h('select', { name }, options.map(([v, l]) => h('option', { value: v }, l)))
+      : h('input', { name, type, required: true, autocomplete: type === 'password' ? 'new-password' : 'on' });
+    return [h('label', {}, label), inputs[name]];
+  }),
+  h('div', { style: 'margin-top:14px' }, h('button', { class: 'btn primary', type: 'submit' }, submitLabel)), err);
+  return el;
+}
+
+// ---------- entry screens ----------
+
+async function boot() {
+  const invite = new URLSearchParams(location.hash.slice(1)).get('invite');
+  if (invite) return renderInvite(invite);
+  try { state.me = (await api('GET', '/api/me')).user; return renderMain(); } catch {}
+  const { needs_setup } = await api('GET', '/api/setup');
+  needs_setup ? renderSetup() : renderLogin();
+}
+
+function renderSetup() {
+  $app.replaceChildren(h('div', { class: 'card narrow' }, h('h2', {}, 'Welkom bij je Audio Vault'),
+    h('p', { class: 'muted' }, 'Maak het eigenaarsaccount aan. Daarna kun je collecties maken, audio uploaden en mensen uitnodigen.'),
+    form([['name', 'Naam'], ['email', 'E-mail', 'email'], ['password', 'Wachtwoord (min. 10 tekens)', 'password']], 'Account aanmaken',
+      async (v) => { state.me = (await api('POST', '/api/setup', v)).user; renderMain(); })));
+}
+
+function renderLogin() {
+  $app.replaceChildren(h('div', { class: 'card narrow' }, h('h2', {}, 'Inloggen'),
+    form([['email', 'E-mail', 'email'], ['password', 'Wachtwoord', 'password']], 'Inloggen',
+      async (v) => { state.me = (await api('POST', '/api/login', v)).user; renderMain(); })));
+}
+
+async function renderInvite(token) {
+  let info;
+  try { info = await api('GET', `/api/invite/${encodeURIComponent(token)}`); } catch (e) {
+    $app.replaceChildren(h('div', { class: 'card narrow' }, h('h2', {}, 'Uitnodiging'), h('p', { class: 'error' }, e.message),
+      h('button', { class: 'btn', onclick: () => { location.hash = ''; boot(); } }, 'Naar inloggen')));
+    return;
+  }
+  $app.replaceChildren(h('div', { class: 'card narrow' }, h('h2', {}, `Hoi ${info.name}`),
+    h('p', { class: 'muted' }, `Kies een wachtwoord voor ${info.email}.`),
+    form([['password', 'Wachtwoord (min. 10 tekens)', 'password']], 'Opslaan en inloggen', async (v) => {
+      state.me = (await api('POST', `/api/invite/${encodeURIComponent(token)}`, v)).user;
+      history.replaceState(null, '', location.pathname); renderMain();
+    })));
+}
+
+// ---------- main shell ----------
+
+function renderMain() {
+  const tabs = [['library', 'Bibliotheek'], ['connect', 'Koppelen (mAirList)']];
+  if (isAdmin()) tabs.push(['users', 'Gebruikers'], ['activity', 'Activiteit']);
+  const content = h('main');
+  $app.replaceChildren(
+    h('header', {}, h('h1', {}, 'Audio Vault'),
+      h('nav', {}, tabs.map(([id, label]) => h('button', { class: state.tab === id ? 'active' : '', onclick: () => { state.tab = id; renderMain(); } }, label))),
+      h('span', { class: 'muted' }, `${state.me.name} · ${roleLabel[state.me.role]}`),
+      h('button', { class: 'btn small', onclick: async () => { await api('POST', '/api/logout'); sessionStorage.clear(); location.reload(); } }, 'Uitloggen')),
+    content);
+  ({ library: renderLibrary, connect: renderConnect, users: renderUsers, activity: renderActivity })[state.tab](content);
+}
+
+// ---------- library ----------
+
+async function renderLibrary(root) {
+  state.collections = (await api('GET', '/api/collections')).collections;
+  if (state.selected && !state.collections.some((c) => c.id === state.selected)) state.selected = null;
+  if (!state.selected && state.collections.length) state.selected = state.collections[0].id;
+  const selected = state.collections.find((c) => c.id === state.selected);
+
+  const side = h('div', { class: 'card collections' }, h('h2', {}, 'Collecties'),
+    state.collections.length ? null : h('p', { class: 'muted' }, isAdmin() ? 'Nog geen collecties. Maak er hieronder een aan, bijv. "Jingles" of "Muziek".' : 'Je hebt nog geen toegang tot collecties. Vraag de beheerder.'),
+    state.collections.map((c) => h('button', { class: c.id === state.selected ? 'active' : '', onclick: () => { state.selected = c.id; renderMain(); } },
+      h('span', {}, c.name), h('span', { class: 'muted' }, c.file_count))),
+    isAdmin() ? h('div', { style: 'margin-top:14px' }, form([['name', 'Nieuwe collectie']], 'Toevoegen', async (v) => {
+      state.selected = (await api('POST', '/api/collections', v)).collection.id; renderMain();
+    })) : null);
+
+  const body = h('div');
+  root.append(h('div', { class: 'layout' }, side, body));
+  if (!selected) return;
+
+  const head = h('div', { class: 'row' }, h('h2', { class: 'grow', style: 'margin:0' }, selected.name),
+    isAdmin() ? h('button', { class: 'btn small', onclick: async () => {
+      const name = prompt('Nieuwe naam voor de collectie', selected.name);
+      if (name) { try { await api('PATCH', `/api/collections/${selected.id}`, { name }); renderMain(); } catch (e) { alert(e.message); } }
+    } }, 'Hernoemen') : null,
+    isAdmin() ? h('button', { class: 'btn small danger', onclick: async () => {
+      if (!confirm(`Collectie "${selected.name}" verwijderen? (moet leeg zijn)`)) return;
+      try { await api('DELETE', `/api/collections/${selected.id}`); state.selected = null; renderMain(); } catch (e) { alert(e.message); }
+    } }, 'Verwijderen') : null);
+
+  const card = h('div', { class: 'card' }, head);
+  if (selected.can_upload) card.append(uploadBox(selected));
+
+  const search = h('input', { placeholder: 'Zoek op titel, artiest of tag…', value: state.q });
+  const tableHolder = h('div', { class: 'table-wrap' });
+  search.addEventListener('input', () => { state.q = search.value; clearTimeout(search.t); search.t = setTimeout(loadFiles, 250); });
+  card.append(h('div', { style: 'margin:14px 0 6px' }, search), tableHolder);
+  body.append(card);
+
+  async function loadFiles() {
+    const params = new URLSearchParams({ collection_id: selected.id });
+    if (state.q) params.set('q', state.q);
+    const { files } = await api('GET', `/api/files?${params}`);
+    if (!files.length) { tableHolder.replaceChildren(h('p', { class: 'muted' }, state.q ? 'Niets gevonden.' : 'Nog geen bestanden in deze collectie.')); return; }
+    tableHolder.replaceChildren(h('table', {},
+      h('tr', {}, h('th', {}, ''), h('th', {}, 'Titel'), h('th', {}, 'Artiest'), h('th', {}, 'Duur'), h('th', {}, 'Grootte'), h('th', {}, '')),
+      files.map((f) => h('tr', {},
+        h('td', {}, h('button', { class: 'btn small', title: 'Afspelen', onclick: () => play(f) }, '▶')),
+        h('td', {}, f.title, f.tags.length ? h('div', {}, f.tags.map((t) => h('span', { class: 'chip', style: 'margin-right:4px' }, t))) : null),
+        h('td', {}, f.artist || h('span', { class: 'muted' }, '–')),
+        h('td', { class: 'num' }, fmtDuration(f.duration_seconds)),
+        h('td', { class: 'num' }, fmtSize(f.size_bytes)),
+        h('td', { style: 'white-space:nowrap' },
+          h('a', { class: 'btn small', href: `/api/files/${f.id}/stream?download=1`, style: 'text-decoration:none;color:inherit;border:1px solid var(--line);border-radius:6px;padding:3px 9px;font-size:13px' }, 'Download'),
+          selected.can_upload ? [' ', h('button', { class: 'btn small', onclick: () => editFile(f) }, 'Bewerk'), ' ',
+            h('button', { class: 'btn small danger', onclick: async () => {
+              if (!confirm(`"${f.title}" verwijderen?`)) return;
+              await api('DELETE', `/api/files/${f.id}`); renderMain();
+            } }, 'Verwijder')] : null)))));
+  }
+  loadFiles();
+}
+
+function uploadBox(collection) {
+  const status = h('div', { class: 'muted', style: 'margin-top:6px' });
+  const input = h('input', { type: 'file', multiple: true, accept: 'audio/*,.mp3,.wav,.flac,.m4a,.aac,.ogg,.opus,.aif,.aiff,.wma,.mp2', class: 'hidden' });
+  const drop = h('div', { class: 'drop', onclick: () => input.click() }, 'Sleep audiobestanden hierheen of klik om te kiezen');
+  async function send(files) {
+    let done = 0, failed = [];
+    for (const file of files) {
+      status.textContent = `Uploaden ${done + 1}/${files.length}: ${file.name}…`;
+      const fd = new FormData(); fd.append('collection_id', collection.id); fd.append('file', file);
+      try { await api('POST', '/api/files', fd); } catch (e) { failed.push(`${file.name}: ${e.message}`); }
+      done++;
+    }
+    renderMain();
+    if (failed.length) alert(`Niet gelukt:\n${failed.join('\n')}`);
+  }
+  input.addEventListener('change', () => send([...input.files]));
+  drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); send([...e.dataTransfer.files]); });
+  return h('div', { style: 'margin-top:14px' }, drop, input, status,
+    h('div', { class: 'muted' }, 'Titel, artiest en duur worden automatisch uit de tags van het bestand gelezen.'));
+}
+
+function play(f) {
+  const audio = document.getElementById('audio');
+  audio.src = `/api/files/${f.id}/stream`; audio.play();
+  document.getElementById('now-playing').textContent = f.artist ? `${f.artist} – ${f.title}` : f.title;
+  document.getElementById('player').classList.add('on');
+}
+
+async function editFile(f) {
+  const title = prompt('Titel', f.title); if (title === null) return;
+  const artist = prompt('Artiest', f.artist); if (artist === null) return;
+  const tags = prompt('Tags (komma-gescheiden)', f.tags.join(', ')); if (tags === null) return;
+  await api('PATCH', `/api/files/${f.id}`, { title, artist, tags: tags.split(',').map((t) => t.trim()).filter(Boolean) });
+  renderMain();
+}
+
+// ---------- connect (mAirList etc.) ----------
+
+async function renderConnect(root) {
+  const collections = (await api('GET', '/api/collections')).collections;
+  const base = location.origin;
+  const tokenCard = h('div', { class: 'card' }, h('h2', {}, 'Jouw persoonlijke koppel-token'),
+    h('p', { class: 'muted' }, 'Met deze token kan mAirList (of een ander programma) bij de collecties waar jij toegang toe hebt. Behandel hem als een wachtwoord. Een nieuwe token aanmaken maakt alle oude links ongeldig.'));
+  root.append(tokenCard);
+
+  const regen = h('button', { class: 'btn primary', onclick: async () => {
+    if (state.me.has_api_token && !confirm('Nieuwe token maken? Oude links en de netwerkschijf stoppen dan met werken tot je ze bijwerkt.')) return;
+    state.token = (await api('POST', '/api/me/token')).token; sessionStorage.setItem('av_token', state.token);
+    state.me.has_api_token = true; renderMain();
+  } }, state.me.has_api_token ? 'Nieuwe token maken' : 'Token aanmaken');
+  const revoke = state.me.has_api_token ? h('button', { class: 'btn danger', onclick: async () => {
+    if (!confirm('Token intrekken? Alle koppelingen stoppen direct.')) return;
+    await api('DELETE', '/api/me/token'); state.token = null; sessionStorage.removeItem('av_token'); state.me.has_api_token = false; renderMain();
+  } }, 'Intrekken') : null;
+
+  if (!state.token) {
+    tokenCard.append(state.me.has_api_token ? h('p', {}, 'Je hebt al een token, maar die wordt om veiligheidsredenen maar één keer getoond. Maak een nieuwe om de links hieronder te zien.') : '',
+      h('div', { class: 'row' }, regen, revoke));
+    return;
+  }
+  tokenCard.append(h('label', {}, 'Token (wordt maar één keer getoond — bewaar hem)'), copyField(state.token), h('div', { class: 'row', style: 'margin-top:8px' }, regen, revoke));
+
+  root.append(h('div', { class: 'card' }, h('h2', {}, 'Optie 1 — Als netwerkschijf (WebDAV), aanbevolen voor mAirList'),
+    h('p', {}, 'Hiermee verschijnt je bibliotheek als gewone map in Windows, met een submap per collectie. In mAirList voeg je die map toe aan je bibliotheek/database.'),
+    h('label', {}, 'Adres'), copyField(`${base}/dav/`),
+    h('label', {}, 'Gebruikersnaam'), copyField(state.me.email),
+    h('label', {}, 'Wachtwoord'), copyField(state.token),
+    h('h3', {}, 'Stappen in Windows'),
+    h('ol', {}, h('li', {}, 'Open Verkenner → rechtsklik op "Deze pc" → "Netwerkverbinding maken…".'),
+      h('li', {}, 'Kies een stationsletter (bijv. ', h('code', {}, 'V:'), ') en plak het adres hierboven.'),
+      h('li', {}, 'Vink "Verbinding maken met andere referenties" en "Opnieuw verbinding maken bij aanmelden" aan.'),
+      h('li', {}, 'Log in met je e-mail en de token als wachtwoord.'),
+      h('li', {}, 'In mAirList: Configuratie → Database/Bibliotheek → voeg map ', h('code', {}, 'V:\\'), ' (of een submap) toe en laat mAirList hem scannen.')),
+    h('p', { class: 'muted' }, 'De schijf is alleen-lezen: uploaden en verwijderen doe je via deze website, zodat de database altijd klopt.')));
+
+  root.append(h('div', { class: 'card' }, h('h2', {}, 'Optie 2 — Playlist-links (M3U)'),
+    h('p', {}, 'Laad een collectie als playlist in mAirList (Playlist → Openen/Importeren, of sleep de link erin), of in VLC, Winamp, foobar2000, RadioDJ, ZaraRadio, Rivendell, enz. De nummers worden gestreamd vanaf deze server.'),
+    h('label', {}, 'Alles waar je toegang toe hebt'), copyField(`${base}/m/${state.token}/all.m3u8`),
+    collections.map((c) => [h('label', {}, c.name), copyField(`${base}/m/${state.token}/collections/${c.id}.m3u8`)])));
+
+  root.append(h('div', { class: 'card' }, h('h2', {}, 'Optie 3 — Voor ontwikkelaars / andere software'),
+    h('p', {}, 'Een JSON-catalogus met alle collecties, metadata en directe stream-URL\'s:'),
+    copyField(`${base}/m/${state.token}/library.json`)));
+}
+
+// ---------- users ----------
+
+async function renderUsers(root) {
+  const [{ users }, { collections }] = await Promise.all([api('GET', '/api/users'), api('GET', '/api/collections')]);
+  const result = h('div');
+  const roleOptions = [['member', 'Lid — alleen collecties die je aanvinkt']];
+  if (state.me.role === 'owner') roleOptions.push(['admin', 'Beheerder — alles, behalve de eigenaar']);
+  root.append(h('div', { class: 'card' }, h('h2', {}, 'Iemand uitnodigen'),
+    form([['name', 'Naam'], ['email', 'E-mail', 'email'], ['role', 'Rol', 'select', roleOptions]], 'Uitnodiging maken', async (v) => {
+      const { invite_url } = await api('POST', '/api/users', v);
+      state.lastInvite = { name: v.name, url: invite_url };
+      renderMain();
+    }), result));
+  if (state.lastInvite) { showInvite(state.lastInvite.name, state.lastInvite.url); state.lastInvite = null; }
+
+  for (const u of users) {
+    const card = h('div', { class: 'card' });
+    const status = u.disabled ? 'geblokkeerd' : u.invite_pending && !u.has_password ? 'uitnodiging open' : 'actief';
+    card.append(h('div', { class: 'row' },
+      h('div', { class: 'grow' }, h('strong', {}, u.name), ' ', h('span', { class: 'muted' }, u.email), ' ',
+        h('span', { class: 'chip' }, roleLabel[u.role]), ' ', h('span', { class: 'chip' }, status),
+        u.has_api_token ? [' ', h('span', { class: 'chip' }, 'gekoppeld')] : null),
+      u.role === 'owner' || (u.role === 'admin' && state.me.role !== 'owner') ? null : [
+        h('button', { class: 'btn small', onclick: async () => { const { invite_url } = await api('POST', `/api/users/${u.id}/invite`); showInvite(u.name, invite_url); } }, 'Nieuwe inloglink'),
+        h('button', { class: 'btn small', onclick: async () => { await api('PATCH', `/api/users/${u.id}`, { disabled: !u.disabled }); renderMain(); } }, u.disabled ? 'Deblokkeren' : 'Blokkeren'),
+        h('button', { class: 'btn small danger', onclick: async () => { if (confirm(`${u.name} verwijderen?`)) { await api('DELETE', `/api/users/${u.id}`); renderMain(); } } }, 'Verwijderen')]));
+    if (u.role === 'member') card.append(accessEditor(u, collections));
+    else card.append(h('p', { class: 'muted', style: 'margin:6px 0 0' }, 'Heeft toegang tot alle collecties.'));
+    root.append(card);
+  }
+
+  function showInvite(name, url) {
+    result.replaceChildren(h('p', {}, `Stuur deze link naar ${name} (7 dagen geldig). Hiermee kiest die persoon een eigen wachtwoord:`), copyField(url));
+    result.scrollIntoView({ behavior: 'smooth' });
+  }
+}
+
+function accessEditor(user, collections) {
+  if (!collections.length) return h('p', { class: 'muted' }, 'Maak eerst een collectie aan om toegang te geven.');
+  const current = new Map(user.access.map((a) => [a.collection_id, a.can_upload]));
+  const boxes = collections.map((c) => ({ c, read: h('input', { type: 'checkbox', checked: current.has(c.id) }), up: h('input', { type: 'checkbox', checked: current.get(c.id) === true }) }));
+  const saved = h('span', { class: 'muted' });
+  async function save() {
+    for (const b of boxes) if (b.up.checked) b.read.checked = true;
+    await api('PUT', `/api/users/${user.id}/access`, { access: boxes.filter((b) => b.read.checked).map((b) => ({ collection_id: b.c.id, can_upload: b.up.checked })) });
+    saved.textContent = 'Opgeslagen'; setTimeout(() => (saved.textContent = ''), 1500);
+  }
+  for (const b of boxes) { b.read.addEventListener('change', () => { if (!b.read.checked) b.up.checked = false; save(); }); b.up.addEventListener('change', save); }
+  return h('div', {}, h('div', { class: 'access-grid' }, h('span', { class: 'muted' }, 'Collectie'), h('span', { class: 'muted' }, 'Gebruiken'), h('span', { class: 'muted' }, 'Uploaden'),
+    boxes.map((b) => [h('span', {}, b.c.name), b.read, b.up])), saved);
+}
+
+// ---------- activity ----------
+
+async function renderActivity(root) {
+  const { activity } = await api('GET', '/api/activity');
+  const labels = { play: 'afgespeeld (web)', download: 'gedownload', stream: 'gestreamd (koppeling)', webdav: 'geopend via netwerkschijf', upload: 'geüpload' };
+  root.append(h('div', { class: 'card' }, h('h2', {}, 'Recente activiteit'),
+    activity.length ? h('div', { class: 'table-wrap' }, h('table', {}, h('tr', {}, h('th', {}, 'Wanneer'), h('th', {}, 'Wie'), h('th', {}, 'Wat'), h('th', {}, 'Bestand')),
+      activity.map((a) => h('tr', {}, h('td', { class: 'num' }, new Date(a.created_at).toLocaleString('nl-NL')), h('td', {}, a.user_name || '–'),
+        h('td', {}, labels[a.action] || a.action), h('td', {}, a.title ? (a.artist ? `${a.artist} – ${a.title}` : a.title) : h('span', { class: 'muted' }, 'verwijderd'))))))
+      : h('p', { class: 'muted' }, 'Nog geen activiteit.')));
+}
+
+window.addEventListener('hashchange', boot);
+boot();
+</script>
+</body>
+</html>

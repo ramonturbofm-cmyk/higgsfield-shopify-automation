@@ -1,0 +1,35 @@
+# Render Blueprint: web service + PostgreSQL + persistent disk for the audio files.
+# In Render: New → Blueprint → pick this repo → set "Blueprint path" to audio-vault/render.yaml
+services:
+  - type: web
+    name: audio-vault
+    runtime: node
+    rootDir: audio-vault
+    plan: starter            # a persistent disk needs a paid instance
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    disk:
+      name: audio
+      mountPath: /var/data
+      sizeGB: 10             # can be increased later, never decreased
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: audio-vault-db
+          property: connectionString
+      - key: DATABASE_SSL
+        value: "false"       # internal Render network
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: STORAGE_DIR
+        value: /var/data
+      - key: PUBLIC_URL
+        sync: false          # fill in after the first deploy, e.g. https://audio-vault.onrender.com
+
+databases:
+  - name: audio-vault-db
+    databaseName: audio_vault
+    plan: basic-256mb
