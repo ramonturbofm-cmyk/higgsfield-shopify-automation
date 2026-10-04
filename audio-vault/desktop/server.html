@@ -44,6 +44,27 @@
   .banner { grid-column: 1 / -1; border: 1px solid var(--warn); color: var(--warn); border-radius: 10px; padding: 12px 16px; display: none; gap: 12px; align-items: center; }
   .banner.show { display: flex; }
   .banner span { flex: 1; }
+  /* first-run wizard */
+  .wizard { grid-column: 1 / -1; max-width: 860px; margin: 8px auto 0; width: 100%; }
+  .steps { display: flex; gap: 6px; margin-bottom: 18px; }
+  .steps div { flex: 1; padding: 8px 10px; border-radius: 8px; background: var(--panel2); color: var(--muted); font-size: 12px; letter-spacing: .08em; }
+  .steps div.on { background: var(--accent); color: #fff; font-weight: 700; }
+  .steps div.done { color: var(--ok); }
+  .wizard h2 { font-size: 20px; letter-spacing: 0; text-transform: none; color: var(--text); margin: 0 0 6px; }
+  .wizard p.lead { color: var(--muted); margin: 0 0 16px; }
+  .choices { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
+  .choice { text-align: left; padding: 14px; border-radius: 10px; border: 2px solid var(--line); background: var(--panel2); }
+  .choice b { display: block; font-size: 15px; margin-bottom: 4px; }
+  .choice span { color: var(--muted); font-size: 12px; }
+  .choice.sel { border-color: var(--accent); }
+  .nav { display: flex; justify-content: space-between; margin-top: 22px; }
+  .big { font-size: 16px; padding: 14px 22px; }
+  .check-line { display: flex; gap: 10px; align-items: center; font-size: 15px; padding: 6px 0; }
+  .howto { background: var(--panel2); border-radius: 8px; padding: 10px 14px; color: var(--muted); font-size: 12px; margin-top: 10px; line-height: 1.6; }
+  .autostart { display: flex; gap: 8px; align-items: center; margin-top: 14px; color: var(--muted); }
+  .autostart input { width: auto; }
+  body.setup .dash { display: none; }
+  body:not(.setup) .wizard { display: none; }
 </style>
 </head>
 <body>
@@ -57,7 +78,9 @@
 <main>
   <div class="banner" id="banner"><span id="banner-text"></span><button class="small" id="banner-btn"></button></div>
 
-  <section class="panel">
+  <section class="panel wizard" id="wizard"></section>
+
+  <section class="panel dash">
     <h2>Status</h2>
     <div class="row"><span class="dot" id="dot-docker"></span><span class="label">Docker Desktop</span><span id="txt-docker">…</span></div>
     <div class="row"><span class="dot" id="dot-db"></span><span class="label">Database</span><span id="txt-db">…</span></div>
@@ -72,9 +95,10 @@
       <button id="btn-restore">Back-up terugzetten</button>
       <button id="btn-refresh">Vernieuwen</button>
     </div>
+    <label class="autostart"><input type="checkbox" id="autostart"> Audio OnAir Turbo openen als Windows start</label>
   </section>
 
-  <section class="panel">
+  <section class="panel dash">
     <h2>Instellingen</h2>
     <form id="settings">
       <div id="dir-wrap">

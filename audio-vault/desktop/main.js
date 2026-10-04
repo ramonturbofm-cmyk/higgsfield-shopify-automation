@@ -196,6 +196,9 @@ ipcMain.handle('server', async (e, method, ...args) => {
       case 'run': return { ok: true, code: await manager.run(args[0], args[1]) };
       case 'listBackups': return await manager.listBackups();
       case 'startDocker': return manager.startDocker();
+      case 'installDocker': return { ok: true, code: await manager.installDocker() };
+      case 'getAutostart': return app.getLoginItemSettings().openAtLogin;
+      case 'setAutostart': app.setLoginItemSettings({ openAtLogin: Boolean(args[0]) }); return app.getLoginItemSettings().openAtLogin;
       case 'openDockerDownload': return shell.openExternal('https://www.docker.com/products/docker-desktop/');
       case 'openStudio': {
         const { port } = await manager.status();

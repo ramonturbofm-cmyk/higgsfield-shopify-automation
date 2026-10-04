@@ -140,6 +140,9 @@ installatieprogramma, snelkoppeling op het bureaublad en in het startmenu.
 op het startscherm): op de pc die de server is, regelt de app alles zelf via
 Docker Desktop, zonder `.bat`-bestanden:
 
+- de eerste keer leidt een **installatiehulp** je in 4 stappen door alles (Docker
+  Desktop installeren met één knop, waar je muziek staat, waar de back-up heen gaat)
+  en zet hij met **Installeren en starten** de server klaar en leest je muziek in;
 - eenmalig instellen: map op de pc (standaard `C:\AudioOnAir`), muziek op de
   NAS of in een map, back-up naar de NAS;
 - knoppen: **Server starten**, **Stoppen**, **Muziek importeren**,

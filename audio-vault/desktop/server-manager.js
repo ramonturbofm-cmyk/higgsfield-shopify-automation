@@ -107,7 +107,7 @@ function createServerManager({ sourceDir, version, onLog, dir }) {
     const docker = await dockerState();
     const env = readEnv();
     const result = {
-      dir: serverDir, installed: installed(), docker, containers: [], web: false, lastBackup: null, busy,
+      dir: serverDir, installed: installed(), outdated: installed() && filesOutdated(), docker, containers: [], web: false, lastBackup: null, busy,
       port: Number(env.PORT || 3000),
       settings: {
         musicDir: env.MUSIC_DIR && env.MUSIC_DIR !== './import' ? env.MUSIC_DIR : '',
@@ -153,13 +153,17 @@ function createServerManager({ sourceDir, version, onLog, dir }) {
       NAS_HOST: input.nasHost || '',
       NAS_SHARE: input.nasShare || '',
       NAS_USER: input.nasUser || '',
-      // An empty password field means "keep the current one".
-      NAS_PASSWORD: input.nasHost ? (input.nasPassword || env.NAS_PASSWORD || '') : '',
+      // An empty password field means "keep the current one". Music comes from the
+      // NAS only when a share is filled in; the NAS may also be used for backups only.
+      NAS_PASSWORD: input.nasHost && input.nasShare ? (input.nasPassword || env.NAS_PASSWORD || '') : '',
       NAS_BACKUP_SHARE: input.backupShare || '',
       NAS_BACKUP_USER: input.backupUser || '',
       NAS_BACKUP_PASSWORD: input.backupShare ? (input.backupPassword || env.NAS_BACKUP_PASSWORD || '') : '',
     };
-    if (next.NAS_HOST && (!next.NAS_SHARE || !next.NAS_USER || !next.NAS_PASSWORD)) throw new Error('Vul bij de NAS ook map, gebruiker en wachtwoord in');
+    if ((next.NAS_SHARE || next.NAS_USER) && (!next.NAS_HOST || !next.NAS_SHARE || !next.NAS_USER || !next.NAS_PASSWORD)) {
+      throw new Error('Vul voor muziek op de NAS het IP-adres, de map, gebruiker en wachtwoord in');
+    }
+    if (next.NAS_HOST && !next.NAS_SHARE && !next.NAS_BACKUP_SHARE) throw new Error('Vul bij de NAS ook de gedeelde map in');
     if (next.NAS_BACKUP_SHARE && (!next.NAS_HOST || !next.NAS_BACKUP_USER || !next.NAS_BACKUP_PASSWORD)) {
       throw new Error('Vul voor de back-up naar de NAS het NAS-adres, de map, gebruiker en wachtwoord in');
     }
@@ -173,6 +177,22 @@ function createServerManager({ sourceDir, version, onLog, dir }) {
     if (busy) throw new Error(`Even geduld: "${busy}" is nog bezig`);
     busy = name;
     try { return await fn(); } finally { busy = null; }
+  }
+
+  // Windows 11 has winget: install Docker Desktop without hunting for a download.
+  function installDocker() {
+    return exclusive('Docker Desktop installeren', () => new Promise((resolve) => {
+      if (process.platform !== 'win32') { onLog('Automatisch installeren kan alleen op Windows.\n'); resolve(1); return; }
+      onLog('\n▶ Docker Desktop installeren (Windows vraagt om toestemming)…\n');
+      const child = spawn('winget', ['install', '-e', '--id', 'Docker.DockerDesktop', '--accept-package-agreements', '--accept-source-agreements'], { windowsHide: true });
+      child.stdout.on('data', (d) => onLog(String(d)));
+      child.stderr.on('data', (d) => onLog(String(d)));
+      child.on('error', () => { onLog('winget niet gevonden. Download Docker Desktop via de knop "Downloaden".\n'); resolve(1); });
+      child.on('close', (code) => {
+        onLog(code === 0 ? '✓ Docker Desktop is geïnstalleerd. Herstart de pc en open daarna deze app opnieuw.\n' : `✗ Installeren mislukt (code ${code}). Probeer de knop "Downloaden".\n`);
+        resolve(code);
+      });
+    }));
   }
 
   async function startDocker() {
@@ -217,7 +237,8 @@ function createServerManager({ sourceDir, version, onLog, dir }) {
   }
 
   return {
-    status, saveSettings, listBackups, startDocker,
+    status, saveSettings, listBackups, startDocker, installDocker,
+    get outdated() { return installed() && filesOutdated(); },
     run: (name, arg) => { if (!actions[name]) throw new Error('Onbekende actie'); return actions[name](arg); },
     get dir() { return serverDir; },
     get busy() { return busy; },
