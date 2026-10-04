@@ -40,7 +40,7 @@ function client() {
 before(async () => {
   if (!DB) return;
   pool = createPool(DB);
-  await pool.query('DROP TABLE IF EXISTS access_log, collection_access, audio_files, collections, users CASCADE');
+  await pool.query('DROP TABLE IF EXISTS now_playing, user_settings, access_log, collection_access, audio_files, collections, users CASCADE');
   await migrate(pool);
   storageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-'));
   const app = createApp({ pool, storageDir, sessionSecret: 'test-secret' });
@@ -151,6 +151,26 @@ test('full flow: owner, upload, invite member, permissions, mAirList links, WebD
   // Activity log saw the stream.
   const activity = (await owner('GET', '/api/activity')).data.activity.map((a) => a.action);
   assert.ok(activity.includes('stream') && activity.includes('webdav') && activity.includes('upload'));
+
+  // Studio: settings, cue points and "now playing".
+  assert.deepEqual((await sam('GET', '/api/me/settings')).data.settings, {});
+  assert.equal((await sam('PUT', '/api/me/settings', { settings: { background: 'zwart', playlist: [{ id: file.id }] } })).status, 200);
+  assert.equal((await sam('GET', '/api/me/settings')).data.settings.background, 'zwart');
+  assert.equal((await sam('PUT', '/api/me/settings', { settings: [1] })).status, 400);
+  assert.equal((await sam('PUT', `/api/files/${file.id}/cues`, { cue_in: 0.5, mix_out: 0.2, cue_out: 0.9 })).status, 400);
+  const cued = await sam('PUT', `/api/files/${file.id}/cues`, { cue_in: 0.05, mix_out: 0.8, cue_out: 0.95 });
+  assert.equal(cued.status, 200);
+  assert.equal(cued.data.file.mix_out, 0.8);
+  assert.equal((await sam('PUT', `/api/files/${file.id}/cues`, { cue_in: 0, mix_out: 0, cue_out: 0 })).status, 400);
+  assert.equal((await client()('GET', '/api/now-playing')).data.now_playing, null);
+  assert.equal((await sam('POST', '/api/now-playing', { file_id: file.id })).status, 200);
+  const np = (await client()('GET', '/api/now-playing')).data;
+  assert.equal(np.now_playing.title, 'Station ID é');
+  assert.equal(np.now_playing.duration_seconds, 0.9);
+  assert.equal((await sam('POST', '/api/now-playing', { file_id: null })).status, 200);
+  const after = (await client()('GET', '/api/now-playing')).data;
+  assert.equal(after.now_playing, null);
+  assert.equal(after.recent[0].title, 'Station ID é');
 
   // Blocking a user kills both their session and their token immediately.
   assert.equal((await owner('PATCH', `/api/users/${samId}`, { disabled: true })).status, 200);

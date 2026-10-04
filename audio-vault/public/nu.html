@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nu op de radio</title>
+<style>
+  :root { --bg: #000; --text: #f2f2f2; --muted: #8a8a92; --line: #26262b; --accent: #ff3b30; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text); font: 16px/1.4 "Segoe UI", system-ui, sans-serif;
+    display: grid; place-items: center; padding: 24px; }
+  .wrap { width: min(760px, 100%); }
+  .label { color: var(--accent); letter-spacing: .25em; font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 12px var(--accent); animation: pulse 1.6s infinite; }
+  .dot.off { background: var(--muted); box-shadow: none; animation: none; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  h1 { font-size: clamp(30px, 6vw, 58px); line-height: 1.05; margin: 14px 0 6px; overflow-wrap: anywhere; }
+  .artist { font-size: clamp(18px, 3vw, 26px); color: var(--muted); }
+  .bar { height: 6px; background: #1b1b1f; border-radius: 3px; margin: 26px 0 6px; overflow: hidden; }
+  .fill { height: 100%; width: 0; background: var(--accent); transition: width .5s linear; }
+  .times { display: flex; justify-content: space-between; color: var(--muted); font: 13px ui-monospace, Consolas, monospace; }
+  h2 { font-size: 12px; letter-spacing: .2em; color: var(--muted); margin: 44px 0 8px; font-weight: 600; }
+  ol { list-style: none; margin: 0; padding: 0; }
+  li { display: grid; grid-template-columns: 56px 1fr; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+  li time { color: var(--muted); font: 13px ui-monospace, Consolas, monospace; padding-top: 2px; }
+  li span { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="label"><span class="dot off" id="dot"></span><span id="state">NU OP DE RADIO</span></div>
+  <h1 id="title">—</h1>
+  <div class="artist" id="artist"></div>
+  <div class="bar"><div class="fill" id="fill"></div></div>
+  <div class="times"><span id="elapsed"></span><span id="total"></span></div>
+  <h2 id="recent-head" hidden>EERDER GEDRAAID</h2>
+  <ol id="recent"></ol>
+</div>
+<script>
+// Accent colour can be set with ?kleur=30d158 (handy when embedding on a website).
+const accent = new URLSearchParams(location.search).get('kleur');
+if (/^[0-9a-f]{6}$/i.test(accent || '')) document.documentElement.style.setProperty('--accent', `#${accent}`);
+const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+let current = null;
+
+async function load() {
+  try {
+    const data = await (await fetch('/api/now-playing')).json();
+    current = data.now_playing;
+    document.getElementById('title').textContent = current ? current.title : 'Even stil…';
+    document.getElementById('artist').textContent = current ? current.artist : '';
+    document.getElementById('dot').classList.toggle('off', !current);
+    document.getElementById('recent-head').hidden = !data.recent.length;
+    const list = document.getElementById('recent');
+    list.replaceChildren(...data.recent.map((r) => {
+      const li = document.createElement('li');
+      const t = document.createElement('time');
+      t.textContent = new Date(r.started_at).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+      const d = document.createElement('div');
+      d.append(r.title);
+      if (r.artist) { const a = document.createElement('span'); a.textContent = ` — ${r.artist}`; d.append(a); }
+      li.append(t, d);
+      return li;
+    }));
+  } catch { /* try again on the next poll */ }
+}
+
+function tick() {
+  if (!current || !current.duration_seconds) { document.getElementById('fill').style.width = '0'; document.getElementById('elapsed').textContent = ''; document.getElementById('total').textContent = ''; return; }
+  const elapsed = Math.min(current.duration_seconds, (Date.now() - new Date(current.started_at)) / 1000);
+  document.getElementById('fill').style.width = `${(elapsed / current.duration_seconds) * 100}%`;
+  document.getElementById('elapsed').textContent = fmt(elapsed);
+  document.getElementById('total').textContent = fmt(current.duration_seconds);
+}
+
+load();
+setInterval(load, 5000);
+setInterval(tick, 500);
+</script>
+</body>
+</html>

@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Audio OnAir Turbo</title>
+<link rel="stylesheet" href="studio.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <div class="logo"><span class="logo-mark">▶</span><div><strong>AUDIO ONAIR</strong><em>TURBO</em></div></div>
+    <div class="station" id="station-name"></div>
+  </div>
+  <div class="onair" id="onair-lamp">ON AIR</div>
+  <section class="now" id="now">
+    <div class="now-label">NU OP DE RADIO</div>
+    <div class="now-title" id="now-title">—</div>
+    <div class="now-artist" id="now-artist">Niets op de lucht</div>
+    <div class="now-bar"><div class="now-fill" id="now-fill"></div><div class="now-mix" id="now-mix"></div></div>
+    <div class="now-times"><span id="now-elapsed">0:00</span><span id="now-next" class="now-next"></span></div>
+  </section>
+  <div class="countdown" id="now-remaining">-0:00</div>
+  <div class="clock"><div id="clock-time">00:00:00</div><div id="clock-date" class="clock-date"></div></div>
+  <div class="top-actions">
+    <button class="icon-btn" id="btn-settings" title="Instellingen">⚙</button>
+    <a class="icon-btn" href="/" title="Bibliotheek beheren">☰</a>
+  </div>
+</header>
+
+<main class="studio">
+  <section class="panel col-playlist">
+    <div class="transport">
+      <button class="tbtn start" id="btn-start" title="Start / volgende (spatie)">▶<span>START</span></button>
+      <button class="tbtn" id="btn-pause" title="Pauze (P)">❚❚<span>PAUZE</span></button>
+      <button class="tbtn" id="btn-stop" title="Stop">■<span>STOP</span></button>
+      <button class="tbtn" id="btn-fade" title="Uitfaden (F)">◢<span>FADE</span></button>
+      <button class="tbtn" id="btn-next" title="Volgende nummer (N)">⏭<span>VOLGENDE</span></button>
+      <button class="tbtn auto" id="btn-auto" title="Automatisch doorstarten (A)">AUTO</button>
+    </div>
+    <div class="decks">
+      <div class="deck" id="deck-0"></div>
+      <div class="deck" id="deck-1"></div>
+    </div>
+    <div class="panel-head">
+      <h2>Playlist</h2>
+      <span class="muted" id="playlist-total"></span>
+      <button class="mini" id="btn-clean" title="Gespeelde items verwijderen">Opruimen</button>
+      <button class="mini" id="btn-clear" title="Playlist leegmaken">Leeg</button>
+    </div>
+    <div class="playlist" id="playlist"></div>
+  </section>
+
+  <section class="panel col-library">
+    <div class="panel-head"><h2>Database</h2><span class="muted" id="library-count"></span></div>
+    <div class="library-filters">
+      <select id="lib-collection"></select>
+      <input id="lib-search" placeholder="Zoek titel, artiest of tag…" autocomplete="off">
+    </div>
+    <div class="library" id="library"></div>
+    <div class="hint">Dubbelklik of + om toe te voegen · sleep naar playlist of jingle-knop · 🎧 = voorbeluisteren</div>
+  </section>
+
+  <section class="panel col-cart">
+    <div class="panel-head">
+      <h2>Jingle paneel</h2>
+      <div class="cart-pages" id="cart-pages"></div>
+      <button class="mini" id="btn-cart-stop" title="Stop alle jingles">Stop alles</button>
+    </div>
+    <div class="cart" id="cart"></div>
+    <div class="hint">Klik = start/stop · rechtsklik = kleur of leegmaken · toetsen 1–9, 0</div>
+  </section>
+</main>
+
+<footer class="statusbar">
+  <span id="status-outputs"></span>
+  <span id="status-msg"></span>
+  <span class="muted">Spatie = start · N = volgende · P = pauze · F = fade · A = auto</span>
+</footer>
+
+<div class="menu hidden" id="slot-menu"></div>
+
+<dialog id="settings">
+  <form method="dialog" class="settings">
+    <h2>Instellingen</h2>
+
+    <h3>Uiterlijk</h3>
+    <label>Stationsnaam</label>
+    <input id="set-station" placeholder="bijv. Turbo FM">
+    <label>Achtergrond</label>
+    <div class="choices" id="set-background"></div>
+    <label>Accentkleur</label>
+    <div class="choices" id="set-accent"></div>
+
+    <h3>Afspelen</h3>
+    <div class="grid2">
+      <div><label>Overlap bij doorstarten (sec)</label><input type="number" id="set-crossfade" min="0" max="10" step="0.1"></div>
+      <div><label>Duur FADE-knop (sec)</label><input type="number" id="set-fadeout" min="0.5" max="15" step="0.5"></div>
+    </div>
+    <label class="check"><input type="checkbox" id="set-autocue"> Auto-cue: stilte aan begin en eind automatisch overslaan en het mixpunt bepalen (strak doorstarten)</label>
+
+    <h3>Geluidskaarten</h3>
+    <p class="muted" id="sink-support"></p>
+    <button type="button" class="mini" id="btn-find-devices">Geluidskaarten zoeken</button>
+    <div class="grid2" id="set-outputs"></div>
+
+    <h3>Jingle paneel</h3>
+    <label>Aantal knoppen</label>
+    <select id="set-cartsize">
+      <option value="3x4">3 × 4 (12)</option>
+      <option value="4x4">4 × 4 (16)</option>
+      <option value="4x5">5 × 4 (20)</option>
+      <option value="6x4">6 × 4 (24)</option>
+    </select>
+
+    <div class="dialog-actions"><button class="tbtn start" value="close">Klaar</button></div>
+  </form>
+</dialog>
+
+<script src="studio.js"></script>
+</body>
+</html>

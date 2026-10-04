@@ -29,12 +29,15 @@ function publicUser(u) {
   };
 }
 
+const num = (v) => (v === null || v === undefined ? null : Number(v));
+
 function publicFile(f) {
   return {
     id: f.id, collection_id: f.collection_id, title: f.title, artist: f.artist,
     original_name: f.original_name, file_name: lib.fileName(f), mime_type: f.mime_type,
-    size_bytes: Number(f.size_bytes), duration_seconds: f.duration_seconds === null ? null : Number(f.duration_seconds),
+    size_bytes: Number(f.size_bytes), duration_seconds: num(f.duration_seconds),
     tags: f.tags, created_at: f.created_at,
+    cue_in: num(f.cue_in), mix_out: num(f.mix_out), cue_out: num(f.cue_out),
   };
 }
 
@@ -345,7 +348,8 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
       params.push(`%${req.query.q}%`);
       where += ` AND (title ILIKE $${params.length} OR artist ILIKE $${params.length} OR array_to_string(tags, ' ') ILIKE $${params.length})`;
     }
-    const { rows } = await pool.query(`SELECT * FROM audio_files WHERE ${where} ORDER BY created_at DESC LIMIT 1000`, params);
+    const limit = Math.min(10000, Math.max(1, Number(req.query.limit) || 1000));
+    const { rows } = await pool.query(`SELECT * FROM audio_files WHERE ${where} ORDER BY created_at DESC LIMIT ${limit}`, params);
     res.json({ files: rows.map(publicFile) });
   }));
 
@@ -430,6 +434,68 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
     const download = req.query.download === '1';
     if (isFirstChunk(req)) lib.logAccess(pool, req.user.id, file.id, download ? 'download' : 'play', 'web');
     sendAudio(req, res, file, { download });
+  }));
+
+  // Cue points found by the studio's silence analysis. Anyone who may play the file
+  // may store them: they are derived from the audio itself, not editorial data.
+  app.put('/api/files/:id/cues', requireUser, wrap(async (req, res) => {
+    const file = await lib.readableFile(pool, req.user, Number(req.params.id));
+    if (!file) throw new HttpError(404, 'Bestand niet gevonden');
+    const { cue_in: cueIn, mix_out: mixOut, cue_out: cueOut } = req.body || {};
+    const values = [cueIn, mixOut, cueOut].map(Number);
+    if (values.some((v) => !Number.isFinite(v) || v < 0) || !(values[0] <= values[1] && values[1] <= values[2] && values[0] < values[2])) {
+      throw new HttpError(400, 'Ongeldige cue-punten');
+    }
+    const { rows } = await pool.query(
+      'UPDATE audio_files SET cue_in = $1, mix_out = $2, cue_out = $3 WHERE id = $4 RETURNING *', [...values, file.id]);
+    res.json({ file: publicFile(rows[0]) });
+  }));
+
+  // ---------- studio (Audio OnAir Turbo) ----------
+
+  app.get('/api/me/settings', requireUser, wrap(async (req, res) => {
+    const { rows } = await pool.query('SELECT data FROM user_settings WHERE user_id = $1', [req.user.id]);
+    res.json({ settings: rows.length ? rows[0].data : {} });
+  }));
+
+  app.put('/api/me/settings', requireUser, wrap(async (req, res) => {
+    const settings = req.body && req.body.settings;
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new HttpError(400, 'settings moet een object zijn');
+    if (JSON.stringify(settings).length > 200000) throw new HttpError(413, 'Instellingen zijn te groot');
+    await pool.query(
+      `INSERT INTO user_settings (user_id, data, updated_at) VALUES ($1, $2, now())
+       ON CONFLICT (user_id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`, [req.user.id, settings]);
+    res.json({ ok: true });
+  }));
+
+  // The studio reports each item it starts; null file_id means "nothing on air".
+  app.post('/api/now-playing', requireUser, wrap(async (req, res) => {
+    const fileId = req.body && req.body.file_id;
+    if (fileId === null) {
+      await pool.query('DELETE FROM now_playing');
+      return res.json({ now_playing: null });
+    }
+    const file = await lib.readableFile(pool, req.user, Number(fileId));
+    if (!file) throw new HttpError(404, 'Bestand niet gevonden');
+    const length = file.cue_out !== null ? Number(file.cue_out) - Number(file.cue_in || 0) : file.duration_seconds;
+    await pool.query(
+      `INSERT INTO now_playing (id, file_id, title, artist, duration_seconds, started_at, started_by)
+       VALUES (1, $1, $2, $3, $4, now(), $5)
+       ON CONFLICT (id) DO UPDATE SET file_id = EXCLUDED.file_id, title = EXCLUDED.title, artist = EXCLUDED.artist,
+         duration_seconds = EXCLUDED.duration_seconds, started_at = now(), started_by = EXCLUDED.started_by`,
+      [file.id, file.title, file.artist, length, req.user.id]);
+    lib.logAccess(pool, req.user.id, file.id, 'onair', 'studio');
+    res.json({ ok: true });
+  }));
+
+  // Public: what is on air now plus the last few items (for a website, RDS, a studio screen).
+  app.get('/api/now-playing', wrap(async (req, res) => {
+    const { rows } = await pool.query('SELECT title, artist, duration_seconds, started_at FROM now_playing WHERE id = 1');
+    const { rows: recent } = await pool.query(
+      `SELECT f.title, f.artist, l.created_at AS started_at FROM access_log l JOIN audio_files f ON f.id = l.file_id
+        WHERE l.action = 'onair' ORDER BY l.created_at DESC LIMIT 11`);
+    const current = rows[0] ? { ...rows[0], duration_seconds: num(rows[0].duration_seconds) } : null;
+    res.set('Access-Control-Allow-Origin', '*').json({ now_playing: current, recent: current ? recent.slice(1) : recent.slice(0, 10) });
   }));
 
   app.get('/api/activity', requireUser, requireAdmin, wrap(async (req, res) => {

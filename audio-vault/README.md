@@ -1,4 +1,8 @@
-# Audio Vault
+# Audio OnAir Turbo
+
+Playout-studio in de browser (in de geest van mAirList) met daarachter een eigen
+audio-database: **Audio Vault**.
+
 
 Je eigen online omgeving voor audiobestanden. Jij beheert de bestanden, nodigt
 mensen uit en bepaalt per persoon welke collecties ze mogen gebruiken. Wie
@@ -37,6 +41,37 @@ audioprogramma. Daarachter draait een PostgreSQL-database.
 - **Direct intrekken**: iemand blokkeren of zijn token vernieuwen sluit meteen
   alle koppelingen af.
 - **Activiteit**: wie wat heeft afgespeeld, gestreamd of gedownload.
+
+## De studio (Audio OnAir Turbo)
+
+Open via **▶ Open studio** na het inloggen, of ga naar `/studio.html`.
+
+- **Playlist** met twee spelers (A/B), net als mAirList: terwijl het ene nummer
+  speelt, staat het volgende al volledig geladen klaar op zijn startpunt.
+- **AUTO**: start het volgende item precies op het mixpunt, zonder gat.
+  Uit = *assist*: na elk item wacht hij op START.
+- **Auto-cue**: stilte aan begin en eind wordt automatisch gevonden, en ook het
+  punt waar het einde zacht genoeg wordt om door te starten. Eén keer per
+  bestand berekend en in de database opgeslagen.
+- Knoppen: **START**, **PAUZE**, **STOP**, **FADE**, **VOLGENDE**, **AUTO**,
+  per item *stop na dit item*, slepen om te sorteren, verwachte starttijden,
+  aftellen met waarschuwing in de laatste 15 seconden.
+- **Jingle paneel**: 4 pagina's (A–D) met 12 tot 24 knoppen, eigen kleuren,
+  sneltoetsen 1–9 en 0, meerdere jingles tegelijk.
+- **Meerdere geluidskaarten**: kies een eigen uitgang voor Player A, Player B,
+  het jingle paneel en voorbeluisteren (PFL). Werkt in Chrome en Edge.
+- **Kleuren**: achtergrond zwart (standaard), antraciet, nachtblauw of licht,
+  en een eigen accentkleur.
+- **Nu op de radio**: de studio meldt elk gestart nummer. Openbaar te tonen op
+  `/nu.html` (scherm in de studio of op je website; kleur via `?kleur=30d158`)
+  of op te halen als JSON via `/api/now-playing`.
+
+Sneltoetsen: spatie = start/volgende, N = volgende, P = pauze, F = fade,
+A = auto aan/uit.
+
+Tip: houd de studio in een eigen browservenster open. Instellingen, playlist en
+jingle paneel worden per gebruiker op de server bewaard; de keuze van
+geluidskaarten per computer.
 
 ## Online zetten op Render (aanbevolen)
 

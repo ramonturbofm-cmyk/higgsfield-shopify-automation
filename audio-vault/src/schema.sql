@@ -55,3 +55,27 @@ CREATE TABLE IF NOT EXISTS access_log (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS access_log_created_idx ON access_log (created_at DESC);
+
+-- Playout: cue points (seconds). cue_in = start of audio, mix_out = where the next
+-- item starts, cue_out = end of audio. Filled automatically by the studio's analysis.
+ALTER TABLE audio_files ADD COLUMN IF NOT EXISTS cue_in  NUMERIC(10, 3);
+ALTER TABLE audio_files ADD COLUMN IF NOT EXISTS mix_out NUMERIC(10, 3);
+ALTER TABLE audio_files ADD COLUMN IF NOT EXISTS cue_out NUMERIC(10, 3);
+
+-- Per-user studio settings: theme, playlist, jingle panel, crossfade, ...
+CREATE TABLE IF NOT EXISTS user_settings (
+  user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  data       JSONB NOT NULL DEFAULT '{}',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- What is on air right now (single row), shown in the studio and on /nu.html.
+CREATE TABLE IF NOT EXISTS now_playing (
+  id               INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  file_id          INTEGER REFERENCES audio_files(id) ON DELETE SET NULL,
+  title            TEXT NOT NULL,
+  artist           TEXT NOT NULL DEFAULT '',
+  duration_seconds NUMERIC(10, 3),
+  started_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  started_by       INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
