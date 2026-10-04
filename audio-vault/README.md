@@ -90,6 +90,38 @@ Tip: houd de studio in een eigen browservenster open. Instellingen, playlist en
 jingle paneel worden per gebruiker op de server bewaard; de keuze van
 geluidskaarten per computer.
 
+## Windows-pc + Synology zonder Docker (bijv. DS218play)
+
+Kleine Synology-modellen (de *j*- en *play*-series) kunnen geen Docker draaien.
+Dan draait het programma op een pc en blijft de muziek op de NAS.
+
+1. **NAS**: maak in DSM een gebruiker (bijv. `onair-lezen`) met alleen
+   *leesrechten* op de gedeelde map met muziek. Noteer het IP-adres van de NAS
+   (Configuratiescherm → Netwerk → Netwerkinterface).
+2. **Pc**: installeer [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+   en zet in de instellingen *Start Docker Desktop when you sign in* aan.
+3. Zet de map `audio-vault` op de pc (bijv. `C:\AudioOnAir`) en dubbelklik
+   **`start-windows.bat`**. De eerste keer opent Kladblok met `.env`: vul de
+   wachtwoorden en `NAS_HOST`, `NAS_SHARE`, `NAS_USER`, `NAS_PASSWORD` in,
+   sla op en dubbelklik opnieuw. De browser opent `http://localhost:3000`.
+4. Dubbelklik **`importeren-windows.bat`** om de muziek van de NAS in te
+   lezen (WAV wordt FLAC; op de NAS verandert niets).
+5. **Van buitenaf bereikbaar** via de NAS als voordeur:
+   - DSM → Configuratiescherm → Externe toegang → **DDNS**: gratis adres,
+     bijv. `ramonturbofm.synology.me`, met Let's Encrypt-certificaat.
+   - Aanmeldingsportal → Geavanceerd → **Reverse proxy**: bron
+     `https://radio.ramonturbofm.synology.me:443` (of je eigen domein),
+     bestemming `http://<IP van de pc>:3000`.
+   - Zet in de router poort 443 door naar de NAS, en vul `PUBLIC_URL` in `.env`.
+   - Geef de pc een vast IP-adres in je router.
+
+QuickConnect werkt alleen voor de eigen apps van Synology, niet voor dit
+programma; daarvoor is de reverse proxy nodig.
+
+De pc moet aan blijven staan zolang het station draait of anderen afspelen.
+Voor 24/7 is een zuinige mini-pc (bijv. Intel N100, 16 GB, SSD van 1 TB,
+± €200–300, ± 10 watt) de nette oplossing; dezelfde stappen gelden dan.
+
 ## Op je Synology draaien (aanbevolen voor een grote muziekbibliotheek)
 
 Werkt op een Synology met Container Manager (meestal de "+"-modellen, liefst

@@ -1,0 +1,19 @@
+# Addition for a Synology (or other NAS) that cannot run Docker itself, such as the
+# DS218play: the music stays on the NAS and is read over the network (SMB), read-only.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.nas.yml up -d --build
+#
+# Needs NAS_HOST, NAS_SHARE, NAS_USER and NAS_PASSWORD in .env. Tip: create a separate
+# NAS user with read-only rights on the music folder for this.
+services:
+  app:
+    volumes:
+      - nasmusic:/import:ro
+
+volumes:
+  nasmusic:
+    driver: local
+    driver_opts:
+      type: cifs
+      device: "//${NAS_HOST:?zet NAS_HOST in .env}/${NAS_SHARE:?zet NAS_SHARE in .env}"
+      o: "username=${NAS_USER:?zet NAS_USER in .env},password=${NAS_PASSWORD:?zet NAS_PASSWORD in .env},vers=3.0,ro,uid=1000,gid=1000,iocharset=utf8"
