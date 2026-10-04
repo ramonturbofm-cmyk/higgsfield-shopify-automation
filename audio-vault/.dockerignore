@@ -1,4 +1,13 @@
-node_modules
+# Only src/, public/ and package files go into the image. Never the data:
+# database, audio, backups and the music folder can be many gigabytes.
+data
+import
 storage
+backup
+desktop
 test
+node_modules
 .env
+.env.*
+*.bat
+*.cmd

@@ -14,6 +14,7 @@ const SERVER_FILES = [
 ];
 const DEFAULT_DIR = process.env.AOT_SERVER_DIR || (process.platform === 'win32' ? 'C:\\AudioOnAir' : path.join(os.homedir(), 'AudioOnAir'));
 const DOCKER_WIN = 'C:\\Program Files\\Docker\\Docker';
+const DOCKERIGNORE = ['data', 'import', 'storage', 'backup', 'desktop', 'test', 'node_modules', '.env', '.env.*', '*.bat', '*.cmd', ''].join('\n');
 
 function createServerManager({ sourceDir, version, onLog, dir }) {
   let serverDir = dir || DEFAULT_DIR;
@@ -47,6 +48,9 @@ function createServerManager({ sourceDir, version, onLog, dir }) {
       const from = path.join(sourceDir, name);
       if (fs.existsSync(from)) fs.cpSync(from, path.join(serverDir, name), { recursive: true, force: true });
     }
+    // Hidden files are not always bundled, and this one keeps data/ (database, audio)
+    // out of every image build, so always write it.
+    fs.writeFileSync(path.join(serverDir, '.dockerignore'), DOCKERIGNORE);
     fs.writeFileSync(path.join(serverDir, '.version'), version);
   }
   function filesOutdated() {
