@@ -223,9 +223,12 @@ async function renderLibrary(root) {
   async function loadFiles() {
     const params = new URLSearchParams({ collection_id: selected.id });
     if (state.q) params.set('q', state.q);
-    const { files } = await api('GET', `/api/files?${params}`);
+    params.set('limit', '500');
+    const { files, total } = await api('GET', `/api/files?${params}`);
     if (!files.length) { tableHolder.replaceChildren(h('p', { class: 'muted' }, state.q ? 'Niets gevonden.' : 'Nog geen bestanden in deze collectie.')); return; }
-    tableHolder.replaceChildren(h('table', {},
+    tableHolder.replaceChildren(
+      total > files.length ? h('p', { class: 'muted' }, `De nieuwste ${files.length} van ${total.toLocaleString('nl-NL')} bestanden. Zoek om een bepaald nummer te vinden.`) : '',
+      h('table', {},
       h('tr', {}, h('th', {}, ''), h('th', {}, 'Titel'), h('th', {}, 'Artiest'), h('th', {}, 'Duur'), h('th', {}, 'Grootte'), h('th', {}, '')),
       files.map((f) => h('tr', {},
         h('td', {}, h('button', { class: 'btn small', title: 'Afspelen', onclick: () => play(f) }, '▶')),

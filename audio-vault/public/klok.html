@@ -41,6 +41,14 @@
   .brush { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
   .brush button.b { display: flex; gap: 6px; align-items: center; background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; cursor: pointer; font-size: 12px; }
   .brush button.b.sel { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .search-wrap { position: relative; }
+  .search-results { position: absolute; z-index: 5; left: 0; right: 0; top: 100%; margin-top: 2px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.5); max-height: 320px; overflow-y: auto; }
+  .search-results button { display: block; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--line);
+    color: var(--text); padding: 7px 10px; cursor: pointer; font: inherit; font-size: 13px; }
+  .search-results button:hover { background: var(--panel2); }
+  .search-results .more { color: var(--muted); font-size: 12px; padding: 7px 10px; }
+  .hidden { display: none !important; }
   .readonly .adminonly { display: none !important; }
   @media (max-width: 1100px) { .klok-main { grid-template-columns: 1fr; } }
 </style>

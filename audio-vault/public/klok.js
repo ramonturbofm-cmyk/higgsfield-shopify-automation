@@ -13,7 +13,8 @@ const TYPE_COLOR = { muziek: '#2f7bff', jingle: '#ff3b30', vast: '#ffd60a' };
 const DAYS = [[1, 'ma'], [2, 'di'], [3, 'wo'], [4, 'do'], [5, 'vr'], [6, 'za'], [0, 'zo']];
 const HOUR = 3600;
 
-const K = { me: null, clocks: [], schedule: new Map(), collections: [], files: [], selected: null, brush: null, highlight: null };
+// fixed: the files used by "Vast nummer" blocks — the full library is never loaded.
+const K = { me: null, clocks: [], schedule: new Map(), collections: [], fixed: new Map(), selected: null, brush: null, highlight: null };
 const $ = (id) => document.getElementById(id);
 
 function h(tag, attrs = {}, ...children) {
@@ -50,17 +51,17 @@ function fileLength(f) {
 }
 function slotLength(slot) {
   if (slot.type === 'vast') {
-    const f = K.files.find((x) => x.id === slot.file_id);
+    const f = K.fixed.get(slot.file_id);
     return f ? fileLength(f) : 0;
   }
-  const list = K.files.filter((f) => f.collection_id === slot.collection_id);
-  return list.length ? list.reduce((t, f) => t + fileLength(f), 0) / list.length : 0;
+  const c = K.collections.find((x) => x.id === slot.collection_id);
+  return c && c.avg_length ? c.avg_length : 0;
 }
 const slotColor = (slot) => slot.color || TYPE_COLOR[slot.type];
 
 function slotLabel(slot) {
   if (slot.type === 'vast') {
-    const f = K.files.find((x) => x.id === slot.file_id);
+    const f = K.fixed.get(slot.file_id);
     return f ? (f.artist ? `${f.artist} – ${f.title}` : f.title) : 'Kies een nummer';
   }
   const c = K.collections.find((x) => x.id === slot.collection_id);
@@ -166,10 +167,7 @@ function renderSlots() {
     });
     let source;
     if (slot.type === 'vast') {
-      source = h('select', { disabled: !admin }, h('option', { value: '' }, 'Kies een nummer…'),
-        K.collections.map((c) => h('optgroup', { label: c.name }, K.files.filter((f) => f.collection_id === c.id)
-          .map((f) => h('option', { value: f.id, selected: f.id === slot.file_id }, f.artist ? `${f.artist} – ${f.title}` : f.title)))));
-      source.addEventListener('change', () => { slot.file_id = Number(source.value) || null; change(); });
+      source = fileSearch(slot, admin, change);
     } else {
       source = h('select', { disabled: !admin }, h('option', { value: '' }, 'Kies collectie…'),
         K.collections.map((c) => h('option', { value: c.id, selected: c.id === slot.collection_id }, `${c.name} (${c.file_count})`)));
@@ -189,6 +187,33 @@ function renderSlots() {
       h('button', { title: 'Omlaag', onclick: () => move(1) }, '↓'),
       h('button', { title: 'Verwijderen', onclick: () => { clock.slots.splice(i, 1); change(); } }, '✕')] : null));
   }));
+}
+
+// Search box for a "Vast nummer" block: searches the database on the server.
+function fileSearch(slot, admin, change) {
+  const chosen = K.fixed.get(slot.file_id);
+  const input = h('input', { type: 'search', disabled: !admin, placeholder: 'Zoek een nummer…', value: chosen ? slotLabel(slot) : '' });
+  const results = h('div', { class: 'search-results hidden' });
+  let timer;
+  input.addEventListener('focus', () => input.select());
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const q = input.value.trim();
+      if (!q) { results.classList.add('hidden'); return; }
+      const { files, total } = await api('GET', `/api/files?limit=12&sort=name&q=${encodeURIComponent(q)}`);
+      results.replaceChildren(...files.map((f) => h('button', {
+        type: 'button', onmousedown: (e) => {
+          e.preventDefault();
+          K.fixed.set(f.id, f); slot.file_id = f.id; results.classList.add('hidden'); change();
+        },
+      }, h('b', {}, f.title), f.artist ? ` – ${f.artist}` : '')),
+      files.length ? (total > files.length ? h('div', { class: 'more' }, `${total - files.length} meer — typ verder om te verfijnen`) : '') : h('div', { class: 'more' }, 'Niets gevonden'));
+      results.classList.remove('hidden');
+    }, 200);
+  });
+  input.addEventListener('blur', () => setTimeout(() => { results.classList.add('hidden'); input.value = K.fixed.get(slot.file_id) ? slotLabel(slot) : ''; }, 150));
+  return h('div', { class: 'search-wrap' }, input, results);
 }
 
 function renderMeta() {
@@ -248,14 +273,19 @@ function tickClock() {
 
 async function boot() {
   try { K.me = (await api('GET', '/api/me')).user; } catch { location.href = '/'; return; }
-  const [{ settings }, { clocks, schedule }, { collections }, { files }] = await Promise.all([
-    api('GET', '/api/me/settings'), api('GET', '/api/clocks'), api('GET', '/api/collections'), api('GET', '/api/files?limit=10000'),
+  const [{ settings }, { clocks, schedule }, { collections }] = await Promise.all([
+    api('GET', '/api/me/settings'), api('GET', '/api/clocks'), api('GET', '/api/collections'),
   ]);
+  const fixedIds = [...new Set(clocks.flatMap((c) => c.slots).filter((s) => s.type === 'vast' && s.file_id).map((s) => s.file_id))];
+  if (fixedIds.length) {
+    const { files } = await api('GET', `/api/files?limit=1000&ids=${fixedIds.slice(0, 1000).join(',')}`);
+    for (const f of files) K.fixed.set(f.id, f);
+  }
   const bg = BACKGROUNDS[settings.background] || BACKGROUNDS.zwart;
   ['bg', 'panel', 'panel2', 'line', 'text', 'muted'].forEach((k, i) => document.documentElement.style.setProperty(`--${k}`, bg[i]));
   if (settings.accent) document.documentElement.style.setProperty('--accent', settings.accent);
   $('station-name').textContent = settings.stationName || '';
-  Object.assign(K, { clocks, collections, files });
+  Object.assign(K, { clocks, collections });
   K.schedule = new Map(schedule.map((s) => [`${s.day}:${s.hour}`, s.clock_id]));
   const nowClock = K.schedule.get(`${new Date().getDay()}:${new Date().getHours()}`);
   K.selected = nowClock || (clocks[0] && clocks[0].id) || null;

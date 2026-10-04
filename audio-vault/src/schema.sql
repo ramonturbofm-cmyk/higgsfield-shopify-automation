@@ -105,3 +105,8 @@ CREATE TABLE IF NOT EXISTS clock_schedule (
   clock_id INTEGER NOT NULL REFERENCES clocks(id) ON DELETE CASCADE,
   PRIMARY KEY (day, hour)
 );
+
+-- Indexes for large libraries (hundreds of thousands of files).
+CREATE INDEX IF NOT EXISTS audio_files_name_idx ON audio_files (lower(artist), lower(title), id);
+CREATE INDEX IF NOT EXISTS audio_files_created_idx ON audio_files (created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS access_log_onair_idx ON access_log (file_id, created_at) WHERE action = 'onair';

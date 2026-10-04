@@ -221,7 +221,8 @@ function createServerManager({ sourceDir, version, onLog, dir }) {
     }),
     stop: () => exclusive('Server stoppen', () => compose(['stop'], 'Server stoppen')),
     import: () => exclusive('Muziek importeren', () => compose(
-      ['exec', '-T', '-u', 'node', 'app', 'node', 'src/import.js', '/import', '--per-folder', '--collection', 'Muziek'], 'Muziek importeren')),
+      ['exec', '-T', '-u', 'node', 'app', 'node', 'src/import.js', '/import', '--per-folder', '--collection', 'Muziek',
+        '--jobs', String(Math.min(6, Math.max(2, Math.floor(os.cpus().length / 2))))], 'Muziek importeren')),
     backup: () => exclusive('Back-up maken', () => compose(['exec', '-T', 'backup', 'sh', '/backup.sh', 'now'], 'Back-up maken')),
     restore: (dump) => exclusive('Back-up terugzetten', async () => {
       if (!/^onair-[\d_-]+\.dump$/.test(dump || '')) throw new Error('Kies een back-up uit de lijst');

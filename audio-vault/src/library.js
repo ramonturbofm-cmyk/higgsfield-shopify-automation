@@ -5,16 +5,21 @@ const isAdmin = (user) => user.role === 'owner' || user.role === 'admin';
 // Download, M3U links, WebDAV and API tokens hand out the files themselves.
 const canDownload = (user) => isAdmin(user) || user.can_download === true;
 
+// Number of files and the average play length (cue-in to mix point) per collection,
+// used by the clock editor so it never has to load the whole library.
+const STATS = `coalesce(s.n, 0)::int AS file_count, s.avg_length`;
+const STATS_JOIN = `LEFT JOIN (SELECT collection_id, count(*) AS n,
+    avg(coalesce(mix_out - coalesce(cue_in, 0), duration_seconds))::float8 AS avg_length
+    FROM audio_files GROUP BY collection_id) s ON s.collection_id = c.id`;
+
 async function listCollections(pool, user) {
   if (isAdmin(user)) {
-    const { rows } = await pool.query(
-      `SELECT c.*, TRUE AS can_upload, (SELECT count(*)::int FROM audio_files f WHERE f.collection_id = c.id) AS file_count
-         FROM collections c ORDER BY c.name`);
+    const { rows } = await pool.query(`SELECT c.*, TRUE AS can_upload, ${STATS} FROM collections c ${STATS_JOIN} ORDER BY c.name`);
     return rows;
   }
   const { rows } = await pool.query(
-    `SELECT c.*, a.can_upload, (SELECT count(*)::int FROM audio_files f WHERE f.collection_id = c.id) AS file_count
-       FROM collections c JOIN collection_access a ON a.collection_id = c.id AND a.user_id = $1
+    `SELECT c.*, a.can_upload, ${STATS}
+       FROM collections c JOIN collection_access a ON a.collection_id = c.id AND a.user_id = $1 ${STATS_JOIN}
       ORDER BY c.name`, [user.id]);
   return rows;
 }

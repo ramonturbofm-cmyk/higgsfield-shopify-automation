@@ -7,6 +7,7 @@ const lib = require('./library');
 const SLOT_TYPES = new Set(['muziek', 'jingle', 'vast']);
 const ROTATION_HOURS = Number(process.env.ROTATION_HOURS || 3);
 const ARTIST_SEPARATION = 4;
+const POOL_SIZE = 600;
 
 const HEX = /^#[0-9a-f]{6}$/i;
 
@@ -98,56 +99,68 @@ function createClockRouter({ pool, requireUser, requireAdmin, wrap, HttpError })
     const hours = Array.isArray(req.body && req.body.hours) ? req.body.hours.slice(0, 24) : [];
     if (!hours.length) throw new HttpError(400, 'Geef minstens één uur op');
     const readable = new Set((await lib.listCollections(pool, req.user)).map((c) => c.id));
-    const { rows: files } = await pool.query(
-      `SELECT f.id, f.collection_id, f.title, f.artist,
-              (SELECT max(created_at) FROM access_log l WHERE l.file_id = f.id AND l.action = 'onair') AS last_played
-         FROM audio_files f WHERE f.collection_id = ANY($1)`, [[...readable]]);
-    const byId = new Map(files.map((f) => [f.id, f]));
-    const byCollection = new Map();
-    for (const f of files) {
-      if (!byCollection.has(f.collection_id)) byCollection.set(f.collection_id, []);
-      byCollection.get(f.collection_id).push(f);
-    }
+    const exclude = (Array.isArray(req.body.exclude) ? req.body.exclude : []).map(Number).filter(Number.isInteger).slice(-500);
 
     // Recently played or already queued files are off limits; recent artists too.
     const { rows: recent } = await pool.query(
-      `SELECT l.file_id FROM access_log l WHERE l.action = 'onair' AND l.created_at > now() - make_interval(hours => $1)
-        ORDER BY l.created_at`, [ROTATION_HOURS]);
-    const used = new Set([...recent.map((r) => r.file_id), ...(req.body.exclude || []).map(Number)]);
-    const recentArtists = [...recent.map((r) => byId.get(r.file_id)), ...(req.body.exclude || []).map((id) => byId.get(Number(id)))]
-      .filter(Boolean).map((f) => f.artist.toLowerCase()).filter(Boolean).slice(-ARTIST_SEPARATION);
+      `SELECT l.file_id, f.artist FROM access_log l JOIN audio_files f ON f.id = l.file_id
+        WHERE l.action = 'onair' AND l.created_at > now() - make_interval(hours => $1) ORDER BY l.created_at`, [ROTATION_HOURS]);
+    const { rows: queued } = await pool.query('SELECT id, artist FROM audio_files WHERE id = ANY($1)', [exclude]);
+    const queuedArtist = new Map(queued.map((r) => [r.id, r.artist]));
+    const used = new Set([...recent.map((r) => r.file_id), ...exclude]);
+    const recentArtists = [...recent.map((r) => r.artist), ...exclude.map((id) => queuedArtist.get(id) || '')]
+      .map((a) => a.toLowerCase()).filter(Boolean).slice(-ARTIST_SEPARATION);
+
+    // Per collection, a candidate pool of the least recently played files (never played
+    // first), shuffled within equal play dates. Large libraries never load in full.
+    const pools = new Map();
+    async function candidates(collectionId) {
+      if (!pools.has(collectionId)) {
+        let rows = [];
+        if (readable.has(collectionId)) {
+          ({ rows } = await pool.query(
+            `SELECT f.id, f.artist, lp.last_played FROM audio_files f
+               LEFT JOIN (SELECT file_id, max(created_at) AS last_played FROM access_log
+                           WHERE action = 'onair' GROUP BY file_id) lp ON lp.file_id = f.id
+              WHERE f.collection_id = $1
+              ORDER BY lp.last_played NULLS FIRST, random() LIMIT $2`, [collectionId, POOL_SIZE]));
+        }
+        pools.set(collectionId, rows);
+      }
+      return pools.get(collectionId);
+    }
 
     const { rows: clocks } = await pool.query('SELECT id, name, color, slots FROM clocks');
     const clockById = new Map(clocks.map((c) => [c.id, c]));
     const { rows: schedule } = await pool.query('SELECT day, hour, clock_id FROM clock_schedule');
     const scheduled = new Map(schedule.map((s) => [`${s.day}:${s.hour}`, s.clock_id]));
 
-    function choose(slot) {
+    async function choose(slot) {
       if (slot.type === 'vast') {
-        const f = byId.get(slot.file_id);
-        return f || null;
+        const { rows } = await pool.query('SELECT id, collection_id, artist FROM audio_files WHERE id = $1', [slot.file_id]);
+        return rows[0] && readable.has(rows[0].collection_id) ? rows[0] : null;
       }
-      const options = byCollection.get(slot.collection_id) || [];
+      const options = await candidates(slot.collection_id);
       if (!options.length) return null;
       const artistOk = (f) => slot.type !== 'muziek' || !f.artist || !recentArtists.includes(f.artist.toLowerCase());
       // Relax the rules step by step rather than leaving a hole in the hour.
-      const candidates = [
+      const list = [
         options.filter((f) => !used.has(f.id) && artistOk(f)),
         options.filter((f) => !used.has(f.id)),
         options,
       ].find((l) => l.length);
       // Least recently played third, then random within that, so it doesn't feel mechanical.
-      candidates.sort((a, b) => (a.last_played ? new Date(a.last_played).getTime() : 0) - (b.last_played ? new Date(b.last_played).getTime() : 0));
-      return pickRandom(candidates.slice(0, Math.max(1, Math.ceil(candidates.length / 3))));
+      return pickRandom(list.slice(0, Math.max(1, Math.ceil(list.length / 3))));
     }
 
-    const planned = hours.map(({ day, hour }) => {
+    const planned = [];
+    for (const { day, hour } of hours) {
       const clock = clockById.get(scheduled.get(`${Number(day)}:${Number(hour)}`));
-      if (!clock) return { day, hour, clock: null, items: [], missing: 0 };
+      if (!clock) { planned.push({ day, hour, clock: null, items: [], missing: 0 }); continue; }
       const items = [];
       let missing = 0;
       for (const slot of clock.slots) {
-        const f = choose(slot);
+        const f = await choose(slot);
         if (!f) { missing++; continue; }
         items.push(f.id);
         used.add(f.id);
@@ -156,8 +169,8 @@ function createClockRouter({ pool, requireUser, requireAdmin, wrap, HttpError })
           if (recentArtists.length > ARTIST_SEPARATION) recentArtists.shift();
         }
       }
-      return { day, hour, clock: { id: clock.id, name: clock.name, color: clock.color }, items, missing };
-    });
+      planned.push({ day, hour, clock: { id: clock.id, name: clock.name, color: clock.color }, items, missing });
+    }
     res.json({ planned });
   }));
 

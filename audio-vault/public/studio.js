@@ -480,7 +480,8 @@ async function planNextHour({ manual }) {
       return;
     }
     S.playlist.push({ uid: newUid(), marker: `${when} · ${p.clock.name}`, color: p.clock.color, state: 'queued' });
-    for (const id of p.items) S.playlist.push({ uid: newUid(), id, stopAfter: false, state: 'queued' });
+    await ensureFiles(p.items);
+    for (const id of p.items) if (S.files.has(id)) S.playlist.push({ uid: newUid(), id, stopAfter: false, state: 'queued' });
     if (p.missing) status(`${p.missing} blok(ken) van "${p.clock.name}" konden niet gevuld worden (lege collectie?)`);
     afterPlaylistChange();
   } catch (e) {
@@ -492,16 +493,29 @@ async function planNextHour({ manual }) {
 
 // ---------- persistence ----------
 
-let saveTimer;
+let saveTimer = null;
+function settingsPayload() {
+  S.settings.playlist = S.playlist.map(({ id, stopAfter, state, marker, color }) => (marker
+    ? { marker, color, played: state === 'played' }
+    : { id, stopAfter, played: state === 'played' }));
+  return JSON.stringify({ settings: S.settings });
+}
 function saveSettingsSoon() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    S.settings.playlist = S.playlist.map(({ id, stopAfter, state, marker, color }) => (marker
-      ? { marker, color, played: state === 'played' }
-      : { id, stopAfter, played: state === 'played' }));
-    api('PUT', '/api/me/settings', { settings: S.settings }).catch((e) => status(`Opslaan mislukt: ${e.message}`));
+    saveTimer = null;
+    fetch('/api/me/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: settingsPayload() })
+      .then((r) => { if (!r.ok) throw new Error(`fout ${r.status}`); })
+      .catch((e) => status(`Opslaan mislukt: ${e.message}`));
   }, 600);
 }
+// Closing the window or app right after a change: save immediately; keepalive lets
+// the request finish while the page goes away.
+window.addEventListener('pagehide', () => {
+  if (saveTimer === null) return;
+  clearTimeout(saveTimer); saveTimer = null;
+  fetch('/api/me/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: settingsPayload(), keepalive: true });
+});
 const savePlaylistSoon = saveSettingsSoon;
 
 // ---------- theme ----------
@@ -670,14 +684,39 @@ function dropOnPlaylist(e, beforeUid) {
   else render();
 }
 
+// Files the studio knows about: search results plus everything in the playlist,
+// on a deck or on the jingle panel. The full library is never loaded.
+async function ensureFiles(ids) {
+  const missing = [...new Set(ids.filter((id) => id && !S.files.has(id)))];
+  for (let i = 0; i < missing.length; i += 500) {
+    const { files } = await api('GET', `/api/files?limit=500&ids=${missing.slice(i, i + 500).join(',')}`);
+    for (const f of files) S.files.set(f.id, f);
+  }
+}
+
+const LIBRARY_PAGE = 300;
+const lib = { files: [], total: 0, token: 0 };
+let libTimer;
+function searchLibrarySoon() { clearTimeout(libTimer); libTimer = setTimeout(searchLibrary, 200); }
+async function searchLibrary() {
+  const token = ++lib.token;
+  const params = new URLSearchParams({ limit: LIBRARY_PAGE, sort: 'name' });
+  if ($('lib-collection').value) params.set('collection_id', $('lib-collection').value);
+  if ($('lib-search').value.trim()) params.set('q', $('lib-search').value.trim());
+  try {
+    const { files, total } = await api('GET', `/api/files?${params}`);
+    if (token !== lib.token) return; // a newer search is already running
+    for (const f of files) if (!S.files.has(f.id)) S.files.set(f.id, f);
+    lib.files = files.map((f) => S.files.get(f.id)); lib.total = total;
+  } catch (e) { status(`Zoeken mislukt: ${e.message}`); }
+  renderLibrary();
+}
+
 function renderLibrary() {
-  const coll = Number($('lib-collection').value) || null;
-  const q = $('lib-search').value.trim().toLowerCase();
-  const list = [...S.files.values()]
-    .filter((f) => (!coll || f.collection_id === coll) && (!q || `${f.title} ${f.artist} ${f.tags.join(' ')}`.toLowerCase().includes(q)))
-    .sort((a, b) => label(a).localeCompare(label(b), 'nl'));
-  $('library-count').textContent = `${list.length} items`;
-  const shown = list.slice(0, 500);
+  const shown = lib.files;
+  $('library-count').textContent = lib.total > shown.length
+    ? `${shown.length.toLocaleString('nl-NL')} van ${lib.total.toLocaleString('nl-NL')} · zoek om te verfijnen`
+    : `${lib.total.toLocaleString('nl-NL')} items`;
   $('library').replaceChildren(...(shown.length ? shown.map((f) => h('div', {
     class: 'lib-row', draggable: 'true',
     ondragstart: (e) => { e.dataTransfer.setData('text/aot-file', String(f.id)); e.dataTransfer.effectAllowed = 'copy'; },
@@ -688,7 +727,7 @@ function renderLibrary() {
   h('div', { class: 'lib-actions' },
     h('button', { title: 'Voorbeluisteren', class: S.pfl.fileId === f.id ? 'pfl-on' : '', onclick: () => togglePfl(f) }, '🎧'),
     h('button', { title: 'Achteraan de playlist', onclick: () => addToPlaylist(f.id) }, '+'))))
-    : [h('div', { class: 'empty' }, S.files.size ? 'Niets gevonden.' : 'De database is nog leeg. Upload muziek via ☰ Bibliotheek.')]));
+    : [h('div', { class: 'empty' }, $('lib-search').value.trim() || $('lib-collection').value ? 'Niets gevonden.' : 'De database is nog leeg. Upload muziek via ☰ Bibliotheek.')]));
 }
 
 function renderCart() {
@@ -854,20 +893,18 @@ document.addEventListener('keydown', (e) => {
 
 async function boot() {
   try { S.me = (await api('GET', '/api/me')).user; } catch { location.href = '/'; return; }
-  const [{ settings }, { collections }, { files }] = await Promise.all([
-    api('GET', '/api/me/settings'), api('GET', '/api/collections'), api('GET', '/api/files?limit=5000'),
-  ]);
+  const [{ settings }, { collections }] = await Promise.all([api('GET', '/api/me/settings'), api('GET', '/api/collections')]);
   S.settings = { ...DEFAULT_SETTINGS, ...settings };
   S.collections = collections;
-  for (const f of files) S.files.set(f.id, f);
+  await ensureFiles([...(S.settings.playlist || []).map((i) => i.id), ...(S.settings.cart || []).filter(Boolean).map((s) => s.id)]);
   S.playlist = (S.settings.playlist || []).filter((i) => i.marker || S.files.has(i.id))
     .map((i) => (i.marker
       ? { uid: newUid(), marker: i.marker, color: i.color, state: i.played ? 'played' : 'queued' }
       : { uid: newUid(), id: i.id, stopAfter: Boolean(i.stopAfter), state: i.played ? 'played' : 'queued' }));
 
   $('lib-collection').replaceChildren(h('option', { value: '' }, 'Alle collecties'), ...collections.map((c) => h('option', { value: c.id }, c.name)));
-  $('lib-collection').addEventListener('change', renderLibrary);
-  $('lib-search').addEventListener('input', renderLibrary);
+  $('lib-collection').addEventListener('change', searchLibrary);
+  $('lib-search').addEventListener('input', searchLibrarySoon);
 
   $('btn-start').addEventListener('click', cmdStart);
   $('btn-next').addEventListener('click', cmdStart);
@@ -895,7 +932,7 @@ async function boot() {
   applyTheme();
   applySink(S.pfl.audio, 'pfl');
   renderOutputsStatus();
-  renderLibrary();
+  searchLibrary();
   render();
   cueNext();
   preloadCartPage();

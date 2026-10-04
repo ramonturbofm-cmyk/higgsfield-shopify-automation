@@ -354,13 +354,26 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
     const params = [visible];
     let where = 'collection_id = ANY($1)';
     if (req.query.collection_id) { params.push(Number(req.query.collection_id)); where += ` AND collection_id = $${params.length}`; }
-    if (req.query.q) {
-      params.push(`%${req.query.q}%`);
-      where += ` AND (title ILIKE $${params.length} OR artist ILIKE $${params.length} OR array_to_string(tags, ' ') ILIKE $${params.length})`;
+    if (req.query.ids) {
+      // Fetch specific files (playlist, jingle panel, clocks) — never the whole library.
+      const ids = String(req.query.ids).split(',').map(Number).filter(Number.isInteger).slice(0, 1000);
+      params.push(ids); where += ` AND id = ANY($${params.length})`;
     }
-    const limit = Math.min(10000, Math.max(1, Number(req.query.limit) || 1000));
-    const { rows } = await pool.query(`SELECT * FROM audio_files WHERE ${where} ORDER BY created_at DESC LIMIT ${limit}`, params);
-    res.json({ files: rows.map(publicFile) });
+    if (req.query.q) {
+      // Every word must appear in title, artist or tags: "turbo id" finds "Turbo FM – Station ID".
+      for (const word of String(req.query.q).trim().split(/\s+/).slice(0, 6)) {
+        params.push(`%${word.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+        where += ` AND (title || ' ' || artist || ' ' || array_to_string(tags, ' ')) ILIKE $${params.length}`;
+      }
+    }
+    const limit = Math.min(1000, Math.max(1, Number(req.query.limit) || 1000));
+    const offset = Math.max(0, Number(req.query.offset) || 0);
+    const order = req.query.sort === 'name' ? 'lower(artist), lower(title), id' : 'created_at DESC, id DESC';
+    const [{ rows }, { rows: [{ n }] }] = await Promise.all([
+      pool.query(`SELECT * FROM audio_files WHERE ${where} ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`, params),
+      pool.query(`SELECT count(*)::int AS n FROM audio_files WHERE ${where}`, params),
+    ]);
+    res.json({ files: rows.map(publicFile), total: n });
   }));
 
   const upload = multer({

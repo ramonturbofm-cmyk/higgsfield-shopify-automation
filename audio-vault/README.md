@@ -213,6 +213,19 @@ installatiehulp bij stap 4 met **Andere schijf…** de muziekschijf (bijv.
 `D:\AudioOnAir`); de app toont hoeveel ruimte er vrij is. De back-up op de NAS
 heeft minstens evenveel vrije ruimte nodig als je FLAC-bibliotheek.
 
+## Grote bibliotheken (200.000+ nummers)
+
+Getest met 200.000 nummers en 150.000 gedraaide items: de studio laadt in
+± 0,3 s, zoeken duurt ± 0,2 s en een uur plannen met de uurklok ± 0,2 s. De
+studio en de klok-editor laden nooit de hele bibliotheek: zoeken gebeurt op de
+server (300 resultaten per keer, verfijn door verder te typen) en alleen de
+nummers in je playlist en jingle paneel worden opgehaald.
+
+Reken bij 200.000 nummers op ± 5 TB aan FLAC (± 8 TB als WAV). De eerste
+import leest alles van de NAS en zet WAV om naar FLAC; dat kan enkele dagen
+duren. Hij gebruikt meerdere processorkernen, je kunt gewoon doorwerken, en
+na een onderbreking gaat hij verder waar hij was.
+
 ## WAV of FLAC?
 
 FLAC. Het is verliesvrij (bit-voor-bit dezelfde audio als de WAV), ongeveer
