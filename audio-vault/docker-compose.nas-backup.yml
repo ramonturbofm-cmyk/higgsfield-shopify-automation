@@ -1,0 +1,15 @@
+# Backups go to a shared folder on the NAS (over SMB), e.g. a folder "backup".
+# Needs NAS_HOST, NAS_BACKUP_SHARE, NAS_BACKUP_USER and NAS_BACKUP_PASSWORD in .env.
+# Use a NAS user with write rights on that folder only.
+services:
+  backup:
+    volumes:
+      - nasbackup:/backup
+
+volumes:
+  nasbackup:
+    driver: local
+    driver_opts:
+      type: cifs
+      device: "//${NAS_HOST:?zet NAS_HOST in .env}/${NAS_BACKUP_SHARE:?zet NAS_BACKUP_SHARE in .env}"
+      o: "username=${NAS_BACKUP_USER:?zet NAS_BACKUP_USER in .env},password=${NAS_BACKUP_PASSWORD:?zet NAS_BACKUP_PASSWORD in .env},vers=3.0,rw,iocharset=utf8"

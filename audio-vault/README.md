@@ -170,6 +170,23 @@ Werkt op een Synology met Container Manager (meestal de "+"-modellen, liefst
    gratis Let's Encrypt-certificaat via **Beveiliging → Certificaat**. Zet
    poort 443 door in je router. Zet poort 3000 zelf **niet** open naar internet.
 
+## Backup (database + muziek)
+
+De dienst `backup` draait automatisch mee. Elke 24 uur dat de server aanstaat,
+maakt hij een backup: een complete kopie van de database (`database/`, 30
+dagen bewaard) en alle audiobestanden (`audio/`, alleen nieuwe bestanden). Staat
+de pc 's nachts uit, dan gebeurt het gewoon zodra hij weer aan is.
+
+- **Naar de NAS**: maak op de Synology een gedeelde map `backup` en een
+  gebruiker (bijv. `onair-backup`) met schrijfrechten op alleen die map. Vul
+  `NAS_BACKUP_SHARE`, `NAS_BACKUP_USER` en `NAS_BACKUP_PASSWORD` in `.env` in
+  en start opnieuw met `start-windows.bat`.
+- Zonder NAS-gegevens komt de backup in `data/backup` op de server-pc.
+- **`backup-nu-windows.bat`**: direct een backup maken.
+- **`herstellen-windows.bat`**: een backup terugzetten (toont de lijst, vraagt
+  om bevestiging, zet database en ontbrekende muziek terug).
+- In `backup.log` in de backupmap zie je wanneer de laatste backup gelukt is.
+
 ## WAV of FLAC?
 
 FLAC. Het is verliesvrij (bit-voor-bit dezelfde audio als de WAV), ongeveer

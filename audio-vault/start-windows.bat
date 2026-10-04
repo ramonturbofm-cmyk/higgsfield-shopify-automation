@@ -14,12 +14,8 @@ if not exist .env (
   notepad .env
   exit /b 0
 )
-findstr /b /c:"NAS_PASSWORD=" .env | findstr /r /c:"=.." >nul
-if errorlevel 1 (
-  docker compose up -d --build
-) else (
-  docker compose -f docker-compose.yml -f docker-compose.nas.yml up -d --build
-)
+call compose-files.cmd
+docker compose %FILES% up -d --build
 if errorlevel 1 ( pause & exit /b 1 )
 echo.
 echo Audio OnAir Turbo draait. De browser opent nu.

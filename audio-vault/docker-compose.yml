@@ -33,3 +33,22 @@ services:
       - ${MUSIC_DIR:-./import}:/import:ro
     ports:
       - "${PORT:-3000}:3000"
+
+  # Daily backup of database + audio (see backup/backup.sh). Target: BACKUP_DIR,
+  # or the NAS with docker-compose.nas-backup.yml.
+  backup:
+    image: postgres:16
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["sh", "/backup.sh"]
+    environment:
+      PGPASSWORD: ${DB_PASSWORD}
+      TZ: Europe/Amsterdam
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-30}
+      BACKUP_EVERY_HOURS: ${BACKUP_EVERY_HOURS:-24}
+    volumes:
+      - ./backup/backup.sh:/backup.sh:ro
+      - ./data/audio:/data:ro
+      - ${BACKUP_DIR:-./data/backup}:/backup
