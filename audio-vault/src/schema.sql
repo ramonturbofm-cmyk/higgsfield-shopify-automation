@@ -87,3 +87,21 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS can_download BOOLEAN NOT NULL DEFAULT
 -- Where a bulk-imported file came from, so re-running the import skips it.
 ALTER TABLE audio_files ADD COLUMN IF NOT EXISTS source_path TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS audio_files_source_path_idx ON audio_files (source_path) WHERE source_path IS NOT NULL;
+
+-- Hour clocks ("uurklokken"): an ordered list of slots that the planner fills from the
+-- database. A slot is { type: 'muziek' | 'jingle' | 'vast', collection_id?, file_id?, color? }.
+CREATE TABLE IF NOT EXISTS clocks (
+  id         SERIAL PRIMARY KEY,
+  name       TEXT NOT NULL UNIQUE,
+  color      TEXT NOT NULL DEFAULT '#2f7bff',
+  slots      JSONB NOT NULL DEFAULT '[]',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Which clock runs in which hour of the week. day uses JavaScript numbering (0 = Sunday).
+CREATE TABLE IF NOT EXISTS clock_schedule (
+  day      SMALLINT NOT NULL CHECK (day BETWEEN 0 AND 6),
+  hour     SMALLINT NOT NULL CHECK (hour BETWEEN 0 AND 23),
+  clock_id INTEGER NOT NULL REFERENCES clocks(id) ON DELETE CASCADE,
+  PRIMARY KEY (day, hour)
+);

@@ -40,7 +40,7 @@ function client() {
 before(async () => {
   if (!DB) return;
   pool = createPool(DB);
-  await pool.query('DROP TABLE IF EXISTS now_playing, user_settings, access_log, collection_access, audio_files, collections, users CASCADE');
+  await pool.query('DROP TABLE IF EXISTS clock_schedule, clocks, now_playing, user_settings, access_log, collection_access, audio_files, collections, users CASCADE');
   await migrate(pool);
   storageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-'));
   const app = createApp({ pool, storageDir, sessionSecret: 'test-secret' });
@@ -229,4 +229,53 @@ test('bulk import converts WAV to FLAC, makes collections per folder and skips k
   // The source folder is left untouched.
   assert.ok(fs.existsSync(path.join(src, 'Reclames', 'Bakker Jansen.wav')));
   fs.rmSync(src, { recursive: true, force: true });
+});
+
+test('hour clocks: schedule, rotation and artist separation', { skip: !DB && 'TEST_DATABASE_URL not set' }, async () => {
+  const owner = client();
+  assert.equal((await owner('POST', '/api/login', { email: 'owner@example.com', password: 'supergeheim1' })).status, 200);
+  const music = (await owner('POST', '/api/collections', { name: 'Klokmuziek' })).data.collection;
+  const ids = (await owner('POST', '/api/collections', { name: 'Klokjingles' })).data.collection;
+  const upload = async (collection, artist, title) => {
+    const fd = new FormData();
+    fd.append('collection_id', String(collection.id)); fd.append('artist', artist); fd.append('title', title);
+    fd.append('file', new Blob([wav()]), `${title}.wav`);
+    return (await owner('POST', '/api/files', fd)).data.file.id;
+  };
+  const songs = [];
+  for (const [artist, title] of [['A', 'a1'], ['A', 'a2'], ['B', 'b1'], ['C', 'c1'], ['D', 'd1'], ['E', 'e1']]) songs.push(await upload(music, artist, title));
+  const jingle = await upload(ids, 'Station', 'ID');
+
+  assert.equal((await client()('GET', '/api/clocks')).status, 401);
+  assert.equal((await owner('POST', '/api/clocks', { name: 'Ochtend', slots: [{ type: 'onzin' }] })).status, 400);
+  const slots = [{ type: 'vast', file_id: jingle }, ...Array(4).fill({ type: 'muziek', collection_id: music.id })];
+  const clock = (await owner('POST', '/api/clocks', { name: 'Ochtend', color: '#30d158', slots })).data.clock;
+  assert.equal(clock.slots.length, 5);
+  assert.equal((await owner('POST', '/api/clocks', { name: 'Ochtend', slots: [] })).status, 409);
+  assert.equal((await owner('PUT', '/api/clock-schedule', { cells: [{ day: 1, hour: 10, clock_id: clock.id }] })).status, 200);
+  assert.deepEqual((await owner('GET', '/api/clocks')).data.schedule, [{ day: 1, hour: 10, clock_id: clock.id }]);
+
+  for (let round = 0; round < 10; round++) {
+    const { planned } = (await owner('POST', '/api/clocks/plan', { hours: [{ day: 1, hour: 10 }, { day: 1, hour: 11 }] })).data;
+    assert.equal(planned[0].clock.name, 'Ochtend');
+    assert.equal(planned[0].items[0], jingle);
+    const picks = planned[0].items.slice(1);
+    assert.equal(picks.length, 4);
+    assert.equal(new Set(picks).size, 4, 'no song twice in one hour');
+    const artists = picks.map((id) => (id === songs[0] || id === songs[1] ? 'A' : id));
+    assert.equal(new Set(artists).size, 4, 'no artist twice within the separation window');
+    assert.equal(planned[1].clock, null, 'unscheduled hour stays empty');
+  }
+  // Everything excluded: the hour is still filled rather than left with holes.
+  const full = (await owner('POST', '/api/clocks/plan', { hours: [{ day: 1, hour: 10 }], exclude: songs })).data.planned[0];
+  assert.equal(full.items.length, 5);
+  assert.equal(full.missing, 0);
+
+  // A slot pointing at an empty collection is reported, not fatal.
+  const empty = (await owner('POST', '/api/collections', { name: 'Leeg' })).data.collection;
+  await owner('PUT', `/api/clocks/${clock.id}`, { name: 'Ochtend', slots: [...slots, { type: 'muziek', collection_id: empty.id }] });
+  assert.equal((await owner('POST', '/api/clocks/plan', { hours: [{ day: 1, hour: 10 }] })).data.planned[0].missing, 1);
+
+  assert.equal((await owner('DELETE', `/api/clocks/${clock.id}`)).status, 200);
+  assert.deepEqual((await owner('GET', '/api/clocks')).data.schedule, []);
 });

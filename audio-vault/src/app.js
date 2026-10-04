@@ -6,6 +6,7 @@ const auth = require('./auth');
 const lib = require('./library');
 const { createDavRouter } = require('./dav');
 const { AUDIO_TYPES, ingestFile } = require('./ingest');
+const { createClockRouter } = require('./clocks');
 
 const INVITE_DAYS = 7;
 
@@ -498,6 +499,8 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
     const current = rows[0] ? { ...rows[0], duration_seconds: num(rows[0].duration_seconds) } : null;
     res.set('Access-Control-Allow-Origin', '*').json({ now_playing: current, recent: current ? recent.slice(1) : recent.slice(0, 10) });
   }));
+
+  app.use('/api', createClockRouter({ pool, requireUser, requireAdmin, wrap, HttpError }));
 
   app.get('/api/activity', requireUser, requireAdmin, wrap(async (req, res) => {
     const { rows } = await pool.query(

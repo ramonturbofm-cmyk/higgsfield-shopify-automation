@@ -26,6 +26,8 @@ const DEFAULT_SETTINGS = {
   cartSize: '4x4',
   cartPage: 0,
   cart: [],
+  clockAuto: false,
+  plannedUntil: null,
 };
 
 const S = {
@@ -189,7 +191,7 @@ function makeDeck(index) {
 const decks = [makeDeck(0), makeDeck(1)];
 
 function nextQueued() {
-  return S.playlist.find((i) => i.state === 'queued' && !i.error);
+  return S.playlist.find((i) => i.state === 'queued' && !i.error && !i.marker);
 }
 
 async function loadDeck(deck, item) {
@@ -249,6 +251,9 @@ function cueNext({ startWhenReady = false } = {}) {
 function startDeck(deck) {
   if (deck.state !== 'cued') return;
   for (const i of S.playlist) if (i.state === 'playing' && i !== deck.item) i.state = 'played';
+  // Hour markers above the item that starts now have been passed.
+  const at = S.playlist.indexOf(deck.item);
+  S.playlist.forEach((i, k) => { if (i.marker && k < at) i.state = 'played'; });
   deck.item.state = 'playing';
   deck.state = 'playing';
   deck.mixed = false;
@@ -451,13 +456,49 @@ function afterPlaylistChange() {
   render();
 }
 
+// ---------- hour clock planning ----------
+
+let planning = false;
+// Fill the next hour after what has already been planned, following the week schedule.
+async function planNextHour({ manual }) {
+  if (planning) return;
+  planning = true;
+  try {
+    const hourMs = 3600 * 1000;
+    const thisHour = Math.floor(Date.now() / hourMs) * hourMs;
+    let start = S.settings.plannedUntil && S.settings.plannedUntil > thisHour ? S.settings.plannedUntil : thisHour;
+    // Never plan more than a day ahead when the schedule is empty.
+    if (start > Date.now() + 24 * hourMs) { if (manual) status('Er is al 24 uur vooruit gepland'); return; }
+    const d = new Date(start);
+    const exclude = S.playlist.filter((i) => i.state === 'queued' && i.id).map((i) => i.id);
+    const { planned: [p] } = await api('POST', '/api/clocks/plan', { hours: [{ day: d.getDay(), hour: d.getHours() }], exclude });
+    S.settings.plannedUntil = start + hourMs;
+    const when = d.toLocaleString('nl-NL', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+    if (!p.clock) {
+      if (manual) status(`Geen uurklok gepland voor ${when} — stel de weekplanning in via ◔`);
+      saveSettingsSoon();
+      return;
+    }
+    S.playlist.push({ uid: newUid(), marker: `${when} · ${p.clock.name}`, color: p.clock.color, state: 'queued' });
+    for (const id of p.items) S.playlist.push({ uid: newUid(), id, stopAfter: false, state: 'queued' });
+    if (p.missing) status(`${p.missing} blok(ken) van "${p.clock.name}" konden niet gevuld worden (lege collectie?)`);
+    afterPlaylistChange();
+  } catch (e) {
+    status(`Plannen mislukt: ${e.message}`);
+  } finally {
+    planning = false;
+  }
+}
+
 // ---------- persistence ----------
 
 let saveTimer;
 function saveSettingsSoon() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    S.settings.playlist = S.playlist.map(({ id, stopAfter, state }) => ({ id, stopAfter, played: state === 'played' }));
+    S.settings.playlist = S.playlist.map(({ id, stopAfter, state, marker, color }) => (marker
+      ? { marker, color, played: state === 'played' }
+      : { id, stopAfter, played: state === 'played' }));
     api('PUT', '/api/me/settings', { settings: S.settings }).catch((e) => status(`Opslaan mislukt: ${e.message}`));
   }, 600);
 }
@@ -561,6 +602,7 @@ function renderTimes() {
   let total = 0;
   for (const item of S.playlist) {
     const el = document.querySelector(`[data-uid="${item.uid}"] .pl-time`);
+    if (item.marker) { if (el) el.textContent = item.state === 'queued' && known ? fmtClock(new Date(at)).slice(0, 5) : ''; continue; }
     const f = S.files.get(item.id);
     if (item.state !== 'queued' || !f) { if (el) el.textContent = item.state === 'playing' ? 'NU' : ''; continue; }
     if (el) el.textContent = known ? fmtClock(new Date(at)) : '';
@@ -589,6 +631,17 @@ function renderPlaylist() {
     return;
   }
   root.replaceChildren(...S.playlist.map((item) => {
+    const drag = {
+      'data-uid': item.uid, draggable: 'true',
+      ondragstart: (e) => { e.dataTransfer.setData('text/aot-item', item.uid); e.dataTransfer.effectAllowed = 'move'; },
+      ondragover: (e) => { e.preventDefault(); if (dragOverUid !== item.uid) { dragOverUid = item.uid; renderPlaylist(); } },
+      ondrop: (e) => { e.preventDefault(); e.stopPropagation(); dropOnPlaylist(e, item.uid); },
+    };
+    if (item.marker) {
+      return h('div', { ...drag, class: `pl-marker ${item.state}${dragOverUid === item.uid ? ' drop-before' : ''}`, style: { '--mk': item.color || '' } },
+        h('div', { class: 'pl-time' }), h('div', { class: 'mk-label' }, `◔ ${item.marker}`),
+        h('button', { title: 'Markering verwijderen', onclick: () => { S.playlist = S.playlist.filter((i) => i !== item); afterPlaylistChange(); } }, '✕'));
+    }
     const f = S.files.get(item.id);
     const cls = ['pl-row', item.state, item.error ? 'error' : '', cuedDeck && cuedDeck.item === item ? 'cued' : '', dragOverUid === item.uid ? 'drop-before' : ''].join(' ');
     return h('div', {
@@ -716,6 +769,7 @@ async function renderSettings() {
   $('set-crossfade').value = st.crossfade;
   $('set-fadeout').value = st.fadeOut;
   $('set-autocue').checked = st.autoCue;
+  $('set-clockauto').checked = st.clockAuto;
   $('set-cartsize').value = st.cartSize;
   $('set-background').replaceChildren(...Object.entries(BACKGROUNDS).map(([key, b]) => h('button', {
     type: 'button', class: `choice${st.background === key ? ' sel' : ''}`, style: { background: b.bg, color: b.text },
@@ -756,6 +810,7 @@ function bindSettings() {
   $('set-station').addEventListener('input', (e) => { S.settings.stationName = e.target.value; applyTheme(); saveSettingsSoon(); });
   $('set-crossfade').addEventListener('change', (e) => { S.settings.crossfade = Math.min(10, Math.max(0, Number(e.target.value) || 0)); saveSettingsSoon(); render(); });
   $('set-fadeout').addEventListener('change', (e) => { S.settings.fadeOut = Math.min(15, Math.max(0.5, Number(e.target.value) || 3)); saveSettingsSoon(); });
+  $('set-clockauto').addEventListener('change', (e) => { S.settings.clockAuto = e.target.checked; saveSettingsSoon(); });
   $('set-autocue').addEventListener('change', (e) => { S.settings.autoCue = e.target.checked; saveSettingsSoon(); });
   $('set-cartsize').addEventListener('change', (e) => {
     // Keep each page's buttons in place when the grid size changes.
@@ -805,8 +860,10 @@ async function boot() {
   S.settings = { ...DEFAULT_SETTINGS, ...settings };
   S.collections = collections;
   for (const f of files) S.files.set(f.id, f);
-  S.playlist = (S.settings.playlist || []).filter((i) => S.files.has(i.id))
-    .map((i) => ({ uid: newUid(), id: i.id, stopAfter: Boolean(i.stopAfter), state: i.played ? 'played' : 'queued' }));
+  S.playlist = (S.settings.playlist || []).filter((i) => i.marker || S.files.has(i.id))
+    .map((i) => (i.marker
+      ? { uid: newUid(), marker: i.marker, color: i.color, state: i.played ? 'played' : 'queued' }
+      : { uid: newUid(), id: i.id, stopAfter: Boolean(i.stopAfter), state: i.played ? 'played' : 'queued' }));
 
   $('lib-collection').replaceChildren(h('option', { value: '' }, 'Alle collecties'), ...collections.map((c) => h('option', { value: c.id }, c.name)));
   $('lib-collection').addEventListener('change', renderLibrary);
@@ -819,6 +876,11 @@ async function boot() {
   $('btn-fade').addEventListener('click', cmdFade);
   $('btn-auto').addEventListener('click', cmdAuto);
   $('btn-cart-stop').addEventListener('click', () => [...S.cartPlayers.keys()].forEach(stopCart));
+  $('btn-plan').addEventListener('click', () => planNextHour({ manual: true }));
+  setInterval(() => {
+    const waiting = S.playlist.filter((i) => i.state === 'queued' && !i.marker && !i.error).length;
+    if (S.settings.clockAuto && waiting < 3) planNextHour({ manual: false });
+  }, 5000);
   $('btn-clean').addEventListener('click', () => { S.playlist = S.playlist.filter((i) => i.state !== 'played'); afterPlaylistChange(); });
   $('btn-clear').addEventListener('click', () => {
     if (!confirm('Playlist leegmaken? (wat nu speelt, speelt door)')) return;

@@ -66,6 +66,23 @@ Open via **▶ Open studio** na het inloggen, of ga naar `/studio.html`.
   `/nu.html` (scherm in de studio of op je website; kleur via `?kleur=30d158`)
   of op te halen als JSON via `/api/now-playing`.
 
+### Uurklokken (◔)
+
+Leg één keer vast hoe een uur is opgebouwd, bijvoorbeeld *Top of the hour →
+Nieuws → muziek → jingle → muziek → muziek → weer → …*. Elk blok is:
+
+- **Muziek** – willekeurig uit een collectie, met rotatie: niet hetzelfde
+  nummer binnen 3 uur (`ROTATION_HOURS`), niet dezelfde artiest binnen 4
+  nummers, langst niet gedraaid eerst.
+- **Jingle** – willekeurig uit een collectie.
+- **Vast nummer** – altijd hetzelfde bestand.
+
+De klok toont het uur als ring, met de geschatte starttijd van elk blok. In
+de **weekplanning** kies je per uur welke klok draait (klik of sleep). In de
+studio vult **◔ Plan uur** het volgende uur, of zet in Instellingen
+*Automatisch bijplannen* aan: dan wordt de playlist steeds aangevuld en draait
+het station 24/7 zelfstandig (AUTO moet aan staan).
+
 Sneltoetsen: spatie = start/volgende, N = volgende, P = pauze, F = fade,
 A = auto aan/uit.
 

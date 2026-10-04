@@ -128,6 +128,19 @@ button { font: inherit; color: inherit; }
 .pl-stop { font-size: 10px; color: var(--warn); letter-spacing: .1em; }
 .empty { color: var(--muted); padding: 24px 10px; text-align: center; }
 
+/* hour markers from the clock planner */
+.pl-marker {
+  display: grid; grid-template-columns: 62px 1fr auto; gap: 8px; align-items: center; padding: 5px 6px;
+  border-bottom: 1px solid var(--line); background: var(--panel2); cursor: grab; position: relative;
+  font-size: 11px; letter-spacing: .14em; text-transform: uppercase; font-weight: 700;
+  box-shadow: inset 3px 0 0 var(--mk, var(--accent));
+}
+.pl-marker .mk-label { color: var(--mk, var(--accent)); }
+.pl-marker.played { opacity: .38; }
+.pl-marker.drop-before::before { content: ""; position: absolute; left: 0; right: 0; top: -1px; height: 2px; background: var(--accent); }
+.pl-marker button { background: none; border: 1px solid var(--line); border-radius: 5px; width: 24px; height: 22px; cursor: pointer; padding: 0; opacity: 0; color: var(--text); }
+.pl-marker:hover button { opacity: 1; }
+
 /* library */
 .library-filters { display: grid; grid-template-columns: 160px 1fr; gap: 6px; margin-bottom: 6px; }
 input, select {

@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Uurklokken · Audio OnAir Turbo</title>
+<link rel="stylesheet" href="studio.css">
+<style>
+  body { overflow: auto; }
+  .klok-main { display: grid; grid-template-columns: 220px minmax(340px, 1fr) minmax(420px, 1.2fr); gap: 10px; padding: 10px; }
+  .clock-list button.item {
+    display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: none; border: 0;
+    padding: 8px; border-radius: 6px; cursor: pointer; color: var(--text);
+  }
+  .clock-list button.item.active { background: var(--panel2); font-weight: 700; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+  .ring-wrap { display: grid; place-items: center; padding: 10px 0; }
+  .ring-wrap svg { width: min(100%, 440px); height: auto; }
+  .ring-meta { display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap; margin-top: 6px; }
+  .ring-meta input[type=text] { width: 200px; }
+  .ring-meta input[type=color] { width: 44px; height: 34px; padding: 2px; }
+  .over { color: var(--warn); }
+  .slot-row { display: grid; grid-template-columns: 30px 22px 128px 1fr 54px 78px; gap: 6px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--line); }
+  .slot-row .num { color: var(--muted); font: 12px ui-monospace, Consolas, monospace; text-align: right; }
+  .slot-row input[type=color] { width: 22px; height: 22px; padding: 0; border: 0; background: none; }
+  .slot-row .len { font: 12px ui-monospace, Consolas, monospace; color: var(--muted); text-align: right; }
+  .slot-row .acts { display: flex; gap: 3px; justify-content: flex-end; }
+  .slot-row .acts button { background: var(--panel2); border: 1px solid var(--line); border-radius: 5px; width: 24px; height: 24px; cursor: pointer; padding: 0; }
+  .slot-row.hl { background: var(--panel2); }
+  .add-row { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+  .week { padding: 0 10px 10px; }
+  .week .panel { overflow-x: auto; }
+  .grid { display: grid; grid-template-columns: 34px repeat(24, minmax(26px, 1fr)); gap: 2px; user-select: none; min-width: 760px; }
+  .grid .h { font: 10px ui-monospace, Consolas, monospace; color: var(--muted); text-align: center; }
+  .grid .d { font-size: 12px; color: var(--muted); align-self: center; }
+  .cell { height: 30px; border-radius: 4px; background: var(--panel2); border: 1px solid var(--line); cursor: crosshair;
+    font-size: 10px; font-weight: 700; display: grid; place-items: center; color: #fff; overflow: hidden; text-shadow: 0 1px 2px rgba(0,0,0,.5); }
+  .cell.now { outline: 2px solid var(--text); outline-offset: -2px; }
+  .brush { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .brush button.b { display: flex; gap: 6px; align-items: center; background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; cursor: pointer; font-size: 12px; }
+  .brush button.b.sel { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .readonly .adminonly { display: none !important; }
+  @media (max-width: 1100px) { .klok-main { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header class="top" style="grid-template-columns:auto 1fr auto auto">
+  <div class="brand">
+    <div class="logo"><span class="logo-mark">◔</span><div><strong>AUDIO ONAIR</strong><em>UURKLOKKEN</em></div></div>
+    <div class="station" id="station-name"></div>
+  </div>
+  <div class="muted" id="msg"></div>
+  <div class="clock"><div id="clock-time">00:00:00</div><div id="clock-date" class="clock-date"></div></div>
+  <div class="top-actions">
+    <a class="icon-btn" href="/studio.html" title="Naar de studio">▶</a>
+    <a class="icon-btn" href="/" title="Bibliotheek beheren">☰</a>
+  </div>
+</header>
+
+<main class="klok-main" id="main">
+  <section class="panel clock-list">
+    <div class="panel-head"><h2>Klokken</h2></div>
+    <div id="clocks"></div>
+    <button class="mini adminonly" id="btn-new" style="margin-top:10px">+ Nieuwe klok</button>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>Opbouw van het uur</h2><span class="muted" id="total"></span></div>
+    <div class="ring-wrap" id="ring"></div>
+    <div class="ring-meta adminonly">
+      <input type="text" id="clock-name" placeholder="Naam van de klok">
+      <input type="color" id="clock-color" title="Kleur in de weekplanning">
+      <button class="mini" id="btn-delete">Verwijderen</button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>Blokken</h2><span class="muted">gevuld uit je database</span></div>
+    <div id="slots"></div>
+    <div class="add-row adminonly">
+      <button class="mini" data-add="muziek">+ Muziek</button>
+      <button class="mini" data-add="jingle">+ Jingle</button>
+      <button class="mini" data-add="vast">+ Vast nummer</button>
+    </div>
+    <p class="hint">
+      <b>Muziek</b>: willekeurig uit een collectie, met rotatie (niet hetzelfde nummer binnen een paar uur, niet dezelfde artiest kort na elkaar,
+      langst niet gedraaid eerst). <b>Jingle</b>: willekeurig uit een collectie. <b>Vast nummer</b>: altijd dit bestand.
+    </p>
+  </section>
+</main>
+
+<section class="week">
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Weekplanning</h2>
+      <div class="brush adminonly" id="brush"></div>
+    </div>
+    <div class="grid" id="grid"></div>
+    <p class="hint adminonly">Kies een klok en klik of sleep over de uren. Het lege penseel wist een uur.</p>
+  </div>
+</section>
+
+<script src="klok.js"></script>
+</body>
+</html>
