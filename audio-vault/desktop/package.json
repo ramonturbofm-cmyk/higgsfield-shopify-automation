@@ -1,0 +1,44 @@
+{
+  "name": "audio-onair-turbo",
+  "productName": "Audio OnAir Turbo",
+  "version": "1.0.0",
+  "description": "Audio OnAir Turbo — radio playout studio",
+  "author": "Turbo FM",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "^44.5.1",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "fm.turbo.audio-onair",
+    "productName": "Audio OnAir Turbo",
+    "copyright": "© 2026 Turbo FM",
+    "artifactName": "Audio-OnAir-Turbo-Setup-${version}.${ext}",
+    "files": ["main.js", "preload.js", "connect.html", "build/icon.png", "build/icon.svg"],
+    "directories": { "buildResources": "build", "output": "dist" },
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "build/icon.ico",
+      "legalTrademarks": "Audio OnAir Turbo"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerSidebar": "build/installerSidebar.bmp",
+      "uninstallerSidebar": "build/installerSidebar.bmp",
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "Audio OnAir Turbo",
+      "runAfterFinish": true
+    }
+  }
+}

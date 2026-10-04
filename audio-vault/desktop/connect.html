@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'self'">
+<title>Audio OnAir Turbo</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: radial-gradient(1200px 600px at 50% -10%, #2a0d08 0%, #000 60%); color: #f2f2f2;
+    font: 15px/1.4 "Segoe UI", system-ui, sans-serif; display: grid; place-items: center; user-select: none;
+  }
+  .box { width: 420px; text-align: center; }
+  img { width: 112px; height: 112px; filter: drop-shadow(0 10px 30px rgba(255, 60, 30, .35)); }
+  h1 { margin: 18px 0 0; font-size: 26px; letter-spacing: .14em; font-weight: 800; }
+  .turbo { color: #ff4a2a; font-weight: 800; letter-spacing: .5em; font-size: 15px; margin: 2px 0 34px .5em; }
+  label { display: block; text-align: left; color: #8a8a92; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; margin-bottom: 6px; }
+  input {
+    width: 100%; padding: 12px 14px; border-radius: 8px; border: 1px solid #2c2c31; background: #111114; color: #fff;
+    font: inherit; user-select: text;
+  }
+  input:focus { outline: none; border-color: #ff4a2a; }
+  button {
+    width: 100%; margin-top: 12px; padding: 12px; border: 0; border-radius: 8px; background: #ff3b30; color: #fff;
+    font: 700 14px "Segoe UI", system-ui, sans-serif; letter-spacing: .14em; cursor: pointer;
+  }
+  button:disabled { opacity: .6; cursor: default; }
+  .error { color: #ff9f0a; min-height: 1.4em; margin-top: 12px; font-size: 14px; }
+  .hint { color: #6b6b74; font-size: 12px; margin-top: 26px; line-height: 1.6; }
+  .version { position: fixed; bottom: 14px; left: 0; right: 0; text-align: center; color: #45454c; font-size: 11px; letter-spacing: .1em; }
+</style>
+</head>
+<body>
+<form class="box" id="form">
+  <img src="build/icon.svg" alt="">
+  <h1>AUDIO ONAIR</h1>
+  <div class="turbo">TURBO</div>
+  <label for="server">Adres van je server</label>
+  <input id="server" placeholder="bijv. radio.ramonturbofm.synology.me of localhost:3000" autocomplete="off" spellcheck="false" autofocus>
+  <button id="go">VERBINDEN</button>
+  <div class="error" id="error"></div>
+  <div class="hint">Dit adres krijg je van de beheerder van het station.<br>Daarna log je in met je eigen e-mail en wachtwoord.</div>
+</form>
+<div class="version" id="version"></div>
+<script>
+  const params = new URLSearchParams(location.search);
+  const error = document.getElementById('error');
+  const input = document.getElementById('server');
+  const button = document.getElementById('go');
+  error.textContent = params.get('error') || '';
+  window.onair.config().then((cfg) => {
+    input.value = cfg.server || 'localhost:3000';
+    document.getElementById('version').textContent = `VERSIE ${cfg.version}`;
+    input.select();
+  });
+  document.getElementById('form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    button.disabled = true; button.textContent = 'VERBINDEN…'; error.textContent = '';
+    const result = await window.onair.connect(input.value);
+    if (!result.ok) { error.textContent = result.error; button.disabled = false; button.textContent = 'VERBINDEN'; }
+  });
+</script>
+</body>
+</html>
