@@ -1,18 +1,12 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 const multer = require('multer');
-const mm = require('music-metadata');
 const auth = require('./auth');
 const lib = require('./library');
 const { createDavRouter } = require('./dav');
+const { AUDIO_TYPES, ingestFile } = require('./ingest');
 
-const AUDIO_TYPES = {
-  '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.flac': 'audio/flac', '.aac': 'audio/aac',
-  '.m4a': 'audio/mp4', '.ogg': 'audio/ogg', '.opus': 'audio/opus', '.aif': 'audio/aiff',
-  '.aiff': 'audio/aiff', '.wma': 'audio/x-ms-wma', '.mp2': 'audio/mpeg',
-};
 const INVITE_DAYS = 7;
 
 class HttpError extends Error {
@@ -25,6 +19,7 @@ function publicUser(u) {
   return {
     id: u.id, email: u.email, name: u.name, role: u.role, disabled: u.disabled,
     has_password: Boolean(u.password_hash), has_api_token: Boolean(u.api_token_hash),
+    can_download: lib.canDownload(u),
     invite_pending: Boolean(u.invite_token_hash), created_at: u.created_at,
   };
 }
@@ -51,6 +46,18 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
   app.set('trust proxy', 1);
   app.disable('x-powered-by');
   app.use(express.json({ limit: '1mb' }));
+  app.use((req, res, next) => {
+    res.set({
+      'X-Content-Type-Options': 'nosniff',
+      // Links contain personal tokens: never leak them to other sites.
+      'Referrer-Policy': 'no-referrer',
+      'Permissions-Policy': 'camera=(), geolocation=()',
+    });
+    // Only the public now-playing page may be embedded in another website.
+    if (!req.path.startsWith('/nu')) res.set('X-Frame-Options', 'DENY');
+    if (req.secure) res.set('Strict-Transport-Security', 'max-age=31536000');
+    next();
+  });
 
   const baseUrl = (req) => (publicUrl || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
 
@@ -181,6 +188,7 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
 
   // The personal token used by mAirList / other software. Shown once, stored hashed.
   app.post('/api/me/token', requireUser, wrap(async (req, res) => {
+    if (!lib.canDownload(req.user)) throw new HttpError(403, 'Je mag alleen afspelen in de studio; vraag de beheerder om koppel-rechten');
     const token = auth.randomToken();
     await pool.query('UPDATE users SET api_token_hash = $1 WHERE id = $2', [auth.sha256(token), req.user.id]);
     res.json({ token });
@@ -236,15 +244,16 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
 
   app.patch('/api/users/:id', requireUser, requireAdmin, wrap(async (req, res) => {
     const target = await loadTarget(req.params.id);
-    const { name, role, disabled } = req.body || {};
+    const { name, role, disabled, can_download: canDl } = req.body || {};
     if (role !== undefined && !['member', 'admin'].includes(role)) throw new HttpError(400, 'Ongeldige rol');
     assertCanManage(req.user, target, role);
     const { rows } = await pool.query(
       `UPDATE users SET name = COALESCE($1, name), role = COALESCE($2, role),
-              disabled = COALESCE($3, disabled),
+              disabled = COALESCE($3, disabled), can_download = COALESCE($5, can_download),
               session_version = session_version + CASE WHEN $3::boolean THEN 1 ELSE 0 END
         WHERE id = $4 RETURNING *`,
-      [name ?? null, role ?? null, typeof disabled === 'boolean' ? disabled : null, target.id]);
+      [name ?? null, role ?? null, typeof disabled === 'boolean' ? disabled : null, target.id,
+        typeof canDl === 'boolean' ? canDl : null]);
     res.json({ user: publicUser(rows[0]) });
   }));
 
@@ -368,21 +377,11 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
 
       // Original names arrive as latin1 from multer; restore UTF-8 (é, ü, ...).
       const originalName = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
-      const ext = path.extname(originalName).toLowerCase();
-      let meta = {};
-      try { meta = await mm.parseFile(tmp, { duration: true, skipCovers: true }); } catch { /* unreadable tags are fine */ }
-      const common = meta.common || {};
-      const title = String(req.body.title || common.title || path.basename(originalName, ext)).trim().slice(0, 300);
-      const artist = String(req.body.artist || common.artist || '').trim().slice(0, 300);
-      const tags = String(req.body.tags || '').split(',').map((t) => t.trim()).filter(Boolean);
-      const storageKey = `${crypto.randomUUID()}${ext}`;
-      fs.renameSync(tmp, path.join(filesDir, storageKey));
-
-      const { rows } = await pool.query(
-        `INSERT INTO audio_files (collection_id, title, artist, original_name, storage_key, mime_type, size_bytes, duration_seconds, tags, uploaded_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
-        [collectionId, title, artist, originalName, storageKey, AUDIO_TYPES[ext], req.file.size,
-          meta.format && meta.format.duration ? meta.format.duration : null, tags, req.user.id]);
+      const row = await ingestFile({
+        pool, filesDir, source: tmp, move: true, originalName, collectionId, userId: req.user.id,
+        overrides: { title: req.body.title, artist: req.body.artist, tags: req.body.tags },
+      });
+      const rows = [row];
       lib.logAccess(pool, req.user.id, rows[0].id, 'upload', 'web');
       res.status(201).json({ file: publicFile(rows[0]) });
     } finally {
@@ -432,6 +431,8 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
     const file = await lib.readableFile(pool, req.user, Number(req.params.id));
     if (!file) throw new HttpError(404, 'Bestand niet gevonden');
     const download = req.query.download === '1';
+    if (download && !lib.canDownload(req.user)) throw new HttpError(403, 'Downloaden is voor jou niet toegestaan');
+    res.set('Cache-Control', 'private, no-store');
     if (isFirstChunk(req)) lib.logAccess(pool, req.user.id, file.id, download ? 'download' : 'play', 'web');
     sendAudio(req, res, file, { download });
   }));
@@ -512,7 +513,7 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
 
   const tokenUser = wrap(async (req, res, next) => {
     const { rows } = await pool.query('SELECT * FROM users WHERE api_token_hash = $1 AND NOT disabled', [auth.sha256(req.params.token)]);
-    if (!rows.length) throw new HttpError(401, 'Ongeldige of ingetrokken token');
+    if (!rows.length || !lib.canDownload(rows[0])) throw new HttpError(401, 'Ongeldige of ingetrokken token');
     req.user = rows[0];
     next();
   });

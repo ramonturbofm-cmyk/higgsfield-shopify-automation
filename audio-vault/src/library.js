@@ -2,6 +2,8 @@
 const path = require('path');
 
 const isAdmin = (user) => user.role === 'owner' || user.role === 'admin';
+// Download, M3U links, WebDAV and API tokens hand out the files themselves.
+const canDownload = (user) => isAdmin(user) || user.can_download === true;
 
 async function listCollections(pool, user) {
   if (isAdmin(user)) {
@@ -57,4 +59,4 @@ async function logAccess(pool, userId, fileId, action, client) {
     [userId, fileId, action, (client || '').slice(0, 200)]).catch(() => {});
 }
 
-module.exports = { isAdmin, listCollections, collectionAccess, readableFile, safeName, fileName, fileIdFromName, logAccess };
+module.exports = { isAdmin, canDownload, listCollections, collectionAccess, readableFile, safeName, fileName, fileIdFromName, logAccess };

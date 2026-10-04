@@ -155,16 +155,19 @@ async function renderInvite(token) {
   $app.replaceChildren(h('div', { class: 'card narrow' }, h('h2', {}, `Hoi ${info.name}`),
     h('p', { class: 'muted' }, `Kies een wachtwoord voor ${info.email}.`),
     form([['password', 'Wachtwoord (min. 10 tekens)', 'password']], 'Opslaan en inloggen', async (v) => {
-      state.me = (await api('POST', `/api/invite/${encodeURIComponent(token)}`, v)).user;
-      history.replaceState(null, '', location.pathname); renderMain();
+      await api('POST', `/api/invite/${encodeURIComponent(token)}`, v);
+      // An invite link leads straight into the player.
+      location.replace('/studio.html');
     })));
 }
 
 // ---------- main shell ----------
 
 function renderMain() {
-  const tabs = [['library', 'Bibliotheek'], ['connect', 'Koppelen (mAirList)']];
+  const tabs = [['library', 'Bibliotheek']];
+  if (state.me.can_download) tabs.push(['connect', 'Koppelen (mAirList)']);
   if (isAdmin()) tabs.push(['users', 'Gebruikers'], ['activity', 'Activiteit']);
+  if (!tabs.some(([id]) => id === state.tab)) state.tab = 'library';
   const content = h('main');
   $app.replaceChildren(
     h('header', {}, h('h1', {}, 'Audio OnAir Turbo'),
@@ -229,7 +232,7 @@ async function renderLibrary(root) {
         h('td', { class: 'num' }, fmtDuration(f.duration_seconds)),
         h('td', { class: 'num' }, fmtSize(f.size_bytes)),
         h('td', { style: 'white-space:nowrap' },
-          h('a', { class: 'btn small', href: `/api/files/${f.id}/stream?download=1`, style: 'text-decoration:none;color:inherit;border:1px solid var(--line);border-radius:6px;padding:3px 9px;font-size:13px' }, 'Download'),
+          !state.me.can_download ? null : h('a', { class: 'btn small', href: `/api/files/${f.id}/stream?download=1`, style: 'text-decoration:none;color:inherit;border:1px solid var(--line);border-radius:6px;padding:3px 9px;font-size:13px' }, 'Download'),
           selected.can_upload ? [' ', h('button', { class: 'btn small', onclick: () => editFile(f) }, 'Bewerk'), ' ',
             h('button', { class: 'btn small danger', onclick: async () => {
               if (!confirm(`"${f.title}" verwijderen?`)) return;
@@ -347,12 +350,19 @@ async function renderUsers(root) {
     card.append(h('div', { class: 'row' },
       h('div', { class: 'grow' }, h('strong', {}, u.name), ' ', h('span', { class: 'muted' }, u.email), ' ',
         h('span', { class: 'chip' }, roleLabel[u.role]), ' ', h('span', { class: 'chip' }, status),
-        u.has_api_token ? [' ', h('span', { class: 'chip' }, 'gekoppeld')] : null),
+        u.has_api_token && u.can_download ? [' ', h('span', { class: 'chip' }, 'gekoppeld')] : null),
       u.role === 'owner' || (u.role === 'admin' && state.me.role !== 'owner') ? null : [
         h('button', { class: 'btn small', onclick: async () => { const { invite_url } = await api('POST', `/api/users/${u.id}/invite`); showInvite(u.name, invite_url); } }, 'Nieuwe inloglink'),
         h('button', { class: 'btn small', onclick: async () => { await api('PATCH', `/api/users/${u.id}`, { disabled: !u.disabled }); renderMain(); } }, u.disabled ? 'Deblokkeren' : 'Blokkeren'),
         h('button', { class: 'btn small danger', onclick: async () => { if (confirm(`${u.name} verwijderen?`)) { await api('DELETE', `/api/users/${u.id}`); renderMain(); } } }, 'Verwijderen')]));
-    if (u.role === 'member') card.append(accessEditor(u, collections));
+    if (u.role === 'member') {
+      const dl = h('input', { type: 'checkbox', checked: u.can_download, style: 'width:auto' });
+      dl.addEventListener('change', async () => { await api('PATCH', `/api/users/${u.id}`, { can_download: dl.checked }); renderMain(); });
+      card.append(h('label', { style: 'display:flex;gap:8px;align-items:center;color:var(--text);font-size:14px;margin-top:10px' }, dl,
+        'Mag downloaden en koppelen aan eigen software (mAirList, M3U, netwerkschijf)'),
+      h('p', { class: 'muted', style: 'margin:2px 0 0' }, u.can_download ? '' : 'Uit = alleen afspelen in de studio via deze website.'));
+      card.append(accessEditor(u, collections));
+    }
     else card.append(h('p', { class: 'muted', style: 'margin:6px 0 0' }, 'Heeft toegang tot alle collecties.'));
     root.append(card);
   }

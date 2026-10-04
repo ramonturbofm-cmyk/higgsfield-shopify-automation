@@ -79,3 +79,11 @@ CREATE TABLE IF NOT EXISTS now_playing (
   started_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
   started_by       INTEGER REFERENCES users(id) ON DELETE SET NULL
 );
+
+-- Members may only play inside the studio unless they get this right (download,
+-- M3U links, WebDAV drive, own software such as mAirList). Owners/admins always may.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS can_download BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Where a bulk-imported file came from, so re-running the import skips it.
+ALTER TABLE audio_files ADD COLUMN IF NOT EXISTS source_path TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS audio_files_source_path_idx ON audio_files (source_path) WHERE source_path IS NOT NULL;

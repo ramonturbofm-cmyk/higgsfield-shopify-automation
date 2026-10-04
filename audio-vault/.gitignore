@@ -1,3 +1,6 @@
 node_modules/
 storage/
 .env
+data/
+.env.*
+!.env.example

@@ -3,7 +3,7 @@
 const express = require('express');
 const path = require('path');
 const { sha256 } = require('./auth');
-const { listCollections, collectionAccess, readableFile, fileName, fileIdFromName, logAccess } = require('./library');
+const { canDownload, listCollections, collectionAccess, readableFile, fileName, fileIdFromName, logAccess } = require('./library');
 
 const esc = (s) => String(s).replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]));
 const href = (...segments) => '/dav/' + segments.map(encodeURIComponent).join('/');
@@ -32,7 +32,7 @@ function createDavRouter({ pool, filesDir }) {
     const token = decoded.slice(decoded.indexOf(':') + 1);
     if (token) {
       const { rows } = await pool.query('SELECT * FROM users WHERE api_token_hash = $1 AND NOT disabled', [sha256(token)]);
-      if (rows.length) { req.user = rows[0]; return next(); }
+      if (rows.length && canDownload(rows[0])) { req.user = rows[0]; return next(); }
     }
     res.set('WWW-Authenticate', 'Basic realm="Audio Vault", charset="UTF-8"').status(401).send('Login met je e-mail en API-token');
   });

@@ -1,0 +1,35 @@
+# Audio OnAir Turbo on a Synology (Container Manager → Project) or any Docker host.
+# Fill in the values in a file called .env next to this file (see docker.env.example).
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: onair
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?zet DB_PASSWORD in .env}
+      POSTGRES_DB: onair
+    volumes:
+      - ./data/db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U onair"]
+      interval: 5s
+      retries: 20
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://onair:${DB_PASSWORD}@db:5432/onair
+      DATABASE_SSL: "false"
+      SESSION_SECRET: ${SESSION_SECRET:?zet SESSION_SECRET in .env}
+      PUBLIC_URL: ${PUBLIC_URL:-}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-1000}
+    volumes:
+      - ./data/audio:/data
+      # Your existing music folder, read-only, for `npm run import`.
+      - ${MUSIC_DIR:-./import}:/import:ro
+    ports:
+      - "${PORT:-3000}:3000"

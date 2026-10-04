@@ -73,7 +73,55 @@ Tip: houd de studio in een eigen browservenster open. Instellingen, playlist en
 jingle paneel worden per gebruiker op de server bewaard; de keuze van
 geluidskaarten per computer.
 
-## Online zetten op Render (aanbevolen)
+## Op je Synology draaien (aanbevolen voor een grote muziekbibliotheek)
+
+Werkt op een Synology met Container Manager (meestal de "+"-modellen, liefst
+4 GB RAM of meer). Je muziek blijft op de NAS; de server leest hem alleen.
+
+1. Maak een map, bijv. `/volume1/docker/audio-onair`, en zet de inhoud van
+   `audio-vault/` daarin.
+2. Kopieer `docker.env.example` naar `.env` en vul in: wachtwoorden,
+   `MUSIC_DIR` (bijv. `/volume1/music`) en later `PUBLIC_URL`.
+3. Container Manager → **Project → Maken** → kies die map (hij vindt
+   `docker-compose.yml`) → bouwen en starten. Daarna draait hij op poort 3000.
+4. Bestaande muziek importeren (WAV wordt FLAC, originelen blijven staan):
+
+   ```bash
+   docker compose exec -u node app node src/import.js /import --per-folder
+   ```
+
+   `--per-folder`: elke hoofdmap (bijv. `Jingles`, `Muziek`) wordt een collectie.
+   Opnieuw draaien slaat al geïmporteerde bestanden over.
+5. Bereikbaar maken voor anderen, veilig via https:
+   DSM → Configuratiescherm → **Aanmeldingsportal → Geavanceerd → Reverse
+   proxy**: `https://radio.jouwdomein.nl` → `http://localhost:3000`, en een
+   gratis Let's Encrypt-certificaat via **Beveiliging → Certificaat**. Zet
+   poort 443 door in je router. Zet poort 3000 zelf **niet** open naar internet.
+
+## WAV of FLAC?
+
+FLAC. Het is verliesvrij (bit-voor-bit dezelfde audio als de WAV), ongeveer
+40–50% kleiner, en titel/artiest worden betrouwbaar in het bestand bewaard.
+Alle moderne browsers en mAirList spelen FLAC af. Uploads en de import zetten
+WAV/AIFF daarom automatisch om (uit te zetten met `CONVERT_TO_FLAC=false`).
+Lukt de omzetting niet (bijv. 32-bit float WAV), dan wordt het origineel bewaard.
+
+## Beveiliging
+
+- Alles via https; wachtwoorden worden gehasht (scrypt) opgeslagen.
+- Mensen komen alleen binnen via een persoonlijke uitnodigingslink (7 dagen
+  geldig) en zien alleen de collecties die je aanvinkt.
+- Standaard mag een lid **alleen afspelen in de studio**. Downloaden,
+  M3U-links, de netwerkschijf en koppelen aan eigen software (mAirList) staan
+  uit tot je per persoon *Mag downloaden en koppelen* aanvinkt.
+- Blokkeren werkt meteen: sessie en koppelingen stoppen direct.
+- In *Activiteit* zie je wie wat heeft afgespeeld.
+
+Eerlijk is eerlijk: wat iemand in zijn browser hoort, kan hij met moeite altijd
+opnemen. Geen enkel systeem voorkomt dat volledig; deze opzet maakt het
+kopiëren lastig en laat zien wie wat gebruikt.
+
+## Online zetten op Render (alternatief)
 
 1. Render → **New → Blueprint** → kies deze repository en zet *Blueprint path*
    op `audio-vault/render.yaml`.

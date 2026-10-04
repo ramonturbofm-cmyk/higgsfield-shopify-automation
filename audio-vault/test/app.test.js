@@ -76,6 +76,9 @@ test('full flow: owner, upload, invite member, permissions, mAirList links, WebD
   const file = up.data.file;
   assert.equal(file.title, 'Station ID é');
   assert.equal(file.duration_seconds, 1);
+  // WAV is stored as lossless FLAC (ffmpeg is available in the test environment).
+  assert.equal(file.mime_type, 'audio/flac');
+  assert.match(file.file_name, /\.flac$/);
 
   const bad = new FormData();
   bad.append('collection_id', String(jingles.id));
@@ -114,6 +117,14 @@ test('full flow: owner, upload, invite member, permissions, mAirList links, WebD
   const ranged = await fetch(`${base}/api/files/${file.id}/stream`, { headers: { cookie: '' } });
   assert.equal(ranged.status, 401);
 
+  // Members may only play in the studio until they get download/link rights.
+  assert.equal((await sam('GET', `/api/files/${file.id}/stream`)).status, 200);
+  assert.equal((await sam('GET', `/api/files/${file.id}/stream?download=1`)).status, 403);
+  assert.equal((await sam('POST', '/api/me/token')).status, 403);
+  assert.equal((await sam('GET', '/api/me')).data.user.can_download, false);
+  assert.equal((await owner('PATCH', `/api/users/${samId}`, { can_download: true })).status, 200);
+  assert.equal((await sam('GET', `/api/files/${file.id}/stream?download=1`)).status, 200);
+
   // mAirList / other software via personal token.
   const token = (await sam('POST', '/api/me/token')).data.token;
   const m3u = await sam('GET', `/m/${token}/collections/${jingles.id}.m3u8`);
@@ -141,12 +152,19 @@ test('full flow: owner, upload, invite member, permissions, mAirList links, WebD
   assert.doesNotMatch(rootXml, /Muziek/);
   const folder = await (await fetch(`${base}/dav/Jingles/`, { method: 'PROPFIND', headers: { ...basic, depth: '1' } })).text();
   const fileHref = /<D:href>(\/dav\/Jingles\/[^<]+)<\/D:href>/.exec(folder)[1];
-  assert.match(decodeURIComponent(fileHref), /Turbo FM - Station ID é \[\d+\]\.wav$/);
+  assert.match(decodeURIComponent(fileHref), /Turbo FM - Station ID é \[\d+\]\.flac$/);
   const got = await fetch(base + fileHref, { headers: basic });
   assert.equal(got.status, 200);
-  assert.equal((await got.arrayBuffer()).byteLength, wav().length);
+  assert.equal((await got.arrayBuffer()).byteLength, file.size_bytes);
+  assert.equal(got.headers.get('referrer-policy'), 'no-referrer');
   assert.equal((await fetch(`${base}/dav/Muziek/`, { method: 'PROPFIND', headers: basic })).status, 404);
   assert.equal((await fetch(base + fileHref, { method: 'DELETE', headers: basic })).status, 405);
+
+  // Taking the right away again closes the token and WebDAV routes at once.
+  await owner('PATCH', `/api/users/${samId}`, { can_download: false });
+  assert.equal((await fetch(streamUrl)).status, 401);
+  assert.equal((await fetch(`${base}/dav/`, { method: 'PROPFIND', headers: basic })).status, 401);
+  await owner('PATCH', `/api/users/${samId}`, { can_download: true });
 
   // Activity log saw the stream.
   const activity = (await owner('GET', '/api/activity')).data.activity.map((a) => a.action);
@@ -187,4 +205,28 @@ test('full flow: owner, upload, invite member, permissions, mAirList links, WebD
   await new Promise((r) => setTimeout(r, 50));
   assert.deepEqual(fs.readdirSync(path.join(storageDir, 'files')), []);
   assert.equal((await owner('DELETE', `/api/collections/${jingles.id}`)).status, 200);
+});
+
+test('bulk import converts WAV to FLAC, makes collections per folder and skips known files', { skip: !DB && 'TEST_DATABASE_URL not set' }, async () => {
+  const { execFileSync } = require('child_process');
+  const src = fs.mkdtempSync(path.join(os.tmpdir(), 'import-'));
+  fs.mkdirSync(path.join(src, 'Reclames'));
+  fs.mkdirSync(path.join(src, '@eaDir'));
+  fs.writeFileSync(path.join(src, 'Reclames', 'Bakker Jansen.wav'), wav());
+  fs.writeFileSync(path.join(src, '@eaDir', 'thumb.wav'), wav());
+  fs.writeFileSync(path.join(src, 'los nummer.wav'), wav());
+  fs.writeFileSync(path.join(src, 'notes.txt'), 'geen audio');
+  const env = { ...process.env, DATABASE_URL: DB, STORAGE_DIR: storageDir };
+  const run = () => execFileSync(process.execPath, [path.join(__dirname, '..', 'src', 'import.js'), src, '--per-folder', '--collection', 'Import'], { env }).toString();
+  assert.match(run(), /Klaar: 2 geïmporteerd, 0 mislukt/);
+  assert.match(run(), /Klaar: 0 geïmporteerd/);
+  const { rows } = await pool.query(
+    `SELECT f.title, f.mime_type, c.name FROM audio_files f JOIN collections c ON c.id = f.collection_id WHERE f.source_path IS NOT NULL ORDER BY f.title`);
+  assert.deepEqual(rows.map((r) => [r.title, r.mime_type, r.name]), [
+    ['Bakker Jansen', 'audio/flac', 'Reclames'],
+    ['los nummer', 'audio/flac', 'Import'],
+  ]);
+  // The source folder is left untouched.
+  assert.ok(fs.existsSync(path.join(src, 'Reclames', 'Bakker Jansen.wav')));
+  fs.rmSync(src, { recursive: true, force: true });
 });
