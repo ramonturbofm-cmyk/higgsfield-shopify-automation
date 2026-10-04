@@ -3,6 +3,8 @@ const $ = (id) => document.getElementById(id);
 const api = window.onair.server;
 let last = null;
 
+const gb = (bytes) => (bytes >= 1e12 ? `${(bytes / 1e12).toFixed(1)} TB` : `${Math.round(bytes / 1e9)} GB`);
+
 function setDot(id, state) { $(id).className = `dot ${state}`; }
 
 function log(text) {
@@ -39,7 +41,7 @@ async function refresh() {
   const b = c('backup');
   setDot('dot-backup', s.lastBackup && /MISLUKT/.test(s.lastBackup) ? 'bad' : s.lastBackup ? 'ok' : b && b.state === 'running' ? 'warn' : '');
   $('txt-backup').textContent = s.lastBackup ? s.lastBackup.replace(/^(\S+ \S+) /, '$1 · ') : b && b.state === 'running' ? 'Nog geen back-up' : 'Niet actief';
-  $('txt-dir').textContent = s.dir;
+  $('txt-dir').textContent = s.freeBytes != null ? `${s.dir} (nog ${gb(s.freeBytes)} vrij)` : s.dir;
 
   if (s.docker === 'missing') banner('Docker Desktop is nodig om de server te draaien.', 'Docker Desktop installeren', () => api.installDocker().then(refresh));
   else if (s.docker === 'stopped') banner('Docker Desktop is niet gestart.', 'Docker Desktop starten', async () => { await api.startDocker(); log('Docker Desktop wordt gestart, dit duurt ongeveer een minuut…\n'); });
@@ -191,6 +193,7 @@ function renderWizard(s) {
       el('div', { class: 'nav' }, el('button', { onclick: () => go(2) }, '← Terug'), el('button', { class: 'primary big', onclick: () => {
         const v = wizard.values;
         if (wizard.backup === 'nas' && !(v.nasHost && v.backupShare && v.backupUser && v.backupPassword)) { $('wiz-error').textContent = 'Vul alles in (of kies "Op deze pc").'; return; }
+        api.freeSpace(wizard.values.dir || last.dir).then((f) => { wizard.free = f; renderWizard(last); });
         go(4);
       } }, 'Volgende →')),
     ];
@@ -205,7 +208,13 @@ function renderWizard(s) {
           el('button', { class: 'primary big', onclick: () => api.openStudio() }, '▶ Open de studio'), ' ',
           el('button', { class: 'big', onclick: () => { wizard.finished = false; refresh(); } }, 'Naar Server beheren'))
         : el('div', {},
-          el('div', { class: 'row' }, el('span', { class: 'label' }, 'Map op deze pc'), el('span', {}, s.dir)),
+          el('div', { class: 'row' }, el('span', { class: 'label' }, 'Map op deze pc'),
+            el('span', { style: 'flex:1' }, wizard.values.dir || s.dir, el('br'),
+              el('span', { class: 'hint' }, wizard.free != null ? `Nog ${gb(wizard.free)} vrij op deze schijf — hier komen de database en al je muziek (FLAC).` : '')),
+            el('button', { class: 'small', disabled: wizard.running, onclick: async () => {
+              const d = await api.chooseFolder('server');
+              if (d) { wizard.values.dir = /audioonair$/i.test(d) ? d : `${d.replace(/[\\/]+$/, '')}${d.includes('\\') ? '\\' : '/'}AudioOnAir`; wizard.free = await api.freeSpace(wizard.values.dir); renderWizard(last); }
+            } }, 'Andere schijf…')),
           el('div', { class: 'row' }, el('span', { class: 'label' }, 'Muziek'), el('span', {}, musicText)),
           el('div', { class: 'row' }, el('span', { class: 'label' }, 'Back-up'), el('span', {}, wizard.backup === 'nas' ? `Synology → map "${v.backupShare}"` : 'op deze pc')),
           el('p', { class: 'hint' }, 'De eerste keer duurt het een paar minuten; het inlezen van een grote muziekbibliotheek kan langer duren. Je kunt meekijken in het logboek hieronder.'),
@@ -236,6 +245,7 @@ async function install() {
       nasShare: wizard.music === 'nas' ? v.nasShare : '', nasUser: wizard.music === 'nas' ? v.nasUser : '', nasPassword: wizard.music === 'nas' ? v.nasPassword : '',
       backupShare: wizard.backup === 'nas' ? v.backupShare : '', backupUser: wizard.backup === 'nas' ? v.backupUser : '', backupPassword: wizard.backup === 'nas' ? v.backupPassword : '',
     };
+    if (v.dir) settings.dir = v.dir;
     const saved = await api.saveSettings(settings);
     if (!saved.ok) throw new Error(saved.error);
     log('Instellingen opgeslagen.\n');

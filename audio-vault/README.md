@@ -204,6 +204,15 @@ de pc 's nachts uit, dan gebeurt het gewoon zodra hij weer aan is.
   om bevestiging, zet database en ontbrekende muziek terug).
 - In `backup.log` in de backupmap zie je wanneer de laatste backup gelukt is.
 
+## Opslag
+
+Reken voor FLAC op ± 6 MB per minuut (± 25 MB per nummer van 4 minuten; 10.000
+nummers ≈ 250 GB). Advies voor een eigen server-pc: SSD 1 (1 TB NVMe) voor
+Windows, Docker en de database, en SSD 2 (2–4 TB) voor de muziek. Kies in de
+installatiehulp bij stap 4 met **Andere schijf…** de muziekschijf (bijv.
+`D:\AudioOnAir`); de app toont hoeveel ruimte er vrij is. De back-up op de NAS
+heeft minstens evenveel vrije ruimte nodig als je FLAC-bibliotheek.
+
 ## WAV of FLAC?
 
 FLAC. Het is verliesvrij (bit-voor-bit dezelfde audio als de WAV), ongeveer

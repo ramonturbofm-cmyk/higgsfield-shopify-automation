@@ -101,13 +101,20 @@ function createServerManager({ sourceDir, version, onLog, dir }) {
     return r.code === 0 && r.stdout.trim() ? 'running' : 'stopped';
   }
 
+  // Free space on the drive of a folder (walks up to the nearest existing folder).
+  function freeBytes(dir) {
+    let p = dir;
+    while (p && !fs.existsSync(p)) { const up = path.dirname(p); if (up === p) break; p = up; }
+    try { const st = fs.statfsSync(p); return st.bavail * st.bsize; } catch { return null; }
+  }
+
   // ---------- status ----------
 
   async function status() {
     const docker = await dockerState();
     const env = readEnv();
     const result = {
-      dir: serverDir, installed: installed(), outdated: installed() && filesOutdated(), docker, containers: [], web: false, lastBackup: null, busy,
+      dir: serverDir, freeBytes: freeBytes(serverDir), installed: installed(), outdated: installed() && filesOutdated(), docker, containers: [], web: false, lastBackup: null, busy,
       port: Number(env.PORT || 3000),
       settings: {
         musicDir: env.MUSIC_DIR && env.MUSIC_DIR !== './import' ? env.MUSIC_DIR : '',
@@ -237,7 +244,7 @@ function createServerManager({ sourceDir, version, onLog, dir }) {
   }
 
   return {
-    status, saveSettings, listBackups, startDocker, installDocker,
+    status, saveSettings, listBackups, startDocker, installDocker, freeBytes,
     get outdated() { return installed() && filesOutdated(); },
     run: (name, arg) => { if (!actions[name]) throw new Error('Onbekende actie'); return actions[name](arg); },
     get dir() { return serverDir; },

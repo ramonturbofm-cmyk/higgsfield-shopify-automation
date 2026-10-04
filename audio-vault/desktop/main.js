@@ -197,6 +197,7 @@ ipcMain.handle('server', async (e, method, ...args) => {
       case 'listBackups': return await manager.listBackups();
       case 'startDocker': return manager.startDocker();
       case 'installDocker': return { ok: true, code: await manager.installDocker() };
+      case 'freeSpace': return manager.freeBytes(String(args[0] || ''));
       case 'getAutostart': return app.getLoginItemSettings().openAtLogin;
       case 'setAutostart': app.setLoginItemSettings({ openAtLogin: Boolean(args[0]) }); return app.getLoginItemSettings().openAtLogin;
       case 'openDockerDownload': return shell.openExternal('https://www.docker.com/products/docker-desktop/');
