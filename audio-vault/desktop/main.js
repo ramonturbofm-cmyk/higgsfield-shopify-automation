@@ -3,6 +3,7 @@
 // and asks before closing while something is on air.
 const { app, BrowserWindow, Menu, dialog, ipcMain, net, powerSaveBlocker, session, shell } = require('electron');
 const fs = require('fs');
+const { createServerManager } = require('./server-manager');
 const path = require('path');
 
 const ICON = path.join(__dirname, 'build', 'icon.png');
@@ -34,6 +35,11 @@ function normaliseUrl(input) {
 
 let win = null;
 let serverOrigin = null;
+let manager = null;
+
+function showServer() {
+  win.loadFile(path.join(__dirname, 'server.html'));
+}
 
 function showConnect(error) {
   win.loadFile(path.join(__dirname, 'connect.html'), { query: error ? { error } : {} });
@@ -60,6 +66,7 @@ function buildMenu() {
         { label: 'Bibliotheek en gebruikers', accelerator: 'CmdOrCtrl+3', click: go('/') },
         { label: 'Nu op de radio', accelerator: 'CmdOrCtrl+4', click: go('/nu.html') },
         { type: 'separator' },
+        { label: 'Server beheren (deze pc)…', accelerator: 'CmdOrCtrl+5', click: () => showServer() },
         { label: 'Andere server kiezen…', click: () => showConnect() },
         { type: 'separator' },
         { role: 'quit', label: 'Afsluiten' },
@@ -140,6 +147,13 @@ function createWindow() {
     const onAir = await win.webContents
       .executeJavaScript('typeof S !== "undefined" && !!S.live && S.live.state === "playing"', true)
       .catch(() => false);
+    if (!onAir && manager && manager.busy) {
+      const { response } = await dialog.showMessageBox(win, {
+        type: 'warning', icon: ICON, buttons: ['Blijven', 'Toch afsluiten'], defaultId: 0, cancelId: 0,
+        title: 'Nog bezig', message: `"${manager.busy}" is nog bezig.`, detail: 'Wacht tot het klaar is voordat je afsluit.',
+      });
+      if (response !== 1) return;
+    }
     if (onAir) {
       const { response } = await dialog.showMessageBox(win, {
         type: 'warning', icon: ICON, buttons: ['Blijven', 'Toch afsluiten'], defaultId: 0, cancelId: 0,
@@ -159,6 +173,43 @@ function createWindow() {
     showConnect();
   }
 }
+
+ipcMain.handle('open-server', () => showServer());
+
+// Everything the "Server beheren" screen can ask for.
+ipcMain.handle('server', async (e, method, ...args) => {
+  try {
+    switch (method) {
+      case 'status': return await manager.status();
+      case 'saveSettings': {
+        const res = manager.saveSettings(args[0] || {});
+        writeConfig({ serverDir: res.dir });
+        return res;
+      }
+      case 'chooseFolder': {
+        const r = await dialog.showOpenDialog(win, {
+          title: args[0] === 'music' ? 'Map met muziek kiezen' : 'Map voor de server kiezen',
+          properties: ['openDirectory', 'createDirectory'],
+        });
+        return r.canceled ? null : r.filePaths[0];
+      }
+      case 'run': return { ok: true, code: await manager.run(args[0], args[1]) };
+      case 'listBackups': return await manager.listBackups();
+      case 'startDocker': return manager.startDocker();
+      case 'openDockerDownload': return shell.openExternal('https://www.docker.com/products/docker-desktop/');
+      case 'openStudio': {
+        const { port } = await manager.status();
+        serverOrigin = `http://localhost:${port}`;
+        writeConfig({ server: serverOrigin });
+        openStudio();
+        return { ok: true };
+      }
+      default: throw new Error('Onbekend verzoek');
+    }
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
 
 ipcMain.handle('config', () => ({ server: readConfig().server || '', version: app.getVersion() }));
 ipcMain.handle('connect', async (e, input) => {
@@ -180,6 +231,12 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
   app.whenReady().then(() => {
     powerSaveBlocker.start('prevent-app-suspension');
+    manager = createServerManager({
+      sourceDir: app.isPackaged ? path.join(process.resourcesPath, 'server') : path.join(__dirname, '..'),
+      version: app.getVersion(),
+      dir: readConfig().serverDir,
+      onLog: (text) => { if (win && !win.isDestroyed()) win.webContents.send('server-log', text); },
+    });
     buildMenu();
     createWindow();
   });

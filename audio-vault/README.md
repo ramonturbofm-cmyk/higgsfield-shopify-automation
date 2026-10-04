@@ -136,6 +136,20 @@ installatieprogramma, snelkoppeling op het bureaublad en in het startmenu.
   Nu op de radio (Ctrl+4), volledig scherm, andere server kiezen.
 - Links naar andere websites openen in je gewone browser.
 
+**Server beheren vanuit de app** (menu → *Server beheren*, Ctrl+5, of de link
+op het startscherm): op de pc die de server is, regelt de app alles zelf via
+Docker Desktop, zonder `.bat`-bestanden:
+
+- eenmalig instellen: map op de pc (standaard `C:\AudioOnAir`), muziek op de
+  NAS of in een map, back-up naar de NAS;
+- knoppen: **Server starten**, **Stoppen**, **Muziek importeren**,
+  **Back-up maken**, **Back-up terugzetten**;
+- status van Docker, database, website en de laatste back-up, met logboek.
+
+Na een update van de app klik je op *Herstarten / bijwerken*; de nieuwe
+serverversie wordt dan geïnstalleerd (database, muziek en `.env` blijven).
+De `.bat`-bestanden werken nog steeds, voor wie liever zonder app werkt.
+
 **Installatieprogramma maken**: bij elke wijziging in `desktop/` bouwt GitHub
 het automatisch op een Windows-machine (Actions → *Audio OnAir Turbo – Windows
 installer* → onderaan *Artifacts*). Zelf bouwen op een Windows-pc:

@@ -28,6 +28,8 @@
   button:disabled { opacity: .6; cursor: default; }
   .error { color: #ff9f0a; min-height: 1.4em; margin-top: 12px; font-size: 14px; }
   .hint { color: #6b6b74; font-size: 12px; margin-top: 26px; line-height: 1.6; }
+  .server-link { display: inline-block; margin-top: 18px; color: #ff6a4d; font-size: 13px; text-decoration: none; }
+  .server-link:hover { text-decoration: underline; }
   .version { position: fixed; bottom: 14px; left: 0; right: 0; text-align: center; color: #45454c; font-size: 11px; letter-spacing: .1em; }
 </style>
 </head>
@@ -41,6 +43,7 @@
   <button id="go">VERBINDEN</button>
   <div class="error" id="error"></div>
   <div class="hint">Dit adres krijg je van de beheerder van het station.<br>Daarna log je in met je eigen e-mail en wachtwoord.</div>
+  <a href="#" class="server-link" id="server-link">Is deze pc de server? Server beheren →</a>
 </form>
 <div class="version" id="version"></div>
 <script>
@@ -54,6 +57,7 @@
     document.getElementById('version').textContent = `VERSIE ${cfg.version}`;
     input.select();
   });
+  document.getElementById('server-link').addEventListener('click', (e) => { e.preventDefault(); window.onair.openServer(); });
   document.getElementById('form').addEventListener('submit', async (e) => {
     e.preventDefault();
     button.disabled = true; button.textContent = 'VERBINDEN…'; error.textContent = '';

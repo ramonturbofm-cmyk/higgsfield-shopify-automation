@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self'">
+<title>Server beheren · Audio OnAir Turbo</title>
+<style>
+  :root { --bg: #000; --panel: #0e0e10; --panel2: #18181b; --line: #26262b; --text: #f2f2f2; --muted: #8a8a92; --accent: #ff3b30; --ok: #30d158; --warn: #ff9f0a; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 "Segoe UI", system-ui, sans-serif; }
+  header { display: flex; align-items: center; gap: 14px; padding: 14px 22px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header img { width: 40px; height: 40px; }
+  header h1 { margin: 0; font-size: 15px; letter-spacing: .14em; }
+  header .sub { color: var(--accent); font-weight: 800; letter-spacing: .3em; font-size: 11px; }
+  header .grow { flex: 1; }
+  main { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; max-width: 1400px; margin: 0 auto; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
+  .panel.wide { grid-column: 1 / -1; }
+  h2 { margin: 0 0 12px; font-size: 12px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
+  h3 { margin: 18px 0 4px; font-size: 13px; }
+  .row { display: flex; gap: 10px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--line); }
+  .row:last-child { border-bottom: 0; }
+  .row .label { width: 150px; color: var(--muted); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.ok { background: var(--ok); box-shadow: 0 0 8px var(--ok); } .dot.bad { background: var(--accent); } .dot.warn { background: var(--warn); }
+  .buttons { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
+  button { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .4; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+  button.small { padding: 5px 10px; font-size: 12px; }
+  label { display: block; color: var(--muted); font-size: 12px; margin: 10px 0 4px; }
+  input, select { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel2); color: var(--text); font: inherit; }
+  input:focus { outline: none; border-color: var(--accent); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+  .hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+  .error { color: var(--warn); min-height: 1.3em; margin-top: 8px; }
+  pre { margin: 0; background: #050505; border: 1px solid var(--line); border-radius: 8px; padding: 12px; height: 230px; overflow: auto;
+    font: 12px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace; color: #c9c9cf; white-space: pre-wrap; word-break: break-word; }
+  .pick { display: flex; gap: 6px; }
+  .pick input { flex: 1; }
+  dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 12px; width: 460px; }
+  dialog::backdrop { background: rgba(0,0,0,.7); }
+  .banner { grid-column: 1 / -1; border: 1px solid var(--warn); color: var(--warn); border-radius: 10px; padding: 12px 16px; display: none; gap: 12px; align-items: center; }
+  .banner.show { display: flex; }
+  .banner span { flex: 1; }
+</style>
+</head>
+<body>
+<header>
+  <img src="build/icon.svg" alt="">
+  <div><h1>SERVER BEHEREN</h1><div class="sub">AUDIO ONAIR TURBO</div></div>
+  <div class="grow"></div>
+  <button id="btn-studio" class="primary">▶ Naar de studio</button>
+</header>
+
+<main>
+  <div class="banner" id="banner"><span id="banner-text"></span><button class="small" id="banner-btn"></button></div>
+
+  <section class="panel">
+    <h2>Status</h2>
+    <div class="row"><span class="dot" id="dot-docker"></span><span class="label">Docker Desktop</span><span id="txt-docker">…</span></div>
+    <div class="row"><span class="dot" id="dot-db"></span><span class="label">Database</span><span id="txt-db">…</span></div>
+    <div class="row"><span class="dot" id="dot-app"></span><span class="label">Server / website</span><span id="txt-app">…</span></div>
+    <div class="row"><span class="dot" id="dot-backup"></span><span class="label">Back-up</span><span id="txt-backup">…</span></div>
+    <div class="row"><span class="dot"></span><span class="label">Map op deze pc</span><span id="txt-dir">…</span></div>
+    <div class="buttons">
+      <button class="primary" data-run="start">Server starten</button>
+      <button data-run="stop">Server stoppen</button>
+      <button data-run="import">Muziek importeren</button>
+      <button data-run="backup">Back-up maken</button>
+      <button id="btn-restore">Back-up terugzetten</button>
+      <button id="btn-refresh">Vernieuwen</button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Instellingen</h2>
+    <form id="settings">
+      <div id="dir-wrap">
+        <label>Map voor server, database en muziek op deze pc</label>
+        <div class="pick"><input id="dir" readonly><button type="button" class="small" id="pick-dir">Kiezen…</button></div>
+      </div>
+      <h3>Muziek op de Synology</h3>
+      <div class="grid2">
+        <div><label>IP-adres van de NAS</label><input id="nasHost" placeholder="192.168.1.20"></div>
+        <div><label>Gedeelde map met muziek</label><input id="nasShare" placeholder="music"></div>
+        <div><label>NAS-gebruiker (alleen lezen)</label><input id="nasUser" placeholder="onair-lezen"></div>
+        <div><label>Wachtwoord</label><input id="nasPassword" type="password" autocomplete="new-password"></div>
+      </div>
+      <p class="hint">Of muziek uit een map op deze pc (laat de NAS-velden dan leeg):</p>
+      <div class="pick"><input id="musicDir" readonly placeholder="geen map gekozen"><button type="button" class="small" id="pick-music">Kiezen…</button></div>
+      <h3>Back-up naar de Synology</h3>
+      <div class="grid2">
+        <div><label>Gedeelde map voor back-ups</label><input id="backupShare" placeholder="backup"></div>
+        <div><label>NAS-gebruiker (schrijven)</label><input id="backupUser" placeholder="onair-backup"></div>
+        <div><label>Wachtwoord</label><input id="backupPassword" type="password" autocomplete="new-password"></div>
+        <div><label>Openbaar adres (optioneel)</label><input id="publicUrl" placeholder="https://radio.ramonturbofm.synology.me"></div>
+      </div>
+      <p class="hint">Leeg = back-up in de servermap op deze pc. Wachtwoordvelden leeg laten = huidige wachtwoord houden.</p>
+      <div style="margin-top:14px;display:flex;gap:10px;align-items:center">
+        <button class="primary" type="submit">Opslaan</button><span class="hint" id="saved"></span>
+      </div>
+      <div class="error" id="error"></div>
+    </form>
+  </section>
+
+  <section class="panel wide">
+    <h2>Logboek</h2>
+    <pre id="log">Klaar.</pre>
+  </section>
+</main>
+
+<dialog id="restore-dialog">
+  <h2 style="margin-top:4px">Back-up terugzetten</h2>
+  <label>Kies een back-up</label>
+  <select id="restore-list"></select>
+  <p class="hint">De huidige database wordt vervangen door deze back-up. Ontbrekende muziekbestanden worden teruggezet.</p>
+  <label>Typ JA om te bevestigen</label>
+  <input id="restore-confirm" autocomplete="off">
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+    <button id="restore-cancel">Annuleren</button>
+    <button class="primary" id="restore-go">Terugzetten</button>
+  </div>
+</dialog>
+
+<script src="server-ui.js"></script>
+</body>
+</html>
