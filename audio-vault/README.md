@@ -122,6 +122,29 @@ De pc moet aan blijven staan zolang het station draait of anderen afspelen.
 Voor 24/7 is een zuinige mini-pc (bijv. Intel N100, 16 GB, SSD van 1 TB,
 ± €200–300, ± 10 watt) de nette oplossing; dezelfde stappen gelden dan.
 
+## Windows-app (Audio OnAir Turbo.exe)
+
+In `desktop/` zit de Windows-app: de studio in een eigen venster met logo,
+installatieprogramma, snelkoppeling op het bureaublad en in het startmenu.
+
+- Bij de eerste start vraagt de app het **adres van je server** (bijv.
+  `localhost:3000` op de server-pc zelf, of `radio.ramonturbofm.synology.me`).
+  Daarna log je in zoals op de website.
+- Speelt door als het venster op de achtergrond staat en houdt de pc wakker.
+- Vraagt om bevestiging als je afsluit terwijl er iets on air is.
+- Menu (Alt): Studio (Ctrl+1), Uurklokken (Ctrl+2), Bibliotheek (Ctrl+3),
+  Nu op de radio (Ctrl+4), volledig scherm, andere server kiezen.
+- Links naar andere websites openen in je gewone browser.
+
+**Installatieprogramma maken**: bij elke wijziging in `desktop/` bouwt GitHub
+het automatisch op een Windows-machine (Actions → *Audio OnAir Turbo – Windows
+installer* → onderaan *Artifacts*). Zelf bouwen op een Windows-pc:
+`cd desktop && npm install && npm run dist` → `desktop/dist/`.
+
+Het installatieprogramma is niet digitaal ondertekend; Windows toont daarom de
+eerste keer "Windows heeft uw pc beschermd" → *Meer info* → *Toch uitvoeren*.
+Een code-signing-certificaat (± €100–300 per jaar) haalt die melding weg.
+
 ## Op je Synology draaien (aanbevolen voor een grote muziekbibliotheek)
 
 Werkt op een Synology met Container Manager (meestal de "+"-modellen, liefst
