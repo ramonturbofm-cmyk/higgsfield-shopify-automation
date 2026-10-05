@@ -142,7 +142,7 @@ function renderWizard(s) {
   if (wizard.step === 1) {
     const ok = s.docker === 'running';
     body = [
-      el('h2', {}, 'Welkom! We zetten je server in een paar stappen klaar.'),
+      el('h2', {}, s.database && s.database.id !== 'main' ? `Database "${s.database.name}" klaarzetten` : 'Welkom! We zetten je server in een paar stappen klaar.'),
       el('p', { class: 'lead' }, 'De server draait op deze pc met Docker Desktop (gratis). Dat installeer je één keer.'),
       el('div', { class: 'check-line' }, el('span', { class: `dot ${ok ? 'ok' : s.docker === 'stopped' ? 'warn' : 'bad'}` }),
         ok ? 'Docker Desktop draait — top!' : s.docker === 'stopped' ? 'Docker Desktop is geïnstalleerd maar nog niet gestart.' : 'Docker Desktop is nog niet geïnstalleerd.'),
@@ -326,3 +326,65 @@ $('arc-stop').addEventListener('click', async () => {
   try { await api.run('archiveStop'); } catch (e) { log(`✗ ${e.message}\n`); }
   refresh();
 });
+
+// ---------- several databases ----------
+
+let dbList = [];
+let dbMode = 'create';
+async function loadDatabases() {
+  const { list, active } = await api.databases();
+  dbList = list;
+  const current = list.find((d) => d.id === active) || list[0];
+  $('db-select').replaceChildren(...list.map((d) => {
+    const o = document.createElement('option'); o.value = d.id; o.textContent = d.name; o.selected = d.id === active; return o;
+  }));
+  $('db-info').textContent = `poort ${current.port} · ${current.dir}`;
+  $('db-remove').style.display = current.id === 'main' ? 'none' : '';
+  document.title = `Server beheren · ${current.name}`;
+  return current;
+}
+
+function resetForDatabase() {
+  Object.assign(wizard, { step: 1, music: 'nas', backup: 'nas', values: {}, running: false, finished: false, free: null });
+  refresh.filled = false; archiveFilled = false;
+  $('log').textContent = 'Klaar.';
+  $('saved').textContent = ''; $('error').textContent = '';
+}
+
+$('db-select').addEventListener('change', async () => {
+  await api.switchDatabase($('db-select').value);
+  resetForDatabase();
+  await loadDatabases();
+  refresh();
+});
+function openDbForm(mode) {
+  dbMode = mode;
+  $('db-form').classList.remove('hidden');
+  $('db-save').textContent = mode === 'create' ? 'Aanmaken' : 'Opslaan';
+  $('db-name').value = mode === 'create' ? '' : (dbList.find((d) => d.id === $('db-select').value) || {}).name || '';
+  $('db-name').focus();
+}
+$('db-new').addEventListener('click', () => openDbForm('create'));
+$('db-rename').addEventListener('click', () => openDbForm('rename'));
+$('db-cancel').addEventListener('click', () => $('db-form').classList.add('hidden'));
+$('db-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = $('db-name').value.trim();
+  const res = dbMode === 'create' ? await api.createDatabase(name) : await api.renameDatabase(name);
+  if (!res.ok) { alert(res.error); return; }
+  $('db-form').classList.add('hidden');
+  if (dbMode === 'create') { resetForDatabase(); log(`Nieuwe database "${name}" aangemaakt. Zet hem nu klaar met de installatiehulp.\n`); }
+  await loadDatabases();
+  refresh();
+});
+$('db-remove').addEventListener('click', async () => {
+  const db = dbList.find((d) => d.id === $('db-select').value);
+  if (!db || !confirm(`"${db.name}" uit de lijst halen?\n\nDe map ${db.dir} met database en muziek blijft gewoon op de schijf staan; je kunt hem later zelf verwijderen.`)) return;
+  const res = await api.removeDatabase();
+  if (!res.ok) { alert(res.error); return; }
+  resetForDatabase();
+  await loadDatabases();
+  refresh();
+});
+
+loadDatabases().then(() => { if (location.hash === '#nieuw') openDbForm('create'); });

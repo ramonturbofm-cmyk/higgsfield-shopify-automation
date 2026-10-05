@@ -22,6 +22,11 @@ if (location.protocol === 'file:') {
       setAutostart: (on) => ipcRenderer.invoke('server', 'setAutostart', on),
       openDockerDownload: () => ipcRenderer.invoke('server', 'openDockerDownload'),
       openStudio: () => ipcRenderer.invoke('server', 'openStudio'),
+      databases: () => ipcRenderer.invoke('server', 'databases'),
+      switchDatabase: (id) => ipcRenderer.invoke('server', 'switchDatabase', id),
+      createDatabase: (name) => ipcRenderer.invoke('server', 'createDatabase', name),
+      renameDatabase: (name) => ipcRenderer.invoke('server', 'renameDatabase', name),
+      removeDatabase: () => ipcRenderer.invoke('server', 'removeDatabase'),
     },
   });
 }

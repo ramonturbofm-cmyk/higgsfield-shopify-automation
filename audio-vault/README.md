@@ -160,6 +160,14 @@ Na een update van de app klik je op *Herstarten / bijwerken*; de nieuwe
 serverversie wordt dan geïnstalleerd (database, muziek en `.env` blijven).
 De `.bat`-bestanden werken nog steeds, voor wie liever zonder app werkt.
 
+**Meerdere databases op één pc**: bovenaan *Server beheren* kies je de database,
+of maak je met **+ Nieuwe database** een tweede, volledig losse database aan
+(bijv. *Mijn eigen* naast de station-database). Elke database heeft een eigen
+map (`C:\AudioOnAir-<naam>`), poort (3001, 3002, …), muziek, gebruikers,
+uurklokken en back-up, en draait naast de andere. Wisselen gaat via het menu
+**Database**; je blijft in elke database apart ingelogd en de venstertitel
+toont waar je bent. *Uit de lijst halen* laat de map met gegevens staan.
+
 **Installatieprogramma maken**: bij elke wijziging in `desktop/` bouwt GitHub
 het automatisch op een Windows-machine (Actions → *Audio OnAir Turbo – Windows
 installer* → onderaan *Artifacts*). Zelf bouwen op een Windows-pc:

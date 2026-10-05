@@ -1,6 +1,8 @@
 const crypto = require('crypto');
 
-const SESSION_COOKIE = 'av_session';
+// Several databases can run on one PC (localhost:3000, :3001, ...). Browsers share
+// cookies between ports, so each database gets its own cookie name.
+const SESSION_COOKIE = /^[A-Za-z0-9_]{1,64}$/.test(process.env.SESSION_COOKIE || '') ? process.env.SESSION_COOKIE : 'av_session';
 const SESSION_DAYS = 14;
 
 function hashPassword(password) {

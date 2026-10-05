@@ -34,7 +34,7 @@ function createDavRouter({ pool, filesDir }) {
       const { rows } = await pool.query('SELECT * FROM users WHERE api_token_hash = $1 AND NOT disabled', [sha256(token)]);
       if (rows.length && canDownload(rows[0])) { req.user = rows[0]; return next(); }
     }
-    res.set('WWW-Authenticate', 'Basic realm="Audio Vault", charset="UTF-8"').status(401).send('Login met je e-mail en API-token');
+    res.set('WWW-Authenticate', 'Basic realm="Audio OnAir Turbo Database", charset="UTF-8"').status(401).send('Login met je e-mail en API-token');
   });
 
   router.use(async (req, res, next) => {
@@ -48,8 +48,8 @@ function createDavRouter({ pool, filesDir }) {
       const collections = await listCollections(pool, req.user);
 
       if (segments.length === 0) {
-        if (req.method !== 'PROPFIND') return res.type('text').send('Audio Vault WebDAV');
-        const out = [entry({ href: '/dav/', name: 'Audio Vault', isDir: true })];
+        if (req.method !== 'PROPFIND') return res.type('text').send('Audio OnAir Turbo Database WebDAV');
+        const out = [entry({ href: '/dav/', name: 'Audio OnAir Turbo Database', isDir: true })];
         if (depth) for (const c of collections) out.push(entry({ href: href(c.name) + '/', name: c.name, isDir: true, created: c.created_at }));
         return multistatus(res, out);
       }

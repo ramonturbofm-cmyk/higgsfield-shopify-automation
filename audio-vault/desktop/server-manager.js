@@ -7,7 +7,6 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const PROJECT = 'audioonair';
 const SERVER_FILES = [
   'src', 'public', 'backup', 'package.json', 'package-lock.json', 'Dockerfile', '.dockerignore',
   'docker-compose.yml', 'docker-compose.nas.yml', 'docker-compose.nas-backup.yml', 'docker-compose.nas-archive.yml',
@@ -17,7 +16,10 @@ const DEFAULT_DIR = process.env.AOT_SERVER_DIR || (process.platform === 'win32' 
 const DOCKER_WIN = 'C:\\Program Files\\Docker\\Docker';
 const DOCKERIGNORE = ['data', 'import', 'storage', 'backup', 'desktop', 'test', 'node_modules', '.env', '.env.*', '*.bat', '*.cmd', ''].join('\n');
 
-function createServerManager({ sourceDir, version, onLog, dir }) {
+// One manager per database. Each database is its own Docker Compose project with its
+// own folder, port and login cookie, so several can run side by side on one PC.
+function createServerManager({ sourceDir, version, onLog, dir, project = 'audioonair', port = 3000, cookie = '' }) {
+  const PROJECT = project;
   let serverDir = dir || DEFAULT_DIR;
   let busy = null;
 
@@ -117,7 +119,7 @@ function createServerManager({ sourceDir, version, onLog, dir }) {
     const env = readEnv();
     const result = {
       dir: serverDir, freeBytes: freeBytes(serverDir), installed: installed(), outdated: installed() && filesOutdated(), docker, containers: [], web: false, lastBackup: null, busy,
-      port: Number(env.PORT || 3000),
+      port: Number(env.PORT || port),
       settings: {
         musicDir: env.MUSIC_DIR && env.MUSIC_DIR !== './import' ? env.MUSIC_DIR : '',
         nasHost: env.NAS_HOST || '', nasShare: env.NAS_SHARE || '', nasUser: env.NAS_USER || '', hasNasPassword: Boolean(env.NAS_PASSWORD),
@@ -158,7 +160,8 @@ function createServerManager({ sourceDir, version, onLog, dir }) {
     const next = {
       DB_PASSWORD: env.DB_PASSWORD || crypto.randomBytes(24).toString('hex'),
       SESSION_SECRET: env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
-      PORT: env.PORT || '3000',
+      PORT: env.PORT || String(port),
+      SESSION_COOKIE: env.SESSION_COOKIE || cookie,
       PUBLIC_URL: input.publicUrl ?? env.PUBLIC_URL ?? '',
       MAX_UPLOAD_MB: env.MAX_UPLOAD_MB || '1000',
       MUSIC_DIR: input.musicDir ? input.musicDir.replace(/\\/g, '/') : './import',

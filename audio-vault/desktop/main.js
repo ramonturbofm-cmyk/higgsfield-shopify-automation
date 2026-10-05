@@ -3,6 +3,7 @@
 // and asks before closing while something is on air.
 const { app, BrowserWindow, Menu, dialog, ipcMain, net, powerSaveBlocker, session, shell } = require('electron');
 const fs = require('fs');
+const os = require('os');
 const { createServerManager } = require('./server-manager');
 const path = require('path');
 
@@ -38,7 +39,62 @@ function normaliseUrl(input) {
 
 let win = null;
 let serverOrigin = null;
-let manager = null;
+
+// ---------- databases on this PC ----------
+// Each database is a fully separate server (own folder, port, music, users, backup).
+const DEFAULT_SERVER_DIR = process.env.AOT_SERVER_DIR || (process.platform === 'win32' ? 'C:\\AudioOnAir' : path.join(os.homedir(), 'AudioOnAir'));
+const managers = new Map();
+
+function databases() {
+  const cfg = readConfig();
+  if (Array.isArray(cfg.databases) && cfg.databases.length) return cfg.databases;
+  // First run after the update: the existing server becomes the first database.
+  const list = [{ id: 'main', name: 'Hoofddatabase', dir: cfg.serverDir || DEFAULT_SERVER_DIR, project: 'audioonair', port: 3000, cookie: '' }];
+  writeConfig({ databases: list, activeDb: 'main' });
+  return list;
+}
+function activeDb() {
+  const list = databases();
+  return list.find((d) => d.id === readConfig().activeDb) || list[0];
+}
+function managerFor(db) {
+  if (!managers.has(db.id)) {
+    managers.set(db.id, createServerManager({
+      sourceDir: app.isPackaged ? path.join(process.resourcesPath, 'server') : path.join(__dirname, '..'),
+      version: app.getVersion(),
+      dir: db.dir, project: db.project, port: db.port, cookie: db.cookie,
+      onLog: (text) => { if (win && !win.isDestroyed()) win.webContents.send('server-log', text); },
+    }));
+  }
+  return managers.get(db.id);
+}
+const current = () => managerFor(activeDb());
+const busyManager = () => [...managers.values()].find((m) => m.busy);
+const databaseForOrigin = (origin) => databases().find((d) => origin === `http://localhost:${d.port}`);
+
+function updateDatabase(id, patch) {
+  writeConfig({ databases: databases().map((d) => (d.id === id ? { ...d, ...patch } : d)) });
+}
+
+function createDatabase(name) {
+  const clean = String(name || '').trim().slice(0, 40);
+  if (!clean) throw new Error('Geef de database een naam');
+  const list = databases();
+  if (list.some((d) => d.name.toLowerCase() === clean.toLowerCase())) throw new Error('Er is al een database met deze naam');
+  const base = clean.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'db';
+  let slug = base; let n = 2;
+  while (list.some((d) => d.id === slug)) slug = `${base}-${n++}`;
+  const folder = clean.replace(/[^A-Za-z0-9 _-]/g, '').replace(/\s+/g, '') || slug;
+  const db = {
+    id: slug, name: clean, project: `audioonair-${slug}`,
+    port: Math.max(...list.map((d) => d.port)) + 1,
+    dir: `${DEFAULT_SERVER_DIR}-${folder}`,
+    cookie: `av_session_${slug.replace(/-/g, '_')}`,
+  };
+  writeConfig({ databases: [...list, db], activeDb: db.id });
+  buildMenu();
+  return db;
+}
 
 function showServer() {
   win.loadFile(path.join(__dirname, 'server.html'));
@@ -58,8 +114,16 @@ async function checkServer(origin) {
   if (!res.ok || !body.ok) throw new Error('Dit adres is geen Audio OnAir Turbo Database-server');
 }
 
+async function switchTo(db) {
+  writeConfig({ activeDb: db.id });
+  buildMenu();
+  const { web } = await managerFor(db).status();
+  if (web) { serverOrigin = `http://localhost:${db.port}`; writeConfig({ server: serverOrigin }); openStudio(); } else showServer();
+}
+
 function buildMenu() {
   const go = (page) => () => serverOrigin && openStudio(page);
+  const active = activeDb();
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     {
       label: 'Audio OnAir Turbo Database',
@@ -73,6 +137,16 @@ function buildMenu() {
         { label: 'Andere server kiezen…', click: () => showConnect() },
         { type: 'separator' },
         { role: 'quit', label: 'Afsluiten' },
+      ],
+    },
+    {
+      label: 'Database',
+      submenu: [
+        ...databases().map((db) => ({
+          label: `${db.name}   (poort ${db.port})`, type: 'radio', checked: db.id === active.id, click: () => switchTo(db),
+        })),
+        { type: 'separator' },
+        { label: 'Nieuwe database…', click: () => win.loadFile(path.join(__dirname, 'server.html'), { hash: 'nieuw' }) },
       ],
     },
     {
@@ -130,6 +204,10 @@ function createWindow() {
     if (allowed(url)) { win.loadURL(url); } else if (/^https?:/.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
+  win.webContents.on('page-title-updated', (e, title) => {
+    const db = !win.webContents.getURL().startsWith('file:') && databaseForOrigin(serverOrigin);
+    if (db && databases().length > 1) { e.preventDefault(); win.setTitle(`${title} — ${db.name}`); }
+  });
   win.webContents.on('did-fail-load', (e, code, description, url, isMainFrame) => {
     if (isMainFrame && !url.startsWith('file:')) showConnect(`Server niet bereikbaar (${description}). Staat de server-pc aan?`);
   });
@@ -150,10 +228,10 @@ function createWindow() {
     const onAir = await win.webContents
       .executeJavaScript('typeof S !== "undefined" && !!S.live && S.live.state === "playing"', true)
       .catch(() => false);
-    if (!onAir && manager && manager.busy) {
+    if (!onAir && busyManager()) {
       const { response } = await dialog.showMessageBox(win, {
         type: 'warning', icon: ICON, buttons: ['Blijven', 'Toch afsluiten'], defaultId: 0, cancelId: 0,
-        title: 'Nog bezig', message: `"${manager.busy}" is nog bezig.`, detail: 'Wacht tot het klaar is voordat je afsluit.',
+        title: 'Nog bezig', message: `"${busyManager().busy}" is nog bezig.`, detail: 'Wacht tot het klaar is voordat je afsluit.',
       });
       if (response !== 1) return;
     }
@@ -183,11 +261,36 @@ ipcMain.handle('open-server', () => showServer());
 ipcMain.handle('server', async (e, method, ...args) => {
   try {
     switch (method) {
-      case 'status': return await manager.status();
+      case 'status': return { ...(await current().status()), database: activeDb() };
       case 'saveSettings': {
-        const res = manager.saveSettings(args[0] || {});
-        writeConfig({ serverDir: res.dir });
+        const res = current().saveSettings(args[0] || {});
+        updateDatabase(activeDb().id, { dir: res.dir });
+        if (activeDb().id === 'main') writeConfig({ serverDir: res.dir });
         return res;
+      }
+      case 'databases': return { list: databases(), active: activeDb().id };
+      case 'switchDatabase': {
+        const db = databases().find((d) => d.id === args[0]);
+        if (!db) throw new Error('Database niet gevonden');
+        writeConfig({ activeDb: db.id }); buildMenu();
+        return { ok: true };
+      }
+      case 'createDatabase': return { ok: true, database: createDatabase(args[0]) };
+      case 'renameDatabase': {
+        const name = String(args[0] || '').trim().slice(0, 40);
+        if (!name) throw new Error('Geef de database een naam');
+        if (databases().some((d) => d.id !== activeDb().id && d.name.toLowerCase() === name.toLowerCase())) throw new Error('Er is al een database met deze naam');
+        updateDatabase(activeDb().id, { name }); buildMenu();
+        return { ok: true };
+      }
+      case 'removeDatabase': {
+        const db = activeDb();
+        if (db.id === 'main') throw new Error('De hoofddatabase blijft altijd in de lijst');
+        const st = await current().status();
+        if (st.containers.some((c) => c.state === 'running')) throw new Error('Stop eerst de server van deze database');
+        writeConfig({ databases: databases().filter((d) => d.id !== db.id), activeDb: 'main' });
+        managers.delete(db.id); buildMenu();
+        return { ok: true, dir: db.dir };
       }
       case 'chooseFolder': {
         const r = await dialog.showOpenDialog(win, {
@@ -196,17 +299,17 @@ ipcMain.handle('server', async (e, method, ...args) => {
         });
         return r.canceled ? null : r.filePaths[0];
       }
-      case 'run': return { ok: true, code: await manager.run(args[0], args[1]) };
-      case 'listBackups': return await manager.listBackups();
-      case 'startDocker': return manager.startDocker();
-      case 'installDocker': return { ok: true, code: await manager.installDocker() };
-      case 'saveArchive': return manager.saveArchiveSettings(args[0] || {});
-      case 'freeSpace': return manager.freeBytes(String(args[0] || ''));
+      case 'run': return { ok: true, code: await current().run(args[0], args[1]) };
+      case 'listBackups': return await current().listBackups();
+      case 'startDocker': return current().startDocker();
+      case 'installDocker': return { ok: true, code: await current().installDocker() };
+      case 'saveArchive': return current().saveArchiveSettings(args[0] || {});
+      case 'freeSpace': return current().freeBytes(String(args[0] || ''));
       case 'getAutostart': return app.getLoginItemSettings().openAtLogin;
       case 'setAutostart': app.setLoginItemSettings({ openAtLogin: Boolean(args[0]) }); return app.getLoginItemSettings().openAtLogin;
       case 'openDockerDownload': return shell.openExternal('https://www.docker.com/products/docker-desktop/');
       case 'openStudio': {
-        const { port } = await manager.status();
+        const { port } = await current().status();
         serverOrigin = `http://localhost:${port}`;
         writeConfig({ server: serverOrigin });
         openStudio();
@@ -239,12 +342,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
   app.whenReady().then(() => {
     powerSaveBlocker.start('prevent-app-suspension');
-    manager = createServerManager({
-      sourceDir: app.isPackaged ? path.join(process.resourcesPath, 'server') : path.join(__dirname, '..'),
-      version: app.getVersion(),
-      dir: readConfig().serverDir,
-      onLog: (text) => { if (win && !win.isDestroyed()) win.webContents.send('server-log', text); },
-    });
+    databases(); // migrate the single server of earlier versions into the list
     buildMenu();
     createWindow();
   });
