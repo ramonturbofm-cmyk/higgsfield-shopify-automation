@@ -34,7 +34,7 @@ button { font: inherit; color: inherit; }
 }
 .onair.live { border-color: var(--accent); background: var(--accent); color: var(--accent-text); box-shadow: 0 0 22px var(--accent); }
 .now { min-width: 0; }
-.now-label { font-size: 11px; letter-spacing: .2em; color: var(--accent); font-weight: 700; }
+.now-label { white-space: nowrap; font-size: 11px; letter-spacing: .2em; color: var(--accent); font-weight: 700; }
 .now-title { font-size: 24px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .now-artist { color: var(--muted); font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .now-bar { cursor: pointer; touch-action: none; position: relative; height: 6px; background: var(--panel2); border-radius: 3px; margin-top: 8px; overflow: hidden; }
@@ -252,7 +252,7 @@ dialog::backdrop { background: rgba(0, 0, 0, .7); }
 .update-btn.has-update::after { content: ''; position: absolute; top: 5px; right: 5px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg); }
 
 /* Stereo level meter: -48 … 0 dBFS, green → yellow (-12) → red (-3). */
-.vu { width: 230px; display: grid; gap: 4px; padding-bottom: 12px; position: relative; }
+.vu { width: clamp(130px, 14vw, 230px); display: grid; gap: 4px; padding-bottom: 12px; position: relative; }
 .vu-row { display: grid; grid-template-columns: 10px 1fr; gap: 5px; align-items: center; font: 11px ui-monospace, Consolas, monospace; color: var(--muted); }
 .vu-bar { position: relative; height: 13px; border-radius: 2px; overflow: hidden;
   background: linear-gradient(90deg, #1fa94a 0%, #30d158 70%, #ffd60a 75%, #ff9f0a 90%, #ff3b30 93.75%, #ff3b30 100%); }
@@ -263,3 +263,4 @@ dialog::backdrop { background: rgba(0, 0, 0, .7); }
 .vu-scale span:first-child { transform: none; }
 .vu-scale span:last-child { transform: translateX(-100%); }
 .vu.clip .vu-row span { color: var(--accent); }
+.now-times > span:first-child { white-space: nowrap; }
