@@ -134,6 +134,21 @@
     <label class="check"><input type="checkbox" id="set-clockauto"> Automatisch bijplannen: zodra de playlist bijna leeg is, wordt het volgende uur gevuld volgens de weekplanning (24/7 automatisch)</label>
     <p class="muted" style="margin:6px 0 0">Klokken en weekplanning beheer je via ◔ rechtsboven.</p>
 
+    <h3>Nonstop-filter</h3>
+    <p class="muted" style="margin:0 0 6px">Wat je hier zet, komt nooit in de automatisch geplande uren. Zelf toevoegen kan altijd nog. Tip: rechtsklik op een nummer → 🚫. Tekst werkt als "bevat": <em>schlager</em> filtert ook "Volksmusik, Schlager".</p>
+    <div style="display:flex;gap:6px">
+      <select id="nonstop-kind" style="width:auto">
+        <option value="genre">Genre</option>
+        <option value="artist">Artiest</option>
+        <option value="folder">Map / bestandsnaam</option>
+      </select>
+      <input id="nonstop-value" list="nonstop-genres" placeholder="bijv. Schlager, Kerst, Polka…" autocomplete="off">
+      <button type="button" class="mini" id="nonstop-add">Toevoegen</button>
+    </div>
+    <datalist id="nonstop-genres"></datalist>
+    <div id="nonstop-list" class="ns-list"></div>
+    <button type="button" class="mini" id="nonstop-show">Toon gefilterde nummers in de database</button>
+
     <h3>Geluidskaarten</h3>
     <p class="muted" id="sink-support"></p>
     <button type="button" class="mini" id="btn-find-devices">Geluidskaarten zoeken</button>

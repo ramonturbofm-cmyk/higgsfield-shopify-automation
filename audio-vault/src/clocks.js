@@ -3,6 +3,7 @@
 // no artist twice within a few songs, least recently played first).
 const express = require('express');
 const lib = require('./library');
+const nonstop = require('./nonstop');
 
 const SLOT_TYPES = new Set(['muziek', 'jingle', 'vast']);
 const ROTATION_HOURS = Number(process.env.ROTATION_HOURS || 3);
@@ -113,17 +114,21 @@ function createClockRouter({ pool, requireUser, requireAdmin, wrap, HttpError })
 
     // Per collection, a candidate pool of the least recently played files (never played
     // first), shuffled within equal play dates. Large libraries never load in full.
+    // The person's nonstop filter keeps tracks, artists, genres and folders out.
     const pools = new Map();
+    const blocks = await nonstop.loadBlocks(pool, req.user.id);
     async function candidates(collectionId) {
       if (!pools.has(collectionId)) {
         let rows = [];
         if (readable.has(collectionId)) {
+          const params = [collectionId, POOL_SIZE, req.user.id];
+          const allowed = blocks.any ? `AND NOT ${nonstop.blockedSql('f', blocks, params)}` : '';
           ({ rows } = await pool.query(
             `SELECT f.id, f.artist, lp.last_played FROM audio_files f
                LEFT JOIN (SELECT file_id, max(created_at) AS last_played FROM access_log
                            WHERE action = 'onair' AND user_id = $3 GROUP BY file_id) lp ON lp.file_id = f.id
-              WHERE f.collection_id = $1
-              ORDER BY lp.last_played NULLS FIRST, random() LIMIT $2`, [collectionId, POOL_SIZE, req.user.id]));
+              WHERE f.collection_id = $1 ${allowed}
+              ORDER BY lp.last_played NULLS FIRST, random() LIMIT $2`, params));
         }
         pools.set(collectionId, rows);
       }

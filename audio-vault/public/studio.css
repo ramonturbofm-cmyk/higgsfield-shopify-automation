@@ -236,3 +236,11 @@ dialog::backdrop { background: rgba(0, 0, 0, .7); }
 .lib-selbar { display: flex; align-items: center; gap: 6px; padding: 6px 8px; margin: 0 0 6px; border: 1px solid var(--accent); border-radius: 6px; font-size: 13px; }
 .lib-selbar span { flex: 1; font-weight: 600; }
 .lib-selbar.hidden { display: none; }
+
+.lib-genre { opacity: .75; }
+.ns-blocked { font-size: 11px; }
+.ns-list { margin: 8px 0; display: grid; gap: 4px; max-height: 220px; overflow: auto; }
+.ns-rule { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; }
+.ns-kind { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); min-width: 120px; }
+.ns-value { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctx-sep { height: 1px; background: var(--line); margin: 4px 0; }

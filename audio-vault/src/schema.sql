@@ -124,3 +124,18 @@ ALTER TABLE audio_files ADD COLUMN IF NOT EXISTS loudness_lufs NUMERIC(6, 2);
 ALTER TABLE audio_files ADD COLUMN IF NOT EXISTS true_peak_db NUMERIC(6, 2);
 ALTER TABLE audio_files ADD COLUMN IF NOT EXISTS loudness_checked BOOLEAN NOT NULL DEFAULT FALSE;
 CREATE INDEX IF NOT EXISTS audio_files_loudness_todo_idx ON audio_files (id) WHERE NOT loudness_checked;
+
+-- Genre from the file's tags. NULL = not read yet (filled in the background), '' = none.
+ALTER TABLE audio_files ADD COLUMN IF NOT EXISTS genre TEXT;
+CREATE INDEX IF NOT EXISTS audio_files_genre_todo_idx ON audio_files (id) WHERE genre IS NULL;
+
+-- Nonstop filter: what someone never wants in their automatically planned hours.
+-- kind: file (one track), artist, genre or folder (text the artist/genre/path contains).
+CREATE TABLE IF NOT EXISTS nonstop_blocks (
+  id         SERIAL PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind       TEXT NOT NULL CHECK (kind IN ('file', 'artist', 'genre', 'folder')),
+  value      TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, kind, value)
+);

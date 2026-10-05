@@ -7,6 +7,7 @@ const lib = require('./library');
 const { createDavRouter } = require('./dav');
 const { AUDIO_TYPES, ingestFile } = require('./ingest');
 const { createClockRouter } = require('./clocks');
+const nonstop = require('./nonstop');
 const { createTranscoder } = require('./transcode');
 
 const INVITE_DAYS = 7;
@@ -36,6 +37,8 @@ function publicFile(f) {
     tags: f.tags, created_at: f.created_at,
     cue_in: num(f.cue_in), mix_out: num(f.mix_out), cue_out: num(f.cue_out),
     loudness_lufs: num(f.loudness_lufs), true_peak_db: num(f.true_peak_db),
+    genre: f.genre || '',
+    ...(f.nonstop_blocked === undefined ? {} : { nonstop_blocked: Boolean(f.nonstop_blocked) }),
   };
 }
 
@@ -366,15 +369,22 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
       // Every word must appear in title, artist or tags: "turbo id" finds "Turbo FM – Station ID".
       for (const word of String(req.query.q).trim().split(/\s+/).slice(0, 6)) {
         params.push(`%${word.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
-        where += ` AND (title || ' ' || artist || ' ' || array_to_string(tags, ' ')) ILIKE $${params.length}`;
+        where += ` AND (title || ' ' || artist || ' ' || coalesce(genre, '') || ' ' || array_to_string(tags, ' ')) ILIKE $${params.length}`;
       }
     }
     const limit = Math.min(1000, Math.max(1, Number(req.query.limit) || 1000));
     const offset = Math.max(0, Number(req.query.offset) || 0);
     const order = { name: 'lower(artist), lower(title), id', title: 'lower(title), lower(artist), id' }[req.query.sort] || 'created_at DESC, id DESC';
+    // Marks what the person's nonstop filter keeps out of the automatic planning;
+    // ?nonstop=blocked lists only those (to review the filter).
+    const blocks = await nonstop.loadBlocks(pool, req.user.id);
+    const blockedParams = [...params];
+    const blocked = blocks.any ? nonstop.blockedSql('f', blocks, blockedParams) : 'FALSE';
+    if (req.query.nonstop === 'blocked') where += ` AND ${blocked}`;
+    const countParams = req.query.nonstop === 'blocked' ? blockedParams : params;
     const [{ rows }, { rows: [{ n }] }] = await Promise.all([
-      pool.query(`SELECT * FROM audio_files WHERE ${where} ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`, params),
-      pool.query(`SELECT count(*)::int AS n FROM audio_files WHERE ${where}`, params),
+      pool.query(`SELECT f.*, ${blocked} AS nonstop_blocked FROM audio_files f WHERE ${where} ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`, blockedParams),
+      pool.query(`SELECT count(*)::int AS n FROM audio_files f WHERE ${where}`, countParams),
     ]);
     res.json({ files: rows.map(publicFile), total: n });
   }));
@@ -491,6 +501,36 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
   }));
 
   // ---------- studio (Audio OnAir Turbo) ----------
+
+  // Nonstop filter (per person): what the uurklok never plans for them.
+  app.get('/api/me/nonstop-blocks', requireUser, wrap(async (req, res) => {
+    const { rows } = await pool.query(
+      `SELECT b.id, b.kind, b.value, f.title, f.artist FROM nonstop_blocks b
+         LEFT JOIN audio_files f ON f.id = CASE WHEN b.kind = 'file' THEN b.value::int END
+        WHERE b.user_id = $1 ORDER BY b.kind, lower(b.value)`, [req.user.id]);
+    res.json({ blocks: rows });
+  }));
+  app.post('/api/me/nonstop-blocks', requireUser, wrap(async (req, res) => {
+    let block;
+    try { block = nonstop.cleanBlock(req.body); } catch (err) { throw new HttpError(err.status || 400, err.message); }
+    const { rows } = await pool.query(
+      `INSERT INTO nonstop_blocks (user_id, kind, value) VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, kind, value) DO UPDATE SET value = EXCLUDED.value RETURNING id, kind, value`, [req.user.id, block.kind, block.value]);
+    res.json({ block: rows[0] });
+  }));
+  app.delete('/api/me/nonstop-blocks/:id', requireUser, wrap(async (req, res) => {
+    await pool.query('DELETE FROM nonstop_blocks WHERE id = $1 AND user_id = $2', [Number(req.params.id), req.user.id]);
+    res.json({ ok: true });
+  }));
+  // Genres in the visible library, most used first (for the filter's genre list).
+  app.get('/api/genres', requireUser, wrap(async (req, res) => {
+    const visible = (await lib.listCollections(pool, req.user)).map((c) => c.id);
+    const { rows } = await pool.query(
+      `SELECT g AS genre, count(*)::int AS count FROM audio_files f,
+              regexp_split_to_table(coalesce(f.genre, ''), '\\s*[,;/]\\s*') AS g
+        WHERE f.collection_id = ANY($1) AND g <> '' GROUP BY g ORDER BY count(*) DESC, g LIMIT 300`, [visible]);
+    res.json({ genres: rows });
+  }));
 
   app.get('/api/me/settings', requireUser, wrap(async (req, res) => {
     const { rows } = await pool.query('SELECT data FROM user_settings WHERE user_id = $1', [req.user.id]);

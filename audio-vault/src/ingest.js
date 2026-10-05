@@ -77,13 +77,14 @@ async function ingestFile({ pool, filesDir, source, move, originalName, collecti
   const title = String(overrides.title || common.title || path.basename(originalName, ext)).trim().slice(0, 300);
   const artist = String(overrides.artist || common.artist || '').trim().slice(0, 300);
   const tags = String(overrides.tags || '').split(',').map((t) => t.trim()).filter(Boolean);
+  const genre = [...new Set(common.genre || [])].map((g) => String(g).trim()).filter(Boolean).join(', ').slice(0, 200);
   try {
     const { rows } = await pool.query(
       `INSERT INTO audio_files (collection_id, title, artist, original_name, storage_key, mime_type, size_bytes,
-                                duration_seconds, tags, uploaded_by, source_path)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+                                duration_seconds, tags, uploaded_by, source_path, genre)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
       [collectionId, title, artist, originalName, path.basename(target), AUDIO_TYPES[storedExt], fs.statSync(target).size,
-        meta.format && meta.format.duration ? meta.format.duration : null, tags, userId, sourcePath]);
+        meta.format && meta.format.duration ? meta.format.duration : null, tags, userId, sourcePath, genre]);
     return rows[0];
   } catch (err) {
     fs.rmSync(target, { force: true });

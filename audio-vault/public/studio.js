@@ -806,6 +806,7 @@ function renderPlaylist() {
       ondragstart: (e) => { e.dataTransfer.setData('text/aot-item', item.uid); e.dataTransfer.effectAllowed = 'move'; },
       ondragover: (e) => { e.preventDefault(); if (dragOverUid !== item.uid) { dragOverUid = item.uid; renderPlaylist(); } },
       ondrop: (e) => { e.preventDefault(); e.stopPropagation(); dropOnPlaylist(e, item.uid); },
+      oncontextmenu: (e) => { if (f) { e.preventDefault(); fileMenu(e, f, { playlist: true }); } },
     },
     h('div', { class: 'pl-time' }),
     h('div', { class: 'pl-main' },
@@ -844,11 +845,20 @@ function searchLibrarySoon() { clearTimeout(libTimer); libTimer = setTimeout(sea
 
 function libraryParams(offset) {
   const params = new URLSearchParams({ limit: LIBRARY_PAGE, offset, sort: $('lib-sort').value });
-  if ($('lib-collection').value) params.set('collection_id', $('lib-collection').value);
+  const col = $('lib-collection').value;
+  if (col === 'nonstop') params.set('nonstop', 'blocked');
+  else if (col) params.set('collection_id', col);
   if ($('lib-search').value.trim()) params.set('q', $('lib-search').value.trim());
   return params;
 }
-const remember = (files) => files.map((f) => { if (!S.files.has(f.id)) S.files.set(f.id, f); return S.files.get(f.id); });
+// Keeps the copy the studio already has (it may carry fresher cue points), but takes
+// over what only the server knows: genre and the nonstop filter mark.
+const remember = (files) => files.map((f) => {
+  const known = S.files.get(f.id);
+  if (!known) { S.files.set(f.id, f); return f; }
+  known.genre = f.genre; known.nonstop_blocked = f.nonstop_blocked;
+  return known;
+});
 
 // New search: first page. Scrolling down loads the next pages, through the whole database.
 async function searchLibrary() {
@@ -942,7 +952,9 @@ function libraryRow(f) {
     ondblclick: (e) => { if (!e.target.closest('button')) { addToPlaylist(f.id); clearSelection(); } },
     oncontextmenu: (e) => { e.preventDefault(); fileMenu(e, f); },
   },
-  h('div', { class: 'pl-main' }, h('div', { class: 'pl-title' }, f.title), h('div', { class: 'pl-artist' }, f.artist || ' ')),
+  h('div', { class: 'pl-main' },
+    h('div', { class: 'pl-title' }, f.nonstop_blocked ? h('span', { class: 'ns-blocked', title: 'Komt niet in de nonstop (uurklok)' }, '🚫 ') : null, f.title),
+    h('div', { class: 'pl-artist' }, f.artist || ' ', f.genre ? h('span', { class: 'lib-genre' }, ` · ${f.genre}`) : null)),
   h('div', { class: 'pl-dur' }, fmt(cueOut(f) !== null ? cueOut(f) - cueIn(f) : null)),
   h('div', { class: 'lib-actions' },
     h('button', { title: 'Voorbeluisteren', 'data-pfl': f.id, class: S.pfl.fileId === f.id ? 'pfl-on' : '', onclick: () => togglePfl(f) }, '🎧'),
@@ -980,29 +992,86 @@ async function checkNewMusic() {
 }
 
 // Right-click menu on a library row.
-function fileMenu(e, f) {
+function fileMenu(e, f, { playlist = false } = {}) {
   const menu = $('slot-menu');
   const close = () => { menu.classList.add('hidden'); menu.classList.remove('ctx'); document.removeEventListener('mousedown', outside); };
   const outside = (ev) => { if (!menu.contains(ev.target)) close(); };
   const item = (text, fn, cls) => h('button', { class: cls || '', onclick: () => { close(); fn(); } }, text);
   menu.classList.add('ctx');
-  const ids = targetIds(f);
+  const ids = playlist ? [f.id] : targetIds(f);
   if (ids.length > 1) {
     menu.replaceChildren(
       h('div', { class: 'ctx-title' }, `${ids.length} nummers geselecteerd`),
       item('⤴  Als volgende afspelen', () => { addNext(ids); clearSelection(); }),
       item('+  Achteraan de playlist', () => { addToPlaylist(ids); clearSelection(); }),
+      item(`🚫  Niet in nonstop (${ids.length} nummers)`, () => { addNonstopBlocks(ids.map((id) => ({ kind: 'file', value: id }))); clearSelection(); }),
       item('✕  Selectie opheffen', clearSelection));
-  } else menu.replaceChildren(
+  } else if (playlist) menu.replaceChildren(
+    h('div', { class: 'ctx-title' }, label(f)),
+    ...nonstopMenuItems(f, item));
+  else menu.replaceChildren(
     h('div', { class: 'ctx-title' }, label(f)),
     item('⤴  Als volgende afspelen', () => addNext(f.id)),
     item('+  Achteraan de playlist', () => addToPlaylist(f.id)),
     item('▶  Direct afspelen', () => playNow(f.id), 'live'),
-    item('🎧  Voorbeluisteren', () => togglePfl(f)));
+    item('🎧  Voorbeluisteren', () => togglePfl(f)),
+    ...nonstopMenuItems(f, item));
   menu.style.left = `${Math.min(e.clientX, innerWidth - 240)}px`;
   menu.style.top = `${Math.min(e.clientY, innerHeight - 200)}px`;
   menu.classList.remove('hidden');
   setTimeout(() => document.addEventListener('mousedown', outside), 0);
+}
+
+// ---------- nonstop filter ----------
+// Tracks, artists, genres and folders that the uurklok never plans for this person.
+// Adding them by hand still works; they are only kept out of the automatic hours.
+const NONSTOP_KINDS = { genre: 'Genre', artist: 'Artiest', folder: 'Map / bestandsnaam', file: 'Nummer' };
+let nonstopBlocks = [];
+async function loadNonstopBlocks() {
+  try { nonstopBlocks = (await api('GET', '/api/me/nonstop-blocks')).blocks; } catch { nonstopBlocks = []; }
+  return nonstopBlocks;
+}
+async function addNonstopBlocks(list) {
+  try {
+    for (const b of list) await api('POST', '/api/me/nonstop-blocks', b);
+    const what = list.length > 1 ? `${list.length} nummers` : list[0].kind === 'file' ? 'Nummer' : `${NONSTOP_KINDS[list[0].kind]} "${list[0].value}"`;
+    status(`🚫 ${what} komt niet meer in de nonstop`);
+  } catch (e) { status(e.message); }
+  await loadNonstopBlocks();
+  renderNonstopBlocks();
+  searchLibrary();
+}
+async function removeNonstopBlock(id) {
+  try { await api('DELETE', `/api/me/nonstop-blocks/${id}`); } catch (e) { status(e.message); }
+  await loadNonstopBlocks();
+  renderNonstopBlocks();
+  searchLibrary();
+}
+function nonstopMenuItems(f, item) {
+  const fileBlock = nonstopBlocks.find((b) => b.kind === 'file' && Number(b.value) === f.id);
+  const out = [h('div', { class: 'ctx-sep' })];
+  if (fileBlock) out.push(item('✓  Weer toestaan in de nonstop', () => removeNonstopBlock(fileBlock.id)));
+  else out.push(item('🚫  Dit nummer niet in de nonstop', () => addNonstopBlocks([{ kind: 'file', value: f.id }])));
+  if (f.artist) out.push(item(`🚫  Artiest niet in de nonstop: ${f.artist}`, () => addNonstopBlocks([{ kind: 'artist', value: f.artist }])));
+  for (const g of (f.genre || '').split(/\s*[,;/]\s*/).filter(Boolean).slice(0, 3)) {
+    out.push(item(`🚫  Genre niet in de nonstop: ${g}`, () => addNonstopBlocks([{ kind: 'genre', value: g }])));
+  }
+  return out;
+}
+function renderNonstopBlocks() {
+  const list = $('nonstop-list');
+  if (!list) return;
+  list.replaceChildren(...(nonstopBlocks.length ? nonstopBlocks.map((b) => h('div', { class: 'ns-rule' },
+    h('span', { class: 'ns-kind' }, NONSTOP_KINDS[b.kind]),
+    h('span', { class: 'ns-value' }, b.kind === 'file' ? (b.title ? `${b.artist ? `${b.artist} – ` : ''}${b.title}` : '(verwijderd nummer)') : b.value),
+    h('button', { type: 'button', class: 'mini', title: 'Weer toestaan', onclick: () => removeNonstopBlock(b.id) }, '✕')))
+    : [h('p', { class: 'muted', style: { margin: '4px 0' } }, 'Nog niets gefilterd: alles kan in de nonstop.')]));
+}
+async function renderNonstopGenres() {
+  try {
+    const { genres } = await api('GET', '/api/genres');
+    $('nonstop-genres').replaceChildren(...genres.map((g) => h('option', { value: g.genre }, `${g.count} nummers`)));
+  } catch { /* the list is only a help */ }
 }
 
 function renderCart() {
@@ -1098,6 +1167,8 @@ async function renderSettings() {
   renderLoudnessStats();
   $('set-quality').value = st.quality || 'auto';
   $('set-clockauto').checked = st.clockAuto;
+  loadNonstopBlocks().then(renderNonstopBlocks);
+  renderNonstopGenres();
   $('set-cartsize').value = st.cartSize;
   $('set-background').replaceChildren(...Object.entries(BACKGROUNDS).map(([key, b]) => h('button', {
     type: 'button', class: `choice${st.background === key ? ' sel' : ''}`, style: { background: b.bg, color: b.text },
@@ -1151,6 +1222,15 @@ function bindSettings() {
     blobCache.clear();
     cueNext(); preloadCartPage();
   });
+  $('nonstop-add').addEventListener('click', () => {
+    const value = $('nonstop-value').value.trim();
+    if (value.length < 2) { $('nonstop-value').focus(); return; }
+    addNonstopBlocks([{ kind: $('nonstop-kind').value, value }]);
+    $('nonstop-value').value = '';
+  });
+  $('nonstop-value').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('nonstop-add').click(); } });
+  $('nonstop-kind').addEventListener('change', (e) => { $('nonstop-value').setAttribute('list', e.target.value === 'genre' ? 'nonstop-genres' : ''); });
+  $('nonstop-show').addEventListener('click', () => { $('settings').close(); $('lib-collection').value = 'nonstop'; $('lib-search').value = ''; searchLibrary(); });
   $('set-autocue').addEventListener('change', (e) => { S.settings.autoCue = e.target.checked; saveSettingsSoon(); });
   $('set-normalize').addEventListener('change', (e) => { S.settings.normalize = e.target.checked; saveSettingsSoon(); reapplyNormalization(); });
   $('set-target').addEventListener('change', (e) => { S.settings.loudnessTarget = Number(e.target.value); saveSettingsSoon(); reapplyNormalization(); });
@@ -1210,13 +1290,15 @@ async function boot() {
   const [{ settings }, { collections }] = await Promise.all([api('GET', '/api/me/settings'), api('GET', '/api/collections')]);
   S.settings = { ...DEFAULT_SETTINGS, ...settings };
   S.collections = collections;
+  loadNonstopBlocks();
   await ensureFiles([...(S.settings.playlist || []).map((i) => i.id), ...(S.settings.cart || []).filter(Boolean).map((s) => s.id)]);
   S.playlist = (S.settings.playlist || []).filter((i) => i.marker || S.files.has(i.id))
     .map((i) => (i.marker
       ? { uid: newUid(), marker: i.marker, color: i.color, state: i.played ? 'played' : 'queued' }
       : { uid: newUid(), id: i.id, stopAfter: Boolean(i.stopAfter), state: i.played ? 'played' : 'queued' }));
 
-  $('lib-collection').replaceChildren(h('option', { value: '' }, 'Alle collecties'), ...collections.map((c) => h('option', { value: c.id }, c.name)));
+  $('lib-collection').replaceChildren(h('option', { value: '' }, 'Alle collecties'), ...collections.map((c) => h('option', { value: c.id }, c.name)),
+    h('option', { value: 'nonstop' }, '🚫 Niet in nonstop'));
   $('lib-collection').addEventListener('change', searchLibrary);
   $('lib-search').addEventListener('input', searchLibrarySoon);
   $('lib-sort').value = S.settings.librarySort || 'name';

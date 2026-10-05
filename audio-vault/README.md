@@ -284,6 +284,24 @@ automatisch toevoegen* (of `AUTO_IMPORT_MINUTES`, 0 = uit).
 - Nummers die je uit de map weghaalt, blijven in de database staan, zodat er
   nooit per ongeluk iets uit je uitzending verdwijnt.
 
+## Nonstop-filter (wat je nooit in de uurklok wilt)
+
+Per persoon stel je in wat de automatische planning (uurklok / 24/7) nooit kiest.
+Zelf toevoegen aan de playlist blijft altijd mogelijk.
+
+- **Rechtsklik** op een nummer in de database of de playlist → 🚫 *Dit nummer niet
+  in de nonstop*, *Artiest niet in de nonstop* of *Genre niet in de nonstop*.
+  Met Ctrl/Shift meerdere nummers selecteren kan ook.
+- ⚙ Instellingen → *Nonstop-filter*: regels toevoegen op **genre**, **artiest** of
+  **map / bestandsnaam** (werkt als "bevat": *kerst* filtert ook de map
+  *Kerst 2024*), en met ✕ weer toestaan.
+- Gefilterde nummers hebben een 🚫 in de database; *🚫 Niet in nonstop* in de
+  collectiekeuze toont ze allemaal.
+- Genres komen uit de tags van de bestanden (ook voor muziek die al in de database
+  stond; dat wordt op de achtergrond ingelezen). WAV-rips hebben vaak geen genre:
+  filter dan op map of artiest.
+- Ieder heeft zijn eigen filter; het filter van een klant geldt niet voor jou.
+
 ## Gelijk volume (loudness-normalisatie)
 
 Elk nummer en elke jingle klinkt even hard, ook als de ene opname veel zachter

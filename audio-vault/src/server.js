@@ -5,6 +5,7 @@ const { createPool, migrate } = require('./db');
 const { createApp } = require('./app');
 const { startAutoImport } = require('./autoimport');
 const { startLoudnessWorker } = require('./loudness');
+const { startGenreWorker } = require('./nonstop');
 
 async function main() {
   const sessionSecret = process.env.SESSION_SECRET;
@@ -32,6 +33,7 @@ async function main() {
   });
   // Measure the loudness of new (and not yet measured) tracks in the background.
   startLoudnessWorker({ pool, filesDir: path.join(storageDir, 'files'), log: (l) => console.log(`[volume] ${l}`) });
+  startGenreWorker({ pool, filesDir: path.join(storageDir, 'files'), log: (l) => console.log(`[genres] ${l}`) });
   const port = Number(process.env.PORT || 3000);
   app.listen(port, () => console.log(`Audio Vault draait op http://localhost:${port}`));
 }

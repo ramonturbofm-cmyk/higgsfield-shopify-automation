@@ -9,6 +9,7 @@ const { createPool, migrate } = require('../src/db');
 const { createApp } = require('../src/app');
 
 const DB = process.env.TEST_DATABASE_URL;
+const hasFfmpeg = (() => { try { require('child_process').execFileSync('ffmpeg', ['-version']); return true; } catch { return false; } })();
 let server, base, pool, storageDir;
 
 // One second of 8 kHz mono silence as a WAV file.
@@ -42,7 +43,7 @@ function client() {
 before(async () => {
   if (!DB) return;
   pool = createPool(DB);
-  await pool.query('DROP TABLE IF EXISTS clock_schedule, clocks, station_now_playing, now_playing, user_settings, access_log, collection_access, audio_files, collections, users CASCADE');
+  await pool.query('DROP TABLE IF EXISTS nonstop_blocks, clock_schedule, clocks, station_now_playing, now_playing, user_settings, access_log, collection_access, audio_files, collections, users CASCADE');
   await migrate(pool);
   storageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-'));
   const app = createApp({ pool, storageDir, sessionSecret: 'test-secret' });
@@ -309,6 +310,81 @@ test('hour clocks: schedule, rotation and artist separation', { skip: !DB && 'TE
 
   assert.equal((await owner('DELETE', `/api/clocks/${clock.id}`)).status, 200);
   assert.deepEqual((await owner('GET', '/api/clocks')).data.schedule, []);
+});
+
+test('nonstop filter: blocked tracks, artists, genres and folders are never planned', { skip: !DB && 'TEST_DATABASE_URL not set' }, async () => {
+  const owner = client();
+  assert.equal((await owner('POST', '/api/login', { email: 'owner@example.com', password: 'supergeheim1' })).status, 200);
+  const music = (await owner('POST', '/api/collections', { name: 'Nonstop' })).data.collection;
+  const upload = async (artist, title) => {
+    const fd = new FormData();
+    fd.append('collection_id', String(music.id)); fd.append('artist', artist); fd.append('title', title);
+    fd.append('file', new Blob([wav()]), `${title}.wav`);
+    return (await owner('POST', '/api/files', fd)).data.file.id;
+  };
+  const ok = [await upload('Goed 1', 'g1'), await upload('Goed 2', 'g2'), await upload('Goed 3', 'g3')];
+  const single = await upload('Prima', 'een nummer niet');
+  const artist = await upload('Hans Polkaband feat. X', 'polka');
+  const genre = await upload('Iemand', 'schlager');
+  const folder = await upload('Ander', 'kerst');
+  await pool.query("UPDATE audio_files SET genre = 'Volksmusik, Schlager' WHERE id = $1", [genre]);
+  await pool.query("UPDATE audio_files SET source_path = '/import/Kerst 2024/kerst.flac' WHERE id = $1", [folder]);
+
+  assert.equal((await owner('POST', '/api/me/nonstop-blocks', { kind: 'onzin', value: 'x' })).status, 400);
+  assert.equal((await owner('POST', '/api/me/nonstop-blocks', { kind: 'artist', value: ' ' })).status, 400);
+  for (const b of [{ kind: 'file', value: single }, { kind: 'artist', value: 'POLKABAND' }, { kind: 'genre', value: 'schlager' }, { kind: 'folder', value: 'Kerst 2024' }]) {
+    assert.equal((await owner('POST', '/api/me/nonstop-blocks', b)).status, 200);
+  }
+  assert.equal((await owner('POST', '/api/me/nonstop-blocks', { kind: 'genre', value: 'Schlager' })).status, 200, 'adding twice is fine');
+  const { blocks } = (await owner('GET', '/api/me/nonstop-blocks')).data;
+  assert.deepEqual(blocks.map((b) => [b.kind, b.value]), [['artist', 'polkaband'], ['file', String(single)], ['folder', 'kerst 2024'], ['genre', 'schlager']]);
+  assert.equal(blocks.find((b) => b.kind === 'file').title, 'een nummer niet');
+
+  // The library marks what the filter keeps out, and can list only those.
+  const { files } = (await owner('GET', `/api/files?collection_id=${music.id}`)).data;
+  assert.deepEqual(files.filter((f) => f.nonstop_blocked).map((f) => f.id).sort(), [single, artist, genre, folder].sort());
+  const only = (await owner('GET', `/api/files?collection_id=${music.id}&nonstop=blocked`)).data;
+  assert.equal(only.total, 4);
+  assert.ok((await owner('GET', '/api/genres')).data.genres.some((g) => g.genre === 'Schlager'));
+  assert.equal((await owner('GET', '/api/files?q=volksmusik')).data.total, 1, 'search finds genres');
+
+  const clock = (await owner('POST', '/api/clocks', { name: 'Nonstop', slots: Array(3).fill({ type: 'muziek', collection_id: music.id }) })).data.clock;
+  await owner('PUT', '/api/clock-schedule', { cells: [{ day: 2, hour: 9, clock_id: clock.id }] });
+  for (let round = 0; round < 15; round++) {
+    const { items } = (await owner('POST', '/api/clocks/plan', { hours: [{ day: 2, hour: 9 }] })).data.planned[0];
+    assert.deepEqual([...items].sort(), [...ok].sort(), 'only unfiltered tracks are planned');
+  }
+  // Someone else's filter does not apply to me.
+  const other = client();
+  const inv = (await owner('POST', '/api/users', { name: 'Noor', email: 'noor-nonstop@example.com', role: 'admin' })).data;
+  assert.equal((await other('POST', `/api/invite/${inv.invite_url.split('#invite=')[1]}`, { password: 'noor-wachtwoord-1' })).status, 200);
+  const seen = new Set();
+  for (let round = 0; round < 25; round++) for (const id of (await other('POST', '/api/clocks/plan', { hours: [{ day: 2, hour: 9 }] })).data.planned[0].items) seen.add(id);
+  assert.ok(seen.size > 3, 'filters are personal');
+
+  // Removing a rule brings the tracks back.
+  for (const b of blocks) assert.equal((await owner('DELETE', `/api/me/nonstop-blocks/${b.id}`)).status, 200);
+  assert.equal((await owner('GET', `/api/files?collection_id=${music.id}&nonstop=blocked`)).data.total, 0);
+  await owner('DELETE', `/api/clocks/${clock.id}`);
+});
+
+test('genres are read from the tags, also for files imported earlier', { skip: (!DB && 'TEST_DATABASE_URL not set') || (!hasFfmpeg && 'ffmpeg not installed') }, async () => {
+  const { startGenreWorker } = require('../src/nonstop');
+  const filesDir = path.join(storageDir, 'files');
+  const { execFileSync } = require('child_process');
+  execFileSync('ffmpeg', ['-nostdin', '-v', 'error', '-y', '-f', 'lavfi', '-i', 'sine=d=1', '-metadata', 'genre=Polka', '-c:a', 'flac', path.join(filesDir, 'genre-test.flac')]);
+  const { rows: [c] } = await pool.query("INSERT INTO collections (name) VALUES ('Genres') RETURNING id");
+  const { rows: [f] } = await pool.query(
+    `INSERT INTO audio_files (collection_id, title, original_name, storage_key, mime_type, size_bytes)
+     VALUES ($1, 'oud', 'oud.flac', 'genre-test.flac', 'audio/flac', 1) RETURNING id, genre`, [c.id]);
+  assert.equal(f.genre, null, 'not read yet');
+  const worker = startGenreWorker({ pool, filesDir });
+  await worker.runOnce();
+  worker.stop();
+  const { rows: [after] } = await pool.query('SELECT genre FROM audio_files WHERE id = $1', [f.id]);
+  assert.equal(after.genre, 'Polka');
+  const { rows: [{ n }] } = await pool.query('SELECT count(*)::int AS n FROM audio_files WHERE genre IS NULL');
+  assert.equal(n, 0, 'files without a genre tag get an empty genre, not read again');
 });
 
 test('new music is added automatically; files still copying wait; one import at a time', { skip: !DB && 'TEST_DATABASE_URL not set' }, async () => {
