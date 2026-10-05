@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
   push:
     branches: [audio-vault]
-    paths: ['audio-vault/desktop/**', '.github/workflows/desktop-windows.yml']
+    paths: ['audio-vault/desktop/**', 'audio-vault/converter/**', 'audio-vault/src/convert-archive.js', '.github/workflows/desktop-windows.yml']
 
 jobs:
   build:
@@ -27,4 +27,25 @@ jobs:
         with:
           name: Audio-OnAir-Turbo-Setup
           path: audio-vault/desktop/dist/*.exe
+          if-no-files-found: error
+
+  # Standalone "Audio OnAir Turbo Omzetter" (WAV → FLAC), installer + single exe.
+  converter:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: audio-vault/converter
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: audio-vault/converter/package-lock.json
+      - run: npm ci
+      - run: npm run dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Audio-OnAir-Turbo-Omzetter
+          path: audio-vault/converter/dist/*.exe
           if-no-files-found: error

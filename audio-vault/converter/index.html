@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'self'; img-src 'self'">
+<title>Audio OnAir Turbo Omzetter</title>
+<style>
+  :root { --bg: #000; --panel: #0e0e10; --panel2: #18181b; --line: #26262b; --text: #f2f2f2; --muted: #8a8a92; --accent: #ff3b30; --ok: #30d158; --warn: #ff9f0a; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: radial-gradient(900px 420px at 50% -8%, #2a0d08 0%, #000 62%); color: var(--text);
+    font: 14px/1.45 "Segoe UI", system-ui, sans-serif; user-select: none; }
+  main { max-width: 820px; margin: 0 auto; padding: 22px 22px 28px; }
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+  header img { width: 52px; height: 52px; filter: drop-shadow(0 6px 18px rgba(255, 60, 30, .35)); }
+  header h1 { margin: 0; font-size: 18px; letter-spacing: .14em; }
+  header .sub { color: var(--accent); font-weight: 800; letter-spacing: .32em; font-size: 12px; }
+  header .tag { margin-left: auto; color: var(--muted); font-size: 12px; text-align: right; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 10px; }
+  .step { display: grid; grid-template-columns: 34px 1fr auto; gap: 12px; align-items: center; }
+  .num { width: 30px; height: 30px; border-radius: 50%; background: var(--panel2); display: grid; place-items: center; font-weight: 800; color: var(--muted); }
+  .num.ok { background: var(--ok); color: #000; }
+  .step b { display: block; }
+  .path { color: var(--muted); font-size: 13px; word-break: break-all; user-select: text; }
+  .path.set { color: var(--text); font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; }
+  button { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 9px 16px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  .big { width: 100%; padding: 15px; font-size: 16px; font-weight: 800; letter-spacing: .12em; border: 0; background: var(--accent); color: #fff; margin-top: 4px; }
+  .big.pause { background: var(--panel2); border: 1px solid var(--warn); color: var(--warn); }
+  .overview { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .stat { background: var(--panel2); border-radius: 8px; padding: 10px 12px; }
+  .stat .v { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stat .k { color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+  .note { margin-top: 10px; font-size: 13px; color: var(--muted); }
+  .note.warn { color: var(--warn); } .note.bad { color: #ff6a5a; } .note.good { color: var(--ok); }
+  .bar { height: 12px; background: var(--panel2); border-radius: 6px; overflow: hidden; margin: 6px 0 10px; }
+  .fill { height: 100%; width: 0; background: linear-gradient(90deg, #ff6a3d, #d4001a); transition: width .3s; }
+  .progress-head { display: flex; justify-content: space-between; align-items: baseline; }
+  .progress-head .pct { font-size: 28px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .current { color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: ui-monospace, Consolas, monospace; }
+  .log { max-height: 140px; overflow: auto; font: 12px/1.5 ui-monospace, Consolas, monospace; color: #c9c9cf; margin-top: 10px; user-select: text; }
+  .log .failed { color: #ff6a5a; } .log .kept { color: var(--warn); }
+  .result h2 { margin: 0 0 6px; font-size: 18px; }
+  .row-buttons { display: flex; gap: 8px; margin-top: 12px; }
+  .hidden { display: none !important; }
+  .footer { text-align: center; color: #45454c; font-size: 11px; letter-spacing: .1em; margin-top: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <img src="build/icon.svg" alt="">
+    <div><h1>AUDIO ONAIR</h1><div class="sub">OMZETTER</div></div>
+    <div class="tag">WAV → FLAC<br>verliesvrij, bit-voor-bit gecontroleerd</div>
+  </header>
+
+  <div class="card step">
+    <div class="num" id="n1">1</div>
+    <div><b>Map met je WAV-bestanden</b><div class="path" id="source">Nog niet gekozen — bijv. je muziekmap op de Synology (\\DS218play\music of netwerkschijf Z:)</div></div>
+    <button id="pick-source">Kiezen…</button>
+  </div>
+  <div class="card step">
+    <div class="num" id="n2">2</div>
+    <div><b>Nieuwe map voor de FLAC-bestanden</b><div class="path" id="target">Nog niet gekozen — maak een nieuwe, lege map (bijv. "music-flac")</div></div>
+    <button id="pick-target">Kiezen…</button>
+  </div>
+
+  <div class="card hidden" id="overview-card">
+    <div class="overview">
+      <div class="stat"><div class="v" id="o-wav">–</div><div class="k">WAV-bestanden</div></div>
+      <div class="stat"><div class="v" id="o-size">–</div><div class="k">Grootte WAV</div></div>
+      <div class="stat"><div class="v" id="o-need">–</div><div class="k">Nodig (± schatting)</div></div>
+      <div class="stat"><div class="v" id="o-free">–</div><div class="k">Vrij op doel</div></div>
+    </div>
+    <div class="note" id="o-note"></div>
+  </div>
+
+  <button class="big" id="start" disabled>START</button>
+
+  <div class="card hidden" id="progress-card">
+    <div class="progress-head"><span class="pct" id="p-pct">0%</span><span id="p-count">0 / 0</span></div>
+    <div class="bar"><div class="fill" id="p-fill"></div></div>
+    <div class="progress-head" style="font-size:13px;color:var(--muted)"><span id="p-eta">Bezig met voorbereiden…</span><span id="p-saved"></span></div>
+    <div class="current" id="p-current"></div>
+    <div class="log" id="p-log"></div>
+  </div>
+
+  <div class="card result hidden" id="result-card">
+    <h2 id="r-title"></h2>
+    <div id="r-text" class="path set" style="white-space:pre-wrap;font-family:inherit;font-size:13.5px"></div>
+    <div class="row-buttons">
+      <button id="open-report">Rapport openen</button>
+      <button id="open-target">Doelmap openen</button>
+    </div>
+  </div>
+
+  <div class="footer" id="footer"></div>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

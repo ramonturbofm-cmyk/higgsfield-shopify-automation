@@ -1,0 +1,51 @@
+{
+  "name": "audio-onair-turbo-omzetter",
+  "productName": "Audio OnAir Turbo Omzetter",
+  "version": "1.0.0",
+  "description": "WAV naar FLAC omzetten, bit-voor-bit gecontroleerd",
+  "author": "Turbo FM",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "sync": "node -e \"require('fs').mkdirSync('lib',{recursive:true});require('fs').copyFileSync('../src/convert-archive.js','lib/convert-archive.js')\"",
+    "prestart": "npm run sync",
+    "start": "electron .",
+    "predist": "npm run sync",
+    "dist": "electron-builder --win --x64 --publish never"
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.2.0",
+    "ffprobe-static": "^3.1.0"
+  },
+  "devDependencies": {
+    "electron": "^44.5.1",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "fm.turbo.audio-onair.omzetter",
+    "productName": "Audio OnAir Turbo Omzetter",
+    "copyright": "© 2026 Turbo FM",
+    "directories": { "buildResources": "build", "output": "dist" },
+    "files": [
+      "main.js", "preload.js", "engine-worker.js", "index.html", "app.js", "lib/**", "build/icon.png", "build/icon.svg",
+      "!node_modules/ffprobe-static/bin/darwin/**", "!node_modules/ffprobe-static/bin/linux/**", "!node_modules/ffprobe-static/bin/win32/ia32/**"
+    ],
+    "asarUnpack": ["engine-worker.js", "lib/**", "node_modules/ffmpeg-static/**", "node_modules/ffprobe-static/bin/**"],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }, { "target": "portable", "arch": ["x64"] }],
+      "icon": "build/icon.ico"
+    },
+    "portable": { "artifactName": "Audio-OnAir-Turbo-Omzetter-${version}-zonder-installatie.exe" },
+    "nsis": {
+      "artifactName": "Audio-OnAir-Turbo-Omzetter-Setup-${version}.exe",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerSidebar": "build/installerSidebar.bmp",
+      "createDesktopShortcut": "always",
+      "shortcutName": "Audio OnAir Turbo Omzetter"
+    }
+  }
+}

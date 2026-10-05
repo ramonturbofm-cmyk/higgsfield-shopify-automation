@@ -233,6 +233,20 @@ schrijven). Je oude WAV-map wordt alleen gelezen.
 Zonder app: `docker compose --profile archief up -d archive` (doel: `ARCHIVE_DIR`
 of de `NAS_ARCHIVE_`-instellingen met `docker-compose.nas-archive.yml`).
 
+## Audio OnAir Turbo Omzetter (los programma)
+
+`converter/` is een los Windows-programma om een WAV-archief om te zetten naar
+FLAC, zonder Docker of server; ffmpeg zit erin. Kies de map met WAV-bestanden
+(ook op de Synology, bijv. `\\DS218play\music` of een netwerkschijf), kies een
+nieuwe map en klik **START**. Het toont vooraf hoeveel bestanden en ruimte het
+gaat om, en tijdens het omzetten een voortgangsbalk (ook op de taakbalk), de
+resterende tijd en de bespaarde ruimte. **Pauzeren** en later **verdergaan**
+kan altijd; de pc gaat tijdens het omzetten niet in slaapstand. Het gebruikt
+dezelfde bit-voor-bit-controle als de server (`src/convert-archive.js`).
+
+GitHub bouwt het automatisch (Actions → artifact *Audio-OnAir-Turbo-Omzetter*):
+een installatieprogramma en een losse `.exe` die je zonder installeren start.
+
 ## Grote bibliotheken (200.000+ nummers)
 
 Getest met 200.000 nummers en 150.000 gedraaide items: de studio laadt in
