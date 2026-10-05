@@ -9,6 +9,9 @@ on:
     branches: [audio-vault]
     paths: ['audio-vault/desktop/**', 'audio-vault/src/**', 'audio-vault/public/**', 'audio-vault/Dockerfile', 'audio-vault/docker-compose*.yml', 'audio-vault/converter/**', 'audio-vault/src/convert-archive.js', '.github/workflows/desktop-windows.yml']
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -29,6 +32,25 @@ jobs:
           name: Audio-OnAir-Turbo-Database-Setup
           path: audio-vault/desktop/dist/*.exe
           if-no-files-found: error
+      - name: Publish on the updates page
+        shell: bash
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./audio-vault/desktop/package.json').version")
+          TAG="v$VERSION"
+          NOTES="Installeren: download Audio-OnAir-Turbo-Database-Setup-$VERSION.exe en start het, of klik in de studio op het ⬆-icoon. Instellingen, databases en muziek blijven staan."$'\n\n'"Laatste wijziging: $(git log -1 --format=%s)"
+          # Each build adds its own files; whichever finishes first creates the release.
+          for attempt in 1 2 3; do
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              gh release upload "$TAG" audio-vault/desktop/dist/*.exe --clobber && exit 0
+            else
+              gh release create "$TAG" audio-vault/desktop/dist/*.exe --target "${{ github.sha }}" --title "Audio OnAir Turbo Database $VERSION" --notes "$NOTES" --latest && exit 0
+            fi
+            sleep 10
+          done
+          exit 1
 
   # Standalone "Audio OnAir Turbo Omzetter" (WAV → FLAC), installer + single exe.
   converter:
@@ -50,33 +72,23 @@ jobs:
           name: Audio-OnAir-Turbo-Database-Omzetter
           path: audio-vault/converter/dist/*.exe
           if-no-files-found: error
-
-  # One release per app version: "Audio OnAir Turbo Database <version>" with both installers.
-  release:
-    needs: [build, converter]
-    # Windows like the build jobs (Linux runners were not always available).
-    runs-on: windows-latest
-    defaults:
-      run:
-        shell: bash
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
       - name: Publish on the updates page
+        shell: bash
+        working-directory: .
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION=$(node -p "require('./audio-vault/desktop/package.json').version")
           TAG="v$VERSION"
-          ls -l dist
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/*.exe --clobber
-          else
-            NOTES="Installeren: download Audio-OnAir-Turbo-Database-Setup-$VERSION.exe en start het. Instellingen, databases en muziek blijven staan; klik daarna in Server beheren op Herstarten / bijwerken."$'\n\n'"Laatste wijziging: $(git log -1 --format=%s)"
-            gh release create "$TAG" dist/*.exe --target "${{ github.sha }}" --title "Audio OnAir Turbo Database $VERSION" --notes "$NOTES" --latest
-          fi
+          NOTES="Installeren: download Audio-OnAir-Turbo-Database-Setup-$VERSION.exe en start het, of klik in de studio op het ⬆-icoon. Instellingen, databases en muziek blijven staan."$'\n\n'"Laatste wijziging: $(git log -1 --format=%s)"
+          # Each build adds its own files; whichever finishes first creates the release.
+          for attempt in 1 2 3; do
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              gh release upload "$TAG" audio-vault/converter/dist/*.exe --clobber && exit 0
+            else
+              gh release create "$TAG" audio-vault/converter/dist/*.exe --target "${{ github.sha }}" --title "Audio OnAir Turbo Database $VERSION" --notes "$NOTES" --latest && exit 0
+            fi
+            sleep 10
+          done
+          exit 1
+
