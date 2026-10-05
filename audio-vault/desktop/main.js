@@ -163,7 +163,7 @@ function buildMenu() {
     {
       label: 'Help',
       submenu: [{
-        label: 'Controleren op updates',
+        label: 'Bijwerken / controleren op updates',
         click: () => checkForUpdates({ manual: true }),
       }, {
         label: 'Alle updates (downloadpagina)',
@@ -194,32 +194,124 @@ function newerVersion(a, b) {
   return false;
 }
 
+// Latest release on the updates page, or null when this is the newest version.
+let updateInfo = null;
+async function fetchLatest() {
+  const res = await net.fetch(UPDATES_API, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Audio-OnAir-Turbo' } });
+  if (!res.ok) throw new Error(`updatepagina gaf ${res.status}`);
+  const release = await res.json();
+  const latest = String(release.tag_name || '').replace(/^v/, '');
+  const setup = (release.assets || []).find((a) => /Setup.*\.exe$/i.test(a.name) && !/Omzetter/i.test(a.name));
+  updateInfo = latest && setup && newerVersion(latest, app.getVersion())
+    ? { version: latest, url: setup.browser_download_url, name: setup.name, size: setup.size, notes: String(release.body || '').trim().slice(0, 900) }
+    : null;
+  sendUpdateStatus({ available: Boolean(updateInfo), version: updateInfo && updateInfo.version });
+  return updateInfo;
+}
+function sendUpdateStatus(status) {
+  if (win && !win.isDestroyed()) win.webContents.send('update-status', { current: app.getVersion(), ...status });
+}
+
 async function checkForUpdates({ manual = false } = {}) {
   try {
-    const res = await net.fetch(UPDATES_API, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Audio-OnAir-Turbo' } });
-    if (!res.ok) throw new Error(`updatepagina gaf ${res.status}`);
-    const release = await res.json();
-    const latest = String(release.tag_name || '').replace(/^v/, '');
-    const cfg = readConfig();
-    if (!latest || !newerVersion(latest, app.getVersion())) {
+    const info = await fetchLatest();
+    if (!info) {
       if (manual) dialog.showMessageBox(win, { type: 'info', icon: ICON, title: 'Updates', message: 'Je hebt de nieuwste versie', detail: `Audio OnAir Turbo Database ${app.getVersion()}` });
       return;
     }
-    if (!manual && cfg.skipVersion === latest) return;
-    const setup = (release.assets || []).find((a) => /Setup.*\.exe$/i.test(a.name) && !/Omzetter/i.test(a.name));
-    const notes = String(release.body || '').trim().slice(0, 900);
-    const { response } = await dialog.showMessageBox(win, {
-      type: 'info', icon: ICON, title: 'Update beschikbaar',
-      message: `Nieuwe versie ${latest} beschikbaar (je hebt ${app.getVersion()})`,
-      detail: `${notes ? `${notes}\n\n` : ''}Download en start het installatieprogramma; je instellingen, databases en muziek blijven staan. Daarna in Server beheren op "Herstarten / bijwerken" klikken.`,
-      buttons: ['Downloaden', 'Later', 'Deze versie overslaan'], defaultId: 0, cancelId: 1,
-    });
-    if (response === 0) shell.openExternal(setup ? setup.browser_download_url : release.html_url || UPDATES_PAGE);
-    if (response === 2) writeConfig({ skipVersion: latest });
+    if (!manual && readConfig().skipVersion === info.version) return;
+    await installUpdate();
   } catch (err) {
     if (manual) dialog.showMessageBox(win, { type: 'warning', icon: ICON, title: 'Updates', message: 'Kon niet controleren op updates', detail: `${err.message}\n\nAlle versies staan op ${UPDATES_PAGE}` });
   }
 }
+
+// One click: download the new installer, install it silently, restart the app.
+// After the restart the server is brought up to date too (see updateServers).
+let installing = false;
+async function installUpdate() {
+  if (installing) return { ok: false, error: 'De update wordt al geïnstalleerd' };
+  const info = updateInfo || (await fetchLatest());
+  if (!info) { sendUpdateStatus({ available: false }); return { ok: true, latest: true }; }
+  const { response } = await dialog.showMessageBox(win, {
+    type: 'info', icon: ICON, title: 'Update beschikbaar',
+    message: `Bijwerken naar versie ${info.version}? (je hebt ${app.getVersion()})`,
+    detail: `${info.notes ? `${info.notes}\n\n` : ''}De app downloadt de update, installeert hem en start opnieuw; daarna wordt de server vanzelf bijgewerkt. `
+      + 'De uitzending stopt daarbij 1 à 2 minuten. Instellingen, databases en muziek blijven staan.',
+    buttons: ['Nu bijwerken', 'Later', 'Deze versie overslaan'], defaultId: 0, cancelId: 1,
+  });
+  if (response === 2) writeConfig({ skipVersion: info.version });
+  if (response !== 0) return { ok: false, cancelled: true };
+  installing = true;
+  try {
+    const file = path.join(os.tmpdir(), info.name);
+    const res = await net.fetch(info.url);
+    if (!res.ok || !res.body) throw new Error(`downloaden mislukt (${res.status})`);
+    const total = Number(res.headers.get('content-length')) || info.size || 0;
+    const out = fs.createWriteStream(file);
+    let done = 0; let lastPct = -1;
+    const reader = res.body.getReader();
+    for (;;) {
+      const { done: end, value } = await reader.read();
+      if (end) break;
+      done += value.length;
+      if (!out.write(Buffer.from(value))) await new Promise((r) => out.once('drain', r));
+      const pct = total ? Math.floor((done / total) * 100) : 0;
+      if (pct !== lastPct) { lastPct = pct; if (win && !win.isDestroyed()) win.setProgressBar(pct / 100); sendUpdateStatus({ available: true, version: info.version, downloading: pct }); }
+    }
+    await new Promise((resolve, reject) => out.end((err) => (err ? reject(err) : resolve())));
+    if (total && done < total) throw new Error('download onvolledig');
+    writeConfig({ updatedFrom: app.getVersion() });
+    sendUpdateStatus({ available: true, version: info.version, installing: true });
+    // /S = silent install in the same folder, --force-run = start the app again afterwards.
+    require('child_process').spawn(file, ['/S', '--force-run'], { detached: true, stdio: 'ignore' }).unref();
+    setTimeout(() => app.exit(0), 500);
+    return { ok: true };
+  } catch (err) {
+    installing = false;
+    if (win && !win.isDestroyed()) win.setProgressBar(-1);
+    sendUpdateStatus({ available: true, version: info.version, error: err.message });
+    dialog.showMessageBox(win, { type: 'warning', icon: ICON, title: 'Bijwerken mislukt', message: 'De update kon niet worden geïnstalleerd', detail: `${err.message}\n\nJe kunt hem ook zelf downloaden: ${UPDATES_PAGE}` });
+    return { ok: false, error: err.message };
+  }
+}
+
+// After an app update: rebuild every local server that still runs the old version,
+// showing the progress on the Server beheren screen, then go back to the studio.
+async function updateServers() {
+  const outdated = databases().map((db) => ({ db, m: managerFor(db) })).filter(({ m }) => m.outdated);
+  if (!outdated.length) return;
+  const active = outdated.find(({ db }) => db.id === activeDb().id);
+  if (active) showServer();
+  for (const { db, m } of outdated) {
+    for (let attempt = 0; attempt < 20; attempt++) {
+      try {
+        const st = await m.status();
+        if (st.docker !== 'running') { if (attempt === 0 && st.docker === 'stopped') await m.startDocker().catch(() => {}); throw new Error('Docker start nog op'); }
+        const code = await m.run('start');
+        if (code) throw new Error(`server bijwerken gaf code ${code}`);
+        if (db === (active && active.db)) {
+          serverOrigin = `http://localhost:${db.port}`;
+          setTimeout(() => openStudio(), 3000);
+        }
+        break;
+      } catch (err) {
+        if (win && !win.isDestroyed()) win.webContents.send('server-log', `Server bijwerken: ${err.message} — opnieuw over 30 seconden…\n`);
+        await new Promise((r) => setTimeout(r, 30000));
+      }
+    }
+  }
+}
+
+ipcMain.handle('update', async (e, action) => {
+  try {
+    if (action === 'check') { await fetchLatest(); return { ok: true, current: app.getVersion(), available: Boolean(updateInfo), version: updateInfo && updateInfo.version }; }
+    if (action === 'install') return await installUpdate();
+    throw new Error('Onbekend verzoek');
+  } catch (err) {
+    return { ok: false, error: err.message, current: app.getVersion() };
+  }
+});
 
 function createWindow() {
   const cfg = readConfig();
@@ -392,6 +484,7 @@ if (!app.requestSingleInstanceLock()) {
     databases(); // migrate the single server of earlier versions into the list
     buildMenu();
     createWindow();
+    setTimeout(() => updateServers().catch(() => {}), 2000);
     setTimeout(() => checkForUpdates(), 15 * 1000);
     setInterval(() => checkForUpdates(), 6 * 60 * 60 * 1000);
   });

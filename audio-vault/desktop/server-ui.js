@@ -46,7 +46,7 @@ async function refresh() {
 
   if (s.docker === 'missing') banner('Docker Desktop is nodig om de server te draaien.', 'Docker Desktop installeren', () => api.installDocker().then(refresh));
   else if (s.docker === 'stopped') banner('Docker Desktop is niet gestart.', 'Docker Desktop starten', async () => { await api.startDocker(); log('Docker Desktop wordt gestart, dit duurt ongeveer een minuut…\n'); });
-  else if (s.outdated) banner('De app is bijgewerkt. Klik op "Herstarten / bijwerken" om ook de server bij te werken.');
+  else if (s.outdated) banner(s.busy ? 'De app is bijgewerkt; de server wordt nu automatisch bijgewerkt…' : 'De app is bijgewerkt. Klik op "Herstarten / bijwerken" om ook de server bij te werken.');
   else banner('');
 
   const ready = s.docker === 'running' && s.installed && !s.busy;

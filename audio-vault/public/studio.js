@@ -1365,7 +1365,34 @@ for (const d of decks) {
 }
 $('now').querySelector('.now-bar').addEventListener('pointerdown', seekable(() => $('now').querySelector('.now-bar'), () => S.live));
 
+// Update icon (only in the Windows app): red dot when a new version is out; one
+// click downloads, installs and restarts, and the server is updated afterwards.
+function setupUpdateButton() {
+  const u = window.onairUpdate;
+  const btn = $('btn-update');
+  if (!u) return;
+  btn.classList.remove('hidden');
+  const show = (st) => {
+    btn.classList.toggle('has-update', Boolean(st.available));
+    btn.title = st.installing ? 'Update wordt geïnstalleerd…'
+      : st.downloading !== undefined ? `Update downloaden… ${st.downloading}%`
+        : st.available ? `Nieuwe versie ${st.version} — klik om bij te werken` : `Je hebt de nieuwste versie (${st.current})`;
+    if (st.downloading !== undefined) status(`⬆ Update ${st.version} downloaden… ${st.downloading}%`);
+    if (st.installing) status('⬆ Update installeren — de app start zo opnieuw');
+    if (st.error) status(`Bijwerken mislukt: ${st.error}`);
+  };
+  u.onStatus(show);
+  u.check().then(show).catch(() => {});
+  btn.addEventListener('click', async () => {
+    const st = await u.check();
+    if (st.ok && !st.available) { show(st); status(`✓ Je hebt de nieuwste versie (${st.current})`); return; }
+    if (!st.ok) { status(`Kon niet controleren op updates: ${st.error}`); return; }
+    await u.install();
+  });
+}
+
 async function boot() {
+  setupUpdateButton();
   try { S.me = (await api('GET', '/api/me')).user; } catch { location.href = '/'; return; }
   const [{ settings }, { collections }] = await Promise.all([api('GET', '/api/me/settings'), api('GET', '/api/collections')]);
   S.settings = { ...DEFAULT_SETTINGS, ...settings };

@@ -1,6 +1,13 @@
-// Only the app's own local screens (connect, server management) get this bridge;
-// the studio pages from the server never see it.
+// Only the app's own local screens (connect, server management) get the `onair`
+// bridge; the studio pages from the server only get `onairUpdate` (the update icon),
+// which can do nothing but install the newest version from the updates page.
 const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('onairUpdate', {
+  check: () => ipcRenderer.invoke('update', 'check'),
+  install: () => ipcRenderer.invoke('update', 'install'),
+  onStatus: (cb) => ipcRenderer.on('update-status', (e, status) => cb(status)),
+});
 
 if (location.protocol === 'file:') {
   contextBridge.exposeInMainWorld('onair', {

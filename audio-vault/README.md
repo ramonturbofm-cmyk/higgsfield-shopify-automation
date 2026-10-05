@@ -168,6 +168,13 @@ uurklokken en back-up, en draait naast de andere. Wisselen gaat via het menu
 **Database**; je blijft in elke database apart ingelogd en de venstertitel
 toont waar je bent. *Uit de lijst halen* laat de map met gegevens staan.
 
+**Bijwerken met één klik**: in de studio staat rechtsboven een ⬆-icoon. Is er een
+nieuwe versie, dan wordt het rood met een stip. Klik erop → *Nu bijwerken*: de app
+downloadt de update, installeert hem, start opnieuw en werkt daarna vanzelf ook de
+server bij (Server beheren toont de voortgang en gaat daarna terug naar de studio).
+De uitzending stopt daarbij 1 à 2 minuten. Hetzelfde kan via Help → *Bijwerken /
+controleren op updates*.
+
 **Updates**: elke nieuwe versie staat op de updatepagina
 <https://github.com/ramonturbofm-cmyk/higgsfield-shopify-automation/releases>
 (zonder inloggen te downloaden). De app kijkt daar bij het starten en elke zes uur
