@@ -11,6 +11,24 @@ const hasFfmpeg = (() => { try { execFileSync('ffmpeg', ['-version']); execFileS
 const ff = (...args) => execFileSync('ffmpeg', ['-nostdin', '-v', 'error', '-y', ...args]);
 const fingerprint = (file) => /MD5=(\w+)/.exec(execFileSync('ffmpeg', ['-nostdin', '-v', 'error', '-i', file, '-map', '0:a', '-c:a', 'pcm_s32le', '-f', 'md5', '-']).toString())[1];
 
+// Appends an "id3 " chunk (ID3v2.3 with title, artist and a front cover) to a WAV file.
+function addId3(file, { title, artist, cover }) {
+  const frame = (id, body) => { const h = Buffer.alloc(10); h.write(id, 0, 'latin1'); h.writeUInt32BE(body.length, 4); return Buffer.concat([h, body]); };
+  const text = (str) => Buffer.concat([Buffer.from([1, 0xff, 0xfe]), Buffer.from(str, 'utf16le')]);
+  const frames = Buffer.concat([
+    frame('TIT2', text(title)), frame('TPE1', text(artist)),
+    frame('APIC', Buffer.concat([Buffer.from([0]), Buffer.from('image/jpeg\0', 'latin1'), Buffer.from([3, 0]), cover])),
+  ]);
+  const n = frames.length;
+  const header = Buffer.from([0x49, 0x44, 0x33, 3, 0, 0, (n >> 21) & 0x7f, (n >> 14) & 0x7f, (n >> 7) & 0x7f, n & 0x7f]);
+  let tag = Buffer.concat([header, frames]);
+  if (tag.length % 2) tag = Buffer.concat([tag, Buffer.from([0])]);
+  const chunk = Buffer.alloc(8); chunk.write('id3 ', 0, 'latin1'); chunk.writeUInt32LE(tag.length, 4);
+  const wav = Buffer.concat([fs.readFileSync(file), chunk, tag]);
+  wav.writeUInt32LE(wav.length - 8, 4);
+  fs.writeFileSync(file, wav);
+}
+
 test('archive conversion is bit-exact, keeps what FLAC cannot hold and resumes', { skip: !hasFfmpeg && 'ffmpeg not installed' }, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'archief-'));
   const src = path.join(root, 'bron');
@@ -24,6 +42,10 @@ test('archive conversion is bit-exact, keeps what FLAC cannot hold and resumes',
   ff(...tone(600), '-c:a', 'pcm_s32le', path.join(src, '32bit.wav'));
   ff(...tone(650), '-c:a', 'pcm_f32le', path.join(src, 'float.wav'));
   fs.writeFileSync(path.join(src, 'Pop', 'cover.jpg'), 'jpg');
+  // WAV with ID3 tags and an embedded cover (as written by e.g. Mp3tag).
+  ff('-f', 'lavfi', '-i', 'color=c=red:s=64x64', '-frames:v', '1', path.join(root, 'cover.jpg'));
+  ff(...tone(700), '-c:a', 'pcm_s16le', path.join(src, 'Pop', 'hoes.wav'));
+  addId3(path.join(src, 'Pop', 'hoes.wav'), { title: 'Met Hoes é', artist: 'Hoes Artiest', cover: fs.readFileSync(path.join(root, 'cover.jpg')) });
   fs.writeFileSync(path.join(src, '@eaDir', 'thumb.wav'), 'synology junk');
 
   const run = () => execFileSync(process.execPath, [path.join(__dirname, '..', 'src', 'convert-archive.js'), src, dst]).toString();
@@ -40,11 +62,16 @@ test('archive conversion is bit-exact, keeps what FLAC cannot hold and resumes',
   assert.ok(!fs.existsSync(path.join(dst, '@eaDir')), 'Synology system folders are skipped');
   assert.match(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format_tags=title', '-of', 'csv=p=0', path.join(dst, 'Pop/Artiest/zomer.flac')]).toString(), /Zomer/);
   assert.ok(fs.existsSync(src + '/Pop/Artiest/zomer.wav'), 'source untouched');
+  const probe = (file, entries) => execFileSync('ffprobe', ['-v', 'error', '-show_entries', entries, '-of', 'default=nw=1', file]).toString();
+  const hoes = path.join(dst, 'Pop', 'hoes.flac');
+  assert.match(probe(hoes, 'format_tags=title,artist'), /title=Met Hoes é[\s\S]*artist=Hoes Artiest|artist=Hoes Artiest[\s\S]*title=Met Hoes é/);
+  assert.match(probe(hoes, 'stream_disposition=attached_pic'), /attached_pic=1/, 'embedded cover kept');
+  assert.equal(fingerprint(hoes), fingerprint(path.join(src, 'Pop', 'hoes.wav')));
 
   // Leftover from an interrupted run is cleaned up; finished work is skipped.
   fs.writeFileSync(path.join(dst, 'half.flac.part'), 'x');
   const again = run();
-  assert.match(again, /6 al klaar, 0 te doen/);
+  assert.match(again, /7 al klaar, 0 te doen/);
   assert.ok(!fs.existsSync(path.join(dst, 'half.flac.part')));
   assert.match(fs.readFileSync(path.join(dst, '_omzetrapport.txt'), 'utf8'), /Ruimte totaal/);
 

@@ -114,7 +114,9 @@ async function convertArchive({ source, target, jobs = 2, ffmpeg = 'ffmpeg', ffp
     if (await isFloat(t.file)) return keepOriginal();
     const part = `${t.out}.part`;
     try {
-      await run(ffmpeg, ['-nostdin', '-v', 'error', '-y', '-i', t.file, '-map', '0:a:0', '-map_metadata', '0', '-c:a', 'flac', '-compression_level', '8', '-f', 'flac', part]);
+      // Audio plus tags (RIFF INFO and ID3) and an embedded cover picture, if any.
+      await run(ffmpeg, ['-nostdin', '-v', 'error', '-y', '-i', t.file, '-map', '0:a:0', '-map', '0:v?', '-map_metadata', '0',
+        '-c:a', 'flac', '-compression_level', '8', '-c:v', 'copy', '-disposition:v', 'attached_pic', '-f', 'flac', part]);
       const [a, b] = await Promise.all([fingerprint(t.file), fingerprint(part)]);
       if (a !== b) { fs.rmSync(part, { force: true }); return keepOriginal(); } // e.g. 32-bit WAV: FLAC would round it
       fs.renameSync(part, t.out);
