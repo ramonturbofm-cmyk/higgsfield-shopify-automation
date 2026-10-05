@@ -37,7 +37,7 @@ button { font: inherit; color: inherit; }
 .now-label { font-size: 11px; letter-spacing: .2em; color: var(--accent); font-weight: 700; }
 .now-title { font-size: 24px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .now-artist { color: var(--muted); font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.now-bar { position: relative; height: 6px; background: var(--panel2); border-radius: 3px; margin-top: 8px; overflow: hidden; }
+.now-bar { cursor: pointer; touch-action: none; position: relative; height: 6px; background: var(--panel2); border-radius: 3px; margin-top: 8px; overflow: hidden; }
 .now-fill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--accent); }
 .now-mix { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--warn); display: none; }
 .now-times { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: 4px; gap: 12px; }
@@ -100,7 +100,8 @@ button { font: inherit; color: inherit; }
 .deck.cued .deck-state { color: var(--cued); }
 .deck-title { font-weight: 600; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .deck-artist { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.deck-bar { height: 3px; background: var(--line); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+.deck-bar { height: 6px; background: var(--line); border-radius: 3px; margin-top: 6px; overflow: hidden; cursor: pointer; touch-action: none; }
+.deck-bar:hover { height: 8px; margin-bottom: -2px; }
 .deck-bar div { height: 100%; width: 0; background: var(--accent); }
 .deck-time { font: 12px ui-monospace, Consolas, monospace; color: var(--muted); margin-top: 3px; display: flex; justify-content: space-between; }
 

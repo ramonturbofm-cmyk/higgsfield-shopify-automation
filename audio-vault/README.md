@@ -168,9 +168,15 @@ uurklokken en back-up, en draait naast de andere. Wisselen gaat via het menu
 **Database**; je blijft in elke database apart ingelogd en de venstertitel
 toont waar je bent. *Uit de lijst halen* laat de map met gegevens staan.
 
-**Installatieprogramma maken**: bij elke wijziging in `desktop/` bouwt GitHub
-het automatisch op een Windows-machine (Actions → *Audio OnAir Turbo – Windows
-installer* → onderaan *Artifacts*). Zelf bouwen op een Windows-pc:
+**Updates**: elke nieuwe versie staat op de updatepagina
+<https://github.com/ramonturbofm-cmyk/higgsfield-shopify-automation/releases>
+(zonder inloggen te downloaden). De app kijkt daar bij het starten en elke zes uur
+zelf en meldt *Update beschikbaar* met een knop **Downloaden**; ook via Help →
+*Controleren op updates*. Installeer de nieuwe Setup over de oude heen en klik in
+*Server beheren* op *Herstarten / bijwerken*.
+
+**Installatieprogramma maken**: bij elke wijziging bouwt GitHub het automatisch op
+een Windows-machine en zet het op de updatepagina. Zelf bouwen op een Windows-pc:
 `cd desktop && npm install && npm run dist` → `desktop/dist/`.
 
 Het installatieprogramma is niet digitaal ondertekend; Windows toont daarom de

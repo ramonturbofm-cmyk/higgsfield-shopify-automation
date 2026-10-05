@@ -163,6 +163,12 @@ function buildMenu() {
     {
       label: 'Help',
       submenu: [{
+        label: 'Controleren op updates',
+        click: () => checkForUpdates({ manual: true }),
+      }, {
+        label: 'Alle updates (downloadpagina)',
+        click: () => shell.openExternal(UPDATES_PAGE),
+      }, { type: 'separator' }, {
         label: 'Over Audio OnAir Turbo Database',
         click: () => dialog.showMessageBox(win, {
           type: 'info', icon: ICON, title: 'Over Audio OnAir Turbo Database',
@@ -172,6 +178,47 @@ function buildMenu() {
       }],
     },
   ]));
+}
+
+// ---------- updates ----------
+// Every new version is published on the updates page (GitHub Releases). The app looks
+// there at start and every few hours, and offers the new installer. Nothing is
+// installed without asking, and the playout keeps running while the dialog is open.
+const UPDATES_PAGE = 'https://github.com/ramonturbofm-cmyk/higgsfield-shopify-automation/releases';
+const UPDATES_API = 'https://api.github.com/repos/ramonturbofm-cmyk/higgsfield-shopify-automation/releases/latest';
+
+function newerVersion(a, b) {
+  const pa = String(a).replace(/^v/, '').split('.').map(Number);
+  const pb = String(b).replace(/^v/, '').split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
+  return false;
+}
+
+async function checkForUpdates({ manual = false } = {}) {
+  try {
+    const res = await net.fetch(UPDATES_API, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Audio-OnAir-Turbo' } });
+    if (!res.ok) throw new Error(`updatepagina gaf ${res.status}`);
+    const release = await res.json();
+    const latest = String(release.tag_name || '').replace(/^v/, '');
+    const cfg = readConfig();
+    if (!latest || !newerVersion(latest, app.getVersion())) {
+      if (manual) dialog.showMessageBox(win, { type: 'info', icon: ICON, title: 'Updates', message: 'Je hebt de nieuwste versie', detail: `Audio OnAir Turbo Database ${app.getVersion()}` });
+      return;
+    }
+    if (!manual && cfg.skipVersion === latest) return;
+    const setup = (release.assets || []).find((a) => /Setup.*\.exe$/i.test(a.name) && !/Omzetter/i.test(a.name));
+    const notes = String(release.body || '').trim().slice(0, 900);
+    const { response } = await dialog.showMessageBox(win, {
+      type: 'info', icon: ICON, title: 'Update beschikbaar',
+      message: `Nieuwe versie ${latest} beschikbaar (je hebt ${app.getVersion()})`,
+      detail: `${notes ? `${notes}\n\n` : ''}Download en start het installatieprogramma; je instellingen, databases en muziek blijven staan. Daarna in Server beheren op "Herstarten / bijwerken" klikken.`,
+      buttons: ['Downloaden', 'Later', 'Deze versie overslaan'], defaultId: 0, cancelId: 1,
+    });
+    if (response === 0) shell.openExternal(setup ? setup.browser_download_url : release.html_url || UPDATES_PAGE);
+    if (response === 2) writeConfig({ skipVersion: latest });
+  } catch (err) {
+    if (manual) dialog.showMessageBox(win, { type: 'warning', icon: ICON, title: 'Updates', message: 'Kon niet controleren op updates', detail: `${err.message}\n\nAlle versies staan op ${UPDATES_PAGE}` });
+  }
 }
 
 function createWindow() {
@@ -345,6 +392,8 @@ if (!app.requestSingleInstanceLock()) {
     databases(); // migrate the single server of earlier versions into the list
     buildMenu();
     createWindow();
+    setTimeout(() => checkForUpdates(), 15 * 1000);
+    setInterval(() => checkForUpdates(), 6 * 60 * 60 * 1000);
   });
   app.on('window-all-closed', () => app.quit());
 }

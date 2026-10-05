@@ -379,6 +379,44 @@ function cmdFade() {
   S.live.noAdvance = true;
   fadeDeck(S.live, S.settings.fadeOut);
 }
+// Doorspoelen: jump to a point in the track (click or drag the progress bar, ← / → keys).
+function seekDeck(deck, sec) {
+  if (!deck || !deck.file || !['playing', 'paused', 'cued'].includes(deck.state)) return;
+  const start = cueIn(deck.file);
+  const end = cueOut(deck.file) ?? deck.audio.duration;
+  if (!Number.isFinite(end)) return;
+  const t = Math.max(start, Math.min(sec, end - 0.5));
+  deck.audio.currentTime = t;
+  // Seeking back before the mix point makes the automatic mix possible again.
+  const mix = mixPoint(deck.file);
+  if (deck.mixed && mix !== null && t < mix && !decks.some((d) => d !== deck && d.state === 'playing')) deck.mixed = false;
+  renderTimes();
+}
+function seekBy(seconds) {
+  const d = S.live;
+  if (d) seekDeck(d, d.audio.currentTime + seconds);
+}
+function seekable(bar, deckFor) {
+  const at = (e) => {
+    const deck = deckFor();
+    if (!deck || !deck.file) return;
+    const r = bar().getBoundingClientRect();
+    const frac = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    const start = cueIn(deck.file);
+    const end = cueOut(deck.file) ?? deck.audio.duration;
+    seekDeck(deck, start + frac * (end - start));
+  };
+  return (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    at(e);
+    const move = (ev) => at(ev);
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+}
+
 function cmdAuto() {
   S.settings.auto = !S.settings.auto;
   saveSettingsSoon();
@@ -654,7 +692,7 @@ function renderDecks() {
       h('div', { class: 'deck-title' }, d.file ? d.file.title : '—'),
       h('div', { class: 'deck-artist' }, d.file ? d.file.artist || ' ' : ' ',
         d.file && S.settings.normalize && d.file.loudness_lufs != null ? h('span', { class: 'deck-gain', title: 'Gelijk volume' }, fmtDb(loudnessDb(d.file))) : null),
-      h('div', { class: 'deck-bar' }, h('div', { id: `deck-fill-${d.index}` })),
+      h('div', { class: 'deck-bar', title: 'Klik of sleep om door te spoelen' }, h('div', { id: `deck-fill-${d.index}` })),
       h('div', { class: 'deck-time' }, h('span', { id: `deck-pos-${d.index}` }, ''), h('span', { id: `deck-rem-${d.index}` }, '')));
   }
 }
@@ -1083,6 +1121,8 @@ document.addEventListener('keydown', (e) => {
   else if (k === 'p') cmdPause();
   else if (k === 'f') cmdFade();
   else if (k === 'a') cmdAuto();
+  else if (k === 'arrowright') { e.preventDefault(); seekBy(e.shiftKey ? 30 : 5); }
+  else if (k === 'arrowleft') { e.preventDefault(); seekBy(e.shiftKey ? -30 : -5); }
   else if (/^[0-9]$/.test(k)) {
     const i = k === '0' ? 9 : Number(k) - 1;
     if (i < cartDims().count) cartTrigger(cartIndex(i));
@@ -1090,6 +1130,14 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ---------- start-up ----------
+
+for (const d of decks) {
+  $(`deck-${d.index}`).addEventListener('pointerdown', (e) => {
+    const bar = e.target.closest('.deck-bar');
+    if (bar) seekable(() => $(`deck-${d.index}`).querySelector('.deck-bar'), () => d)(e);
+  });
+}
+$('now').querySelector('.now-bar').addEventListener('pointerdown', seekable(() => $('now').querySelector('.now-bar'), () => S.live));
 
 async function boot() {
   try { S.me = (await api('GET', '/api/me')).user; } catch { location.href = '/'; return; }

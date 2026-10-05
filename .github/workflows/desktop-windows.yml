@@ -1,12 +1,13 @@
-# Builds the Audio OnAir Turbo Windows installer on a real Windows machine.
-# Download it from the run's "Artifacts" section (Actions tab).
+# Builds the Audio OnAir Turbo Windows installer on a real Windows machine and puts
+# every new version on the updates page (GitHub Releases, tag v<version>), where it
+# can be downloaded without logging in. The app itself checks that page for updates.
 name: Audio OnAir Turbo Database – Windows installer
 
 on:
   workflow_dispatch:
   push:
     branches: [audio-vault]
-    paths: ['audio-vault/desktop/**', 'audio-vault/converter/**', 'audio-vault/src/convert-archive.js', '.github/workflows/desktop-windows.yml']
+    paths: ['audio-vault/desktop/**', 'audio-vault/src/**', 'audio-vault/public/**', 'audio-vault/Dockerfile', 'audio-vault/docker-compose*.yml', 'audio-vault/converter/**', 'audio-vault/src/convert-archive.js', '.github/workflows/desktop-windows.yml']
 
 jobs:
   build:
@@ -49,3 +50,29 @@ jobs:
           name: Audio-OnAir-Turbo-Database-Omzetter
           path: audio-vault/converter/dist/*.exe
           if-no-files-found: error
+
+  # One release per app version: "Audio OnAir Turbo Database <version>" with both installers.
+  release:
+    needs: [build, converter]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish on the updates page
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./audio-vault/desktop/package.json').version")
+          TAG="v$VERSION"
+          ls -l dist
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.exe --clobber
+          else
+            NOTES="Installeren: download Audio-OnAir-Turbo-Database-Setup-$VERSION.exe en start het. Instellingen, databases en muziek blijven staan; klik daarna in Server beheren op Herstarten / bijwerken."$'\n\n'"Laatste wijziging: $(git log -1 --format=%s)"
+            gh release create "$TAG" dist/*.exe --target "${{ github.sha }}" --title "Audio OnAir Turbo Database $VERSION" --notes "$NOTES" --latest
+          fi
