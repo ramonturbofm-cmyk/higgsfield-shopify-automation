@@ -22,6 +22,15 @@ function hasFfmpeg() {
   return ffmpegChecked;
 }
 
+// Float and 32-bit WAVs cannot be stored bit-exact in FLAC; those stay as they are.
+function notFlacExact(file) {
+  return new Promise((resolve) => execFile('ffprobe', ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=sample_fmt,bits_per_sample', '-of', 'csv=p=0', file],
+    (err, stdout) => {
+      const [fmt, bits] = String(stdout).trim().split(',');
+      resolve(Boolean(err) || /^(flt|dbl)/.test(fmt || '') || Number(bits) > 24);
+    }));
+}
+
 function toFlac(input, output) {
   return new Promise((resolve, reject) => {
     execFile('ffmpeg', ['-v', 'error', '-y', '-i', input, '-map', '0:a:0', '-map_metadata', '0', '-c:a', 'flac', '-compression_level', '5', output],
@@ -48,7 +57,7 @@ async function ingestFile({ pool, filesDir, source, move, originalName, collecti
   let storedExt = ext;
   const id = crypto.randomUUID();
   let target = path.join(filesDir, `${id}${ext}`);
-  if (LOSSLESS_UNCOMPRESSED.has(ext) && convertEnabled() && (await hasFfmpeg())) {
+  if (LOSSLESS_UNCOMPRESSED.has(ext) && convertEnabled() && (await hasFfmpeg()) && !(await notFlacExact(source))) {
     const flac = path.join(filesDir, `${id}.flac`);
     try {
       await toFlac(source, flac);

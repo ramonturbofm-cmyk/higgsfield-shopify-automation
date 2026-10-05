@@ -16,6 +16,7 @@ if (location.protocol === 'file:') {
       listBackups: () => ipcRenderer.invoke('server', 'listBackups'),
       startDocker: () => ipcRenderer.invoke('server', 'startDocker'),
       installDocker: () => ipcRenderer.invoke('server', 'installDocker'),
+      saveArchive: (values) => ipcRenderer.invoke('server', 'saveArchive', values),
       freeSpace: (dir) => ipcRenderer.invoke('server', 'freeSpace', dir),
       getAutostart: () => ipcRenderer.invoke('server', 'getAutostart'),
       setAutostart: (on) => ipcRenderer.invoke('server', 'setAutostart', on),

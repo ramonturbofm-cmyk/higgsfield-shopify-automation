@@ -52,3 +52,15 @@ services:
       - ./backup/backup.sh:/backup.sh:ro
       - ./data/audio:/data:ro
       - ${BACKUP_DIR:-./data/backup}:/backup
+
+  # "Archief omzetten": converts the music archive (WAV) to FLAC in a NEW folder.
+  # Only runs when started on purpose:  docker compose --profile archief up -d archive
+  archive:
+    build: .
+    profiles: ["archief"]
+    restart: "no"
+    init: true
+    entrypoint: ["node", "src/convert-archive.js", "/bron", "/doel", "--jobs", "${ARCHIVE_JOBS:-3}"]
+    volumes:
+      - ${MUSIC_DIR:-./import}:/bron:ro
+      - ${ARCHIVE_DIR:-./data/archief}:/doel

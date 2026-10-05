@@ -55,6 +55,8 @@ async function refresh() {
   $('btn-studio').disabled = !s.web;
   $('dir-wrap').style.display = s.installed ? 'none' : '';
 
+  renderArchive(s);
+
   if (!refresh.filled) {
     refresh.filled = true;
     const st = s.settings;
@@ -269,3 +271,58 @@ async function install() {
 
 api.getAutostart().then((on) => { $('autostart').checked = Boolean(on); });
 $('autostart').addEventListener('change', (e) => api.setAutostart(e.target.checked));
+
+// ---------- archief omzetten ----------
+
+let archiveFilled = false;
+function renderArchive(s) {
+  if (!s.installed) return;
+  const st = s.settings;
+  $('arc-source').textContent = st.hasNasPassword ? `Synology ${st.nasHost} → map "${st.nasShare}"` : st.musicDir || 'nog niet ingesteld (zie Instellingen)';
+  if (!archiveFilled) {
+    archiveFilled = true;
+    $('arc-target').value = st.archiveTarget || 'nas';
+    $('arc-host').value = st.nasHost || ''; $('arc-share').value = st.archiveShare; $('arc-user').value = st.archiveUser;
+    $('arc-password').placeholder = st.hasArchivePassword ? '•••••••• (ongewijzigd)' : '';
+    $('arc-dir').value = st.archiveDir;
+    toggleArchiveTarget();
+  }
+  const a = s.archive || { state: 'none', last: '' };
+  const done = /^Omgezet|Alles is gelukt|^Mislukt/m.test(a.last) && !/Gepauzeerd/.test(a.last.split('\n').pop());
+  const label = { running: 'Bezig met omzetten…', exited: done ? 'Klaar — zie het rapport _omzetrapport.txt in de nieuwe map' : 'Gepauzeerd', none: 'Nog niet gestart', created: 'Start op…' }[a.state] || a.state;
+  $('arc-state').textContent = label;
+  setDot('arc-dot', a.state === 'running' ? 'warn' : a.state === 'exited' && done ? 'ok' : '');
+  $('arc-progress').textContent = a.last || '—';
+  const ready = s.docker === 'running' && !s.busy;
+  $('arc-start').disabled = !ready || a.state === 'running' || !st.archiveTarget;
+  $('arc-stop').disabled = !ready || a.state !== 'running';
+}
+function toggleArchiveTarget() {
+  const nas = $('arc-target').value === 'nas';
+  $('arc-nas').style.display = nas ? '' : 'none';
+  $('arc-folder').style.display = nas ? 'none' : '';
+}
+$('arc-target').addEventListener('change', toggleArchiveTarget);
+$('arc-pick').addEventListener('click', async () => { const d = await api.chooseFolder('archive'); if (d) $('arc-dir').value = d; });
+$('arc-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('arc-error').textContent = ''; $('arc-saved').textContent = '';
+  const res = await api.saveArchive({
+    target: $('arc-target').value, host: $('arc-host').value.trim(), share: $('arc-share').value.trim(),
+    user: $('arc-user').value.trim(), password: $('arc-password').value, dir: $('arc-dir').value.trim(),
+  });
+  if (!res.ok) { $('arc-error').textContent = res.error; return; }
+  $('arc-password').value = '';
+  $('arc-saved').textContent = 'Opgeslagen';
+  archiveFilled = false; refresh.filled = false; refresh();
+});
+$('arc-start').addEventListener('click', async () => {
+  $('arc-start').disabled = true;
+  try { const r = await api.run('archiveStart'); if (!r.ok) log(`✗ ${r.error}\n`); } catch (e) { log(`✗ ${e.message}\n`); }
+  refresh();
+});
+$('arc-stop').addEventListener('click', async () => {
+  $('arc-stop').disabled = true;
+  try { await api.run('archiveStop'); } catch (e) { log(`✗ ${e.message}\n`); }
+  refresh();
+});

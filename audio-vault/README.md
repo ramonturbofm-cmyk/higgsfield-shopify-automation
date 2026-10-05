@@ -213,6 +213,26 @@ installatiehulp bij stap 4 met **Andere schijf…** de muziekschijf (bijv.
 `D:\AudioOnAir`); de app toont hoeveel ruimte er vrij is. De back-up op de NAS
 heeft minstens evenveel vrije ruimte nodig als je FLAC-bibliotheek.
 
+## Archief omzetten (WAV → FLAC op de NAS)
+
+In *Server beheren* → **Archief omzetten** zet je je hele muziekarchief om naar
+FLAC, in een **nieuwe** map met dezelfde mappenstructuur (bijv. een nieuwe
+gedeelde map `music-flac` op de Synology, met een gebruiker die daar mag
+schrijven). Je oude WAV-map wordt alleen gelezen.
+
+- Elk nummer wordt **bit-voor-bit** gecontroleerd: de audio in de FLAC moet
+  exact gelijk zijn aan het origineel. Wat FLAC niet exact kan bewaren
+  (32-bit of float-WAV) wordt ongewijzigd meegekopieerd; andere bestanden
+  (MP3, hoesjes) ook, zodat de nieuwe map compleet is.
+- **Pauzeren** en later **verdergaan** kan altijd; het draait op de achtergrond
+  door, ook als de app dicht is.
+- Aan het eind staat `_omzetrapport.txt` in de nieuwe map: aantallen, mislukte
+  bestanden en hoeveel ruimte je bespaart.
+- Pas als je tevreden bent, verwijder je zelf de oude WAV-map.
+
+Zonder app: `docker compose --profile archief up -d archive` (doel: `ARCHIVE_DIR`
+of de `NAS_ARCHIVE_`-instellingen met `docker-compose.nas-archive.yml`).
+
 ## Grote bibliotheken (200.000+ nummers)
 
 Getest met 200.000 nummers en 150.000 gedraaide items: de studio laadt in

@@ -5,3 +5,5 @@ findstr /b /c:"NAS_PASSWORD=" .env | findstr /r /c:"=.." >nul
 if not errorlevel 1 set FILES=%FILES% -f docker-compose.nas.yml
 findstr /b /c:"NAS_BACKUP_PASSWORD=" .env | findstr /r /c:"=.." >nul
 if not errorlevel 1 set FILES=%FILES% -f docker-compose.nas-backup.yml
+findstr /b /c:"NAS_ARCHIVE_PASSWORD=" .env | findstr /r /c:"=.." >nul
+if not errorlevel 1 set FILES=%FILES% -f docker-compose.nas-archive.yml

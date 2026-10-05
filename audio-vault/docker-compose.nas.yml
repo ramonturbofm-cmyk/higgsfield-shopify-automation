@@ -9,6 +9,9 @@ services:
   app:
     volumes:
       - nasmusic:/import:ro
+  archive:
+    volumes:
+      - nasmusic:/bron:ro
 
 volumes:
   nasmusic:

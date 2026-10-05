@@ -1,0 +1,15 @@
+# "Archief omzetten" writes the FLAC archive to a NEW shared folder on the NAS.
+# Needs NAS_HOST, NAS_ARCHIVE_SHARE, NAS_ARCHIVE_USER and NAS_ARCHIVE_PASSWORD in .env
+# (a NAS user with write rights on that new folder).
+services:
+  archive:
+    volumes:
+      - nasarchive:/doel
+
+volumes:
+  nasarchive:
+    driver: local
+    driver_opts:
+      type: cifs
+      device: "//${NAS_HOST:?zet NAS_HOST in .env}/${NAS_ARCHIVE_SHARE:?zet NAS_ARCHIVE_SHARE in .env}"
+      o: "username=${NAS_ARCHIVE_USER:?zet NAS_ARCHIVE_USER in .env},password=${NAS_ARCHIVE_PASSWORD:?zet NAS_ARCHIVE_PASSWORD in .env},vers=3.0,rw,iocharset=utf8"

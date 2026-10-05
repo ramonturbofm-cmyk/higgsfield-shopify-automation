@@ -129,6 +129,43 @@
     </form>
   </section>
 
+  <section class="panel wide dash" id="archive-panel">
+    <h2>Archief omzetten (WAV → FLAC)</h2>
+    <p class="hint" style="margin:0 0 10px">Zet je hele muziekarchief om naar FLAC in een <b>nieuwe</b> map, met dezelfde mappen. Elk nummer wordt
+      bit-voor-bit gecontroleerd tegen het origineel; wat niet exact als FLAC kan, wordt ongewijzigd meegekopieerd. Je oude WAV-map blijft
+      staan — die verwijder je pas zelf als je tevreden bent. Stoppen en later verdergaan kan altijd.</p>
+    <div class="grid2" style="grid-template-columns:1.1fr 1fr;gap:18px">
+      <div>
+        <div class="row"><span class="label">Bron</span><span id="arc-source">—</span></div>
+        <div class="row"><span class="dot" id="arc-dot"></span><span class="label">Status</span><span id="arc-state">Nog niet gestart</span></div>
+        <pre id="arc-progress" style="height:auto;min-height:62px;margin-top:8px">—</pre>
+        <div class="buttons" style="grid-template-columns:1fr 1fr">
+          <button class="primary" id="arc-start">Omzetten starten / verdergaan</button>
+          <button id="arc-stop">Pauzeren</button>
+        </div>
+      </div>
+      <form id="arc-form">
+        <label>Waar komt het nieuwe FLAC-archief?</label>
+        <select id="arc-target"><option value="nas">Nieuwe gedeelde map op de Synology</option><option value="folder">Map op deze pc / externe schijf</option></select>
+        <div id="arc-nas">
+          <div class="grid2">
+            <div><label>IP-adres van de NAS</label><input id="arc-host" placeholder="192.168.1.20"></div>
+            <div><label>Nieuwe gedeelde map</label><input id="arc-share" placeholder="music-flac"></div>
+            <div><label>Gebruiker (schrijven)</label><input id="arc-user" placeholder="onair-archief"></div>
+            <div><label>Wachtwoord</label><input id="arc-password" type="password" autocomplete="new-password"></div>
+          </div>
+          <p class="hint">Maak in DSM eerst een nieuwe gedeelde map (bijv. "music-flac") en een gebruiker die daar mag schrijven.</p>
+        </div>
+        <div id="arc-folder" style="display:none">
+          <label>Map</label>
+          <div class="pick"><input id="arc-dir" readonly placeholder="geen map gekozen"><button type="button" class="small" id="arc-pick">Kiezen…</button></div>
+        </div>
+        <div style="margin-top:12px;display:flex;gap:10px;align-items:center"><button class="primary" type="submit">Opslaan</button><span class="hint" id="arc-saved"></span></div>
+        <div class="error" id="arc-error"></div>
+      </form>
+    </div>
+  </section>
+
   <section class="panel wide">
     <h2>Logboek</h2>
     <pre id="log">Klaar.</pre>

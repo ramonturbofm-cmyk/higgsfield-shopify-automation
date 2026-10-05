@@ -188,7 +188,7 @@ ipcMain.handle('server', async (e, method, ...args) => {
       }
       case 'chooseFolder': {
         const r = await dialog.showOpenDialog(win, {
-          title: args[0] === 'music' ? 'Map met muziek kiezen' : 'Map voor de server kiezen',
+          title: { music: 'Map met muziek kiezen', archive: 'Map voor het nieuwe FLAC-archief kiezen' }[args[0]] || 'Map voor de server kiezen',
           properties: ['openDirectory', 'createDirectory'],
         });
         return r.canceled ? null : r.filePaths[0];
@@ -197,6 +197,7 @@ ipcMain.handle('server', async (e, method, ...args) => {
       case 'listBackups': return await manager.listBackups();
       case 'startDocker': return manager.startDocker();
       case 'installDocker': return { ok: true, code: await manager.installDocker() };
+      case 'saveArchive': return manager.saveArchiveSettings(args[0] || {});
       case 'freeSpace': return manager.freeBytes(String(args[0] || ''));
       case 'getAutostart': return app.getLoginItemSettings().openAtLogin;
       case 'setAutostart': app.setLoginItemSettings({ openAtLogin: Boolean(args[0]) }); return app.getLoginItemSettings().openAtLogin;
