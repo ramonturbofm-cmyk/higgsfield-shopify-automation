@@ -60,9 +60,10 @@ function createServerManager({ sourceDir, version, onLog, dir, project = 'audioo
     try { return fs.readFileSync(path.join(serverDir, '.version'), 'utf8').trim() !== version; } catch { return true; }
   }
 
+  let nasUnavailable = false; // set when the music share could not be reached at start
   function composeFiles(env = readEnv()) {
     const files = ['-f', 'docker-compose.yml'];
-    if (env.NAS_PASSWORD) files.push('-f', 'docker-compose.nas.yml');
+    if (env.NAS_PASSWORD && !nasUnavailable) files.push('-f', 'docker-compose.nas.yml');
     if (env.NAS_BACKUP_PASSWORD) files.push('-f', 'docker-compose.nas-backup.yml');
     if (env.NAS_ARCHIVE_PASSWORD) files.push('-f', 'docker-compose.nas-archive.yml');
     if (process.env.AOT_COMPOSE_EXTRA) files.push('-f', process.env.AOT_COMPOSE_EXTRA); // tests only
@@ -90,7 +91,8 @@ function createServerManager({ sourceDir, version, onLog, dir, project = 'audioo
   function stream(args, label) {
     return new Promise((resolve) => {
       onLog(`\n▶ ${label}\n`);
-      const child = spawn(dockerBin(), args, { cwd: serverDir, windowsHide: true });
+      // No stdin: a question from Docker must never leave the app waiting forever.
+      const child = spawn(dockerBin(), args, { cwd: serverDir, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
       child.stdout.on('data', (d) => onLog(String(d)));
       child.stderr.on('data', (d) => onLog(String(d)));
       child.on('error', (err) => { onLog(`Fout: ${err.message}\n`); resolve(1); });
@@ -273,10 +275,50 @@ function createServerManager({ sourceDir, version, onLog, dir, project = 'audioo
     throw new Error('Start Docker zelf op deze computer');
   }
 
+  // Music on the Synology: try the share before starting, so a wrong IP address,
+  // folder or password gives a clear message and the server still starts (without
+  // the NAS) instead of failing completely. When the NAS settings changed, the old
+  // Docker volume is removed so the new address is really used.
+  async function prepareNas() {
+    nasUnavailable = false;
+    const env = readEnv();
+    if (!env.NAS_PASSWORD) return;
+    const share = String(env.NAS_SHARE || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    const sig = crypto.createHash('sha256').update([env.NAS_HOST, share, env.NAS_USER, env.NAS_PASSWORD].join('\n')).digest('hex');
+    const sigFile = path.join(serverDir, '.nas-config');
+    let old = '';
+    try { old = fs.readFileSync(sigFile, 'utf8').trim(); } catch { /* first time */ }
+    if (old !== sig) {
+      await capture(['compose', '-p', PROJECT, ...composeFiles(), 'rm', '-s', '-f', 'app', 'archive'], { timeout: 120000 });
+      await capture(['volume', 'rm', '-f', `${PROJECT}_nasmusic`]);
+    }
+    onLog(`\n▶ Synology controleren (//${env.NAS_HOST}/${share})\n`);
+    const test = `${PROJECT}_nascheck`;
+    await capture(['volume', 'rm', '-f', test]);
+    await capture(['volume', 'create', '--driver', 'local', '--opt', 'type=cifs', '--opt', `device=//${env.NAS_HOST}/${share}`,
+      '--opt', `o=username=${env.NAS_USER},password=${env.NAS_PASSWORD},vers=3.0,ro,uid=1000,gid=1000,iocharset=utf8`, test]);
+    const r = await capture(['run', '--rm', '-v', `${test}:/muziek:ro`, 'postgres:16', 'sh', '-c', 'ls /muziek | head -n 3'], { timeout: 120000 });
+    await capture(['volume', 'rm', '-f', test]);
+    if (r.code === 0) {
+      fs.writeFileSync(sigFile, sig);
+      onLog('✓ Synology bereikbaar, muziekmap gevonden.\n');
+      return;
+    }
+    const err = `${r.stderr}${r.stdout}`;
+    const why = /no such file or directory/i.test(err) ? `de map "${share}" bestaat niet op de Synology (let op hoofdletters en spaties; kijk in File Station)`
+      : /permission denied|access denied|EACCES/i.test(err) ? `inloggen lukt niet of "${env.NAS_USER}" mag deze map niet lezen (controleer gebruiker, wachtwoord en Machtigingen in DSM)`
+        : /host is down|no route|timed out|unreachable|could not resolve|resolve host/i.test(err) ? `de Synology op ${env.NAS_HOST} is niet bereikbaar (klopt het IP-adres en staat de NAS aan?)`
+          : /no such device/i.test(err) ? 'Docker kan op deze computer geen netwerkmappen koppelen'
+            : 'onbekende fout';
+    onLog(`✗ Muziek op de Synology niet bereikbaar: ${why}.\n  De server start nu zonder de Synology; pas de instelling aan en klik opnieuw op "Herstarten / bijwerken".\n  (${(err.split('\n').find((l) => /error|mount/i.test(l)) || err.trim().split('\n')[0] || '').trim().slice(0, 300)})\n`);
+    nasUnavailable = true;
+  }
+
   const actions = {
     start: () => exclusive('Server starten', async () => {
       if (!installed()) throw new Error('Vul eerst de instellingen in en sla ze op');
       if (filesOutdated()) installFiles(); // app update → new server version
+      await prepareNas();
       onLog('De eerste keer bouwen kan een paar minuten duren…\n');
       return compose(['up', '-d', '--build', '--remove-orphans'], 'Server starten');
     }),
