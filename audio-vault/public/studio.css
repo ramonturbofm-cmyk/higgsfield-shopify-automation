@@ -230,3 +230,9 @@ dialog::backdrop { background: rgba(0, 0, 0, .7); }
   .panel { min-height: 420px; }
 }
 .deck-gain { float: right; margin-left: 6px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+
+.lib-row.sel { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.lib-row.sel:hover { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+.lib-selbar { display: flex; align-items: center; gap: 6px; padding: 6px 8px; margin: 0 0 6px; border: 1px solid var(--accent); border-radius: 6px; font-size: 13px; }
+.lib-selbar span { flex: 1; font-weight: 600; }
+.lib-selbar.hidden { display: none; }

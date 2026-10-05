@@ -538,22 +538,29 @@ S.pfl.audio.addEventListener('ended', () => { S.pfl.fileId = null; updatePflButt
 
 // ---------- playlist editing ----------
 
-function addToPlaylist(id, beforeUid) {
-  const item = { uid: newUid(), id, stopAfter: false, state: 'queued' };
+// One id or a list of ids (multi-select); a list keeps its order.
+const newItems = (ids) => [].concat(ids).map((id) => ({ uid: newUid(), id, stopAfter: false, state: 'queued' }));
+function addedStatus(prefix, items) {
+  const f = S.files.get(items[0].id);
+  status(items.length > 1 ? `${prefix}: ${items.length} nummers` : f ? `${prefix}: ${label(f)}` : prefix);
+}
+function addToPlaylist(ids, beforeUid) {
+  const items = newItems(ids);
   const at = beforeUid ? S.playlist.findIndex((i) => i.uid === beforeUid) : -1;
-  if (at >= 0) S.playlist.splice(at, 0, item); else S.playlist.push(item);
+  if (at >= 0) S.playlist.splice(at, 0, ...items); else S.playlist.push(...items);
   afterPlaylistChange();
+  if (items.length > 1) addedStatus('Toegevoegd', items);
+  return items[0];
 }
 // Insert right after the item that is on air (or before the first waiting item).
-function addNext(id) {
-  const item = { uid: newUid(), id, stopAfter: false, state: 'queued' };
+function addNext(ids) {
+  const items = newItems(ids);
   const playing = S.live && S.live.item ? S.playlist.indexOf(S.live.item) : -1;
   const at = playing >= 0 ? playing + 1 : S.playlist.findIndex((i) => i.state === 'queued');
-  if (at >= 0) S.playlist.splice(at, 0, item); else S.playlist.push(item);
+  if (at >= 0) S.playlist.splice(at, 0, ...items); else S.playlist.push(...items);
   afterPlaylistChange();
-  const f = S.files.get(id);
-  if (f) status(`Als volgende: ${label(f)}`);
-  return item;
+  addedStatus('Als volgende', items);
+  return items[0];
 }
 // Put it next and take over right away with a short crossfade, like a hot start.
 async function playNow(id) {
@@ -814,9 +821,9 @@ function renderPlaylist() {
 function dropOnPlaylist(e, beforeUid) {
   dragOverUid = null;
   const moved = e.dataTransfer.getData('text/aot-item');
-  const fileId = Number(e.dataTransfer.getData('text/aot-file'));
+  const fileIds = (e.dataTransfer.getData('text/aot-files') || e.dataTransfer.getData('text/aot-file')).split(',').map(Number).filter(Boolean);
   if (moved) movePlaylistItem(moved, beforeUid);
-  else if (fileId) addToPlaylist(fileId, beforeUid);
+  else if (fileIds.length) { addToPlaylist(fileIds, beforeUid); clearSelection(); }
   else render();
 }
 
@@ -851,7 +858,9 @@ async function searchLibrary() {
     const { files, total } = await api('GET', `/api/files?${libraryParams(0)}`);
     if (token !== lib.token) return; // a newer search is already running
     lib.files = remember(files); lib.total = total;
+    sel.ids.clear(); sel.anchor = null;
     renderLibrary();
+    updateSelection();
     $('library').scrollTop = 0;
   } catch (e) { status(`Zoeken mislukt: ${e.message}`); } finally { if (token === lib.token) lib.loading = false; }
 }
@@ -877,19 +886,68 @@ function updateLibraryCount() {
 }
 const libraryTail = () => (lib.files.length < lib.total ? [h('div', { class: 'lib-more' }, 'Scroll verder voor meer…')] : []);
 
+// ---------- multi-select in the library ----------
+// Click = select one, Ctrl+click = add/remove, Shift+click = range. The selection keeps
+// the order of the list; ⤴ / + / dragging / right-click then work on all of them.
+const sel = { ids: new Set(), anchor: null };
+const selectedIds = () => lib.files.map((f) => f.id).filter((id) => sel.ids.has(id));
+function selectRow(e, f) {
+  if (e.target.closest('button')) return;
+  if (e.shiftKey && sel.anchor !== null) {
+    const ids = lib.files.map((x) => x.id);
+    const a = ids.indexOf(sel.anchor); const b = ids.indexOf(f.id);
+    if (a >= 0 && b >= 0) {
+      if (!(e.ctrlKey || e.metaKey)) sel.ids.clear();
+      for (let i = Math.min(a, b); i <= Math.max(a, b); i++) sel.ids.add(ids[i]);
+    }
+  } else if (e.ctrlKey || e.metaKey) {
+    if (sel.ids.has(f.id)) sel.ids.delete(f.id); else sel.ids.add(f.id);
+    sel.anchor = f.id;
+  } else {
+    const only = sel.ids.size === 1 && sel.ids.has(f.id);
+    sel.ids.clear();
+    if (!only) sel.ids.add(f.id);
+    sel.anchor = f.id;
+  }
+  updateSelection();
+}
+function clearSelection() { if (sel.ids.size) { sel.ids.clear(); updateSelection(); } }
+function updateSelection() {
+  document.querySelectorAll('#library .lib-row').forEach((r) => r.classList.toggle('sel', sel.ids.has(Number(r.dataset.file))));
+  const n = selectedIds().length;
+  const bar = $('lib-selbar');
+  bar.classList.toggle('hidden', n < 2);
+  if (n >= 2) {
+    bar.replaceChildren(
+      h('span', {}, `${n} geselecteerd`),
+      h('button', { class: 'mini', onclick: () => { addNext(selectedIds()); clearSelection(); } }, '⤴ Als volgende'),
+      h('button', { class: 'mini', onclick: () => { addToPlaylist(selectedIds()); clearSelection(); } }, '+ Achteraan'),
+      h('button', { class: 'mini', title: 'Selectie opheffen (Esc)', onclick: clearSelection }, '✕'));
+  }
+}
+// The row's own buttons act on the whole selection when that row is part of it.
+const targetIds = (f) => (sel.ids.has(f.id) && sel.ids.size > 1 ? selectedIds() : [f.id]);
+
 function libraryRow(f) {
   return h('div', {
-    class: 'lib-row', draggable: 'true', 'data-file': f.id,
-    ondragstart: (e) => { e.dataTransfer.setData('text/aot-file', String(f.id)); e.dataTransfer.effectAllowed = 'copy'; },
-    ondblclick: () => addToPlaylist(f.id),
+    class: `lib-row${sel.ids.has(f.id) ? ' sel' : ''}`, draggable: 'true', 'data-file': f.id,
+    onclick: (e) => selectRow(e, f),
+    onmousedown: (e) => { if (e.shiftKey) e.preventDefault(); }, // no text selection on Shift+click
+    ondragstart: (e) => {
+      const ids = targetIds(f);
+      e.dataTransfer.setData('text/aot-file', String(f.id));
+      if (ids.length > 1) e.dataTransfer.setData('text/aot-files', ids.join(','));
+      e.dataTransfer.effectAllowed = 'copy';
+    },
+    ondblclick: (e) => { if (!e.target.closest('button')) { addToPlaylist(f.id); clearSelection(); } },
     oncontextmenu: (e) => { e.preventDefault(); fileMenu(e, f); },
   },
   h('div', { class: 'pl-main' }, h('div', { class: 'pl-title' }, f.title), h('div', { class: 'pl-artist' }, f.artist || ' ')),
   h('div', { class: 'pl-dur' }, fmt(cueOut(f) !== null ? cueOut(f) - cueIn(f) : null)),
   h('div', { class: 'lib-actions' },
     h('button', { title: 'Voorbeluisteren', 'data-pfl': f.id, class: S.pfl.fileId === f.id ? 'pfl-on' : '', onclick: () => togglePfl(f) }, '🎧'),
-    h('button', { title: 'Als volgende afspelen', onclick: (e) => { addNext(f.id); flashRow(e.target); } }, '⤴'),
-    h('button', { title: 'Achteraan de playlist', onclick: (e) => { addToPlaylist(f.id); flashRow(e.target); } }, '+')));
+    h('button', { title: 'Als volgende afspelen', onclick: (e) => { addNext(targetIds(f)); flashRow(e.target); clearSelection(); } }, '⤴'),
+    h('button', { title: 'Achteraan de playlist', onclick: (e) => { addToPlaylist(targetIds(f)); flashRow(e.target); clearSelection(); } }, '+')));
 }
 function flashRow(el) {
   const row = el.closest('.lib-row');
@@ -928,7 +986,14 @@ function fileMenu(e, f) {
   const outside = (ev) => { if (!menu.contains(ev.target)) close(); };
   const item = (text, fn, cls) => h('button', { class: cls || '', onclick: () => { close(); fn(); } }, text);
   menu.classList.add('ctx');
-  menu.replaceChildren(
+  const ids = targetIds(f);
+  if (ids.length > 1) {
+    menu.replaceChildren(
+      h('div', { class: 'ctx-title' }, `${ids.length} nummers geselecteerd`),
+      item('⤴  Als volgende afspelen', () => { addNext(ids); clearSelection(); }),
+      item('+  Achteraan de playlist', () => { addToPlaylist(ids); clearSelection(); }),
+      item('✕  Selectie opheffen', clearSelection));
+  } else menu.replaceChildren(
     h('div', { class: 'ctx-title' }, label(f)),
     item('⤴  Als volgende afspelen', () => addNext(f.id)),
     item('+  Achteraan de playlist', () => addToPlaylist(f.id)),
@@ -1116,7 +1181,8 @@ document.addEventListener('keydown', (e) => {
   if (e.target.matches('input, select, textarea') || e.ctrlKey || e.metaKey || e.altKey) return;
   if ($('settings').open) return;
   const k = e.key.toLowerCase();
-  if (k === ' ') { e.preventDefault(); cmdStart(); }
+  if (k === 'escape') clearSelection();
+  else if (k === ' ') { e.preventDefault(); cmdStart(); }
   else if (k === 'n') cmdStart();
   else if (k === 'p') cmdPause();
   else if (k === 'f') cmdFade();
