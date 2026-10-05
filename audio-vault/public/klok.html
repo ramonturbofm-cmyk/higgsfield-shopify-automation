@@ -49,6 +49,7 @@
   .search-results button:hover { background: var(--panel2); }
   .search-results .more { color: var(--muted); font-size: 12px; padding: 7px 10px; }
   .hidden { display: none !important; }
+  .page-label { font-weight: 800; letter-spacing: .2em; font-size: 13px; color: var(--muted); border-left: 1px solid var(--line); padding-left: 14px; }
   .readonly .adminonly { display: none !important; }
   @media (max-width: 1100px) { .klok-main { grid-template-columns: 1fr; } }
 </style>
@@ -56,10 +57,10 @@
 <body>
 <header class="top" style="grid-template-columns:auto 1fr auto auto">
   <div class="brand">
-    <div class="logo"><img class="logo-img" src="logo.svg" alt=""><div><strong>AUDIO ONAIR</strong><em>UURKLOKKEN</em></div></div>
+    <div class="logo"><img class="logo-img" src="logo.svg" alt=""><div><strong>AUDIO ONAIR</strong><em>TURBO DATABASE</em></div></div>
     <div class="station" id="station-name"></div>
   </div>
-  <div class="muted" id="msg"></div>
+  <div style="display:flex;gap:14px;align-items:baseline"><span class="page-label">UURKLOKKEN</span><span class="muted" id="msg"></span></div>
   <div class="clock"><div id="clock-time">00:00:00</div><div id="clock-date" class="clock-date"></div></div>
   <div class="top-actions">
     <a class="icon-btn" href="/studio.html" title="Naar de studio">▶</a>

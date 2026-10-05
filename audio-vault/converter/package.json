@@ -1,7 +1,7 @@
 {
   "name": "audio-onair-turbo-omzetter",
   "productName": "Audio OnAir Turbo Omzetter",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "WAV naar FLAC omzetten, bit-voor-bit gecontroleerd",
   "author": "Turbo FM",
   "license": "UNLICENSED",

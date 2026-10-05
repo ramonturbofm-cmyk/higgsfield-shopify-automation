@@ -172,7 +172,7 @@ function renderMain() {
   if (!tabs.some(([id]) => id === state.tab)) state.tab = 'library';
   const content = h('main');
   $app.replaceChildren(
-    h('header', {}, h('h1', {}, 'Audio OnAir Turbo'),
+    h('header', {}, h('h1', {}, 'Audio OnAir Turbo Database'),
       h('nav', {}, tabs.map(([id, label]) => h('button', { class: state.tab === id ? 'active' : '', onclick: () => { state.tab = id; renderMain(); } }, label))),
       h('a', { class: 'btn small primary', href: '/studio.html', style: 'text-decoration:none' }, '▶ Open studio'),
       h('span', { class: 'muted' }, `${state.me.name} · ${roleLabel[state.me.role]}`),
