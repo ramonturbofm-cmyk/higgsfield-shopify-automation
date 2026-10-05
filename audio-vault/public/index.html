@@ -249,7 +249,7 @@ async function renderLibrary(root) {
 
 function uploadBox(collection) {
   const status = h('div', { class: 'muted', style: 'margin-top:6px' });
-  const input = h('input', { type: 'file', multiple: true, accept: 'audio/*,.mp3,.wav,.flac,.m4a,.aac,.ogg,.opus,.aif,.aiff,.wma,.mp2', class: 'hidden' });
+  const input = h('input', { type: 'file', multiple: true, accept: 'audio/*,.mp3,.wav,.flac,.m4a,.aac,.ogg,.opus,.aif,.aiff,.wma,.mp2,.mpeg,.mpg,.mpga', class: 'hidden' });
   const drop = h('div', { class: 'drop', onclick: () => input.click() }, 'Sleep audiobestanden hierheen of klik om te kiezen');
   async function send(files) {
     let done = 0, failed = [];

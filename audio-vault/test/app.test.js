@@ -406,6 +406,35 @@ test('genres are read from the tags, also for files imported earlier', { skip: (
   assert.equal(n, 0, 'files without a genre tag get an empty genre, not read again');
 });
 
+test('.mpeg files are accepted: MP3 inside becomes .mp3, anything else FLAC', { skip: (!DB && 'TEST_DATABASE_URL not set') || (!hasFfmpeg && 'ffmpeg not installed') }, async () => {
+  const { execFileSync } = require('child_process');
+  const owner = client();
+  assert.equal((await owner('POST', '/api/login', { email: 'owner@example.com', password: 'supergeheim1' })).status, 200);
+  const col = (await owner('POST', '/api/collections', { name: 'Mpeg' })).data.collection;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpeg-'));
+  const make = (name, args) => { execFileSync('ffmpeg', ['-nostdin', '-v', 'error', '-y', ...args, path.join(dir, name)]); return fs.readFileSync(path.join(dir, name)); };
+  const files = {
+    'mp3 erin.mpeg': make('a.mp3', ['-f', 'lavfi', '-i', 'sine=d=2', '-metadata', 'title=Piraatje', '-c:a', 'libmp3lame', '-f', 'mp3']),
+    'mp2 erin.mpg': make('b.mp2', ['-f', 'lavfi', '-i', 'sine=d=2', '-c:a', 'mp2', '-f', 'mp2']),
+    'video.mpeg': make('c.mpeg', ['-f', 'lavfi', '-i', 'testsrc=d=2:s=64x64', '-f', 'lavfi', '-i', 'sine=d=2', '-c:v', 'mpeg1video', '-c:a', 'mp2', '-f', 'mpeg']),
+  };
+  const out = {};
+  for (const [name, data] of Object.entries(files)) {
+    const fd = new FormData();
+    fd.append('collection_id', String(col.id)); fd.append('file', new Blob([data]), name);
+    const r = await owner('POST', '/api/files', fd);
+    assert.equal(r.status, 201, `${name}: ${JSON.stringify(r.data)}`);
+    out[name] = r.data.file;
+  }
+  assert.equal(out['mp3 erin.mpeg'].file_name.endsWith('.mp3'), true);
+  assert.equal(out['mp3 erin.mpeg'].title, 'Piraatje');
+  assert.equal(out['mp2 erin.mpg'].mime_type, 'audio/flac');
+  assert.equal(out['video.mpeg'].mime_type, 'audio/flac');
+  const stream = await fetch(`${base}/api/files/${out['mp3 erin.mpeg'].id}/stream`, { headers: { cookie: owner.cookie() } });
+  assert.equal(stream.status, 200);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('new music is added automatically; files still copying wait; one import at a time', { skip: !DB && 'TEST_DATABASE_URL not set' }, async () => {
   const { importFolder } = require('../src/import');
   const { startAutoImport } = require('../src/autoimport');

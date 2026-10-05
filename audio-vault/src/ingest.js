@@ -11,7 +11,11 @@ const AUDIO_TYPES = {
   '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.flac': 'audio/flac', '.aac': 'audio/aac',
   '.m4a': 'audio/mp4', '.ogg': 'audio/ogg', '.opus': 'audio/opus', '.aif': 'audio/aiff',
   '.aiff': 'audio/aiff', '.wma': 'audio/x-ms-wma', '.mp2': 'audio/mpeg',
+  '.mpeg': 'audio/mpeg', '.mpg': 'audio/mpeg', '.mpga': 'audio/mpeg',
 };
+// Files named .mpeg/.mpg/.mpga are usually plain MP3s: stored as .mp3 (stream copied,
+// no quality loss); anything else inside (MP2, or a video file) is stored as FLAC.
+const MPEG_CONTAINERS = new Set(['.mpeg', '.mpg', '.mpga']);
 const LOSSLESS_UNCOMPRESSED = new Set(['.wav', '.aif', '.aiff']);
 
 let ffmpegChecked = null;
@@ -29,6 +33,17 @@ function notFlacExact(file) {
       const [fmt, bits] = String(stdout).trim().split(',');
       resolve(Boolean(err) || /^(flt|dbl)/.test(fmt || '') || Number(bits) > 24);
     }));
+}
+
+function audioCodec(file) {
+  return new Promise((resolve) => execFile('ffprobe', ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', file],
+    (err, stdout) => resolve(err ? '' : String(stdout).trim())));
+}
+function copyToMp3(input, output) {
+  return new Promise((resolve, reject) => {
+    execFile('ffmpeg', ['-v', 'error', '-y', '-i', input, '-map', '0:a:0', '-map_metadata', '0', '-vn', '-c:a', 'copy', '-f', 'mp3', output],
+      { timeout: 10 * 60 * 1000 }, (err, stdout, stderr) => (err ? reject(new Error(stderr || err.message)) : resolve()));
+  });
 }
 
 function toFlac(input, output) {
@@ -68,6 +83,19 @@ async function ingestFile({ pool, filesDir, source, move, originalName, collecti
       // e.g. 32-bit float WAV: keep the original rather than losing anything.
       fs.rmSync(flac, { force: true });
       console.warn(`FLAC-conversie mislukt voor ${originalName}, origineel bewaard: ${err.message.trim()}`);
+    }
+  }
+  if (MPEG_CONTAINERS.has(ext) && (await hasFfmpeg())) {
+    const mp3 = (await audioCodec(source)) === 'mp3';
+    const out = path.join(filesDir, `${id}${mp3 ? '.mp3' : '.flac'}`);
+    try {
+      await (mp3 ? copyToMp3(source, out) : toFlac(source, out));
+      storedExt = mp3 ? '.mp3' : '.flac';
+      target = out;
+      if (move) fs.rmSync(source, { force: true });
+    } catch (err) {
+      fs.rmSync(out, { force: true });
+      console.warn(`Omzetten mislukt voor ${originalName}, origineel bewaard: ${err.message.trim()}`);
     }
   }
   if (storedExt === ext) {
