@@ -378,6 +378,13 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
     res.json({ files: rows.map(publicFile), total: n });
   }));
 
+  // Lets the studio notice new music without loading the library.
+  app.get('/api/library/stats', requireUser, wrap(async (req, res) => {
+    const visible = (await lib.listCollections(pool, req.user)).map((c) => c.id);
+    const { rows: [r] } = await pool.query('SELECT count(*)::int AS count, coalesce(max(id), 0) AS newest FROM audio_files WHERE collection_id = ANY($1)', [visible]);
+    res.json(r);
+  }));
+
   const upload = multer({
     dest: tmpDir,
     limits: { fileSize: maxUploadMb * 1024 * 1024 },

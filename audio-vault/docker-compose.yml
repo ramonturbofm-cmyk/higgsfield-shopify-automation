@@ -27,6 +27,9 @@ services:
       SESSION_SECRET: ${SESSION_SECRET:?zet SESSION_SECRET in .env}
       SESSION_COOKIE: ${SESSION_COOKIE:-av_session}
       CACHE_MAX_GB: ${CACHE_MAX_GB:-20}
+      # New music in the music folder is added automatically every N minutes (0 = off).
+      IMPORT_DIR: /import
+      AUTO_IMPORT_MINUTES: ${AUTO_IMPORT_MINUTES:-10}
       PUBLIC_URL: ${PUBLIC_URL:-}
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-1000}
     volumes:

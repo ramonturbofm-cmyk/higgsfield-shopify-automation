@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const path = require('path');
 const { createPool, migrate } = require('./db');
 const { createApp } = require('./app');
+const { startAutoImport } = require('./autoimport');
 
 async function main() {
   const sessionSecret = process.env.SESSION_SECRET;
@@ -20,6 +21,13 @@ async function main() {
     maxUploadMb: Number(process.env.MAX_UPLOAD_MB || 500),
     // Disk space for "zuinige modus" MP3 versions (least recently used are removed).
     cacheMaxBytes: Number(process.env.CACHE_MAX_GB || 20) * 1e9,
+  });
+  // New music in the music folder is added automatically (Docker: /import).
+  const storageDir = path.resolve(process.env.STORAGE_DIR || './storage');
+  startAutoImport({
+    pool, filesDir: path.join(storageDir, 'files'), statusFile: path.join(storageDir, 'autoimport.json'),
+    dir: process.env.IMPORT_DIR, minutes: Number(process.env.AUTO_IMPORT_MINUTES || 0),
+    jobs: Math.min(6, Math.max(2, Math.floor(require('os').cpus().length / 2))),
   });
   const port = Number(process.env.PORT || 3000);
   app.listen(port, () => console.log(`Audio Vault draait op http://localhost:${port}`));

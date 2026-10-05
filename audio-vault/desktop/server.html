@@ -107,6 +107,7 @@
     <div class="row"><span class="dot" id="dot-db"></span><span class="label">Database</span><span id="txt-db">…</span></div>
     <div class="row"><span class="dot" id="dot-app"></span><span class="label">Server / website</span><span id="txt-app">…</span></div>
     <div class="row"><span class="dot" id="dot-backup"></span><span class="label">Back-up</span><span id="txt-backup">…</span></div>
+    <div class="row"><span class="dot" id="dot-auto"></span><span class="label">Nieuwe muziek</span><span id="txt-auto">…</span></div>
     <div class="row"><span class="dot"></span><span class="label">Map op deze pc</span><span id="txt-dir">…</span></div>
     <div class="buttons">
       <button class="primary" data-run="start">Server starten</button>
@@ -142,6 +143,14 @@
         <div><label>Wachtwoord</label><input id="backupPassword" type="password" autocomplete="new-password"></div>
         <div><label>Openbaar adres (optioneel)</label><input id="publicUrl" placeholder="https://radio.ramonturbofm.synology.me"></div>
       </div>
+      <h3>Nieuwe muziek automatisch toevoegen</h3>
+      <select id="autoImportMinutes">
+        <option value="5">Elke 5 minuten</option>
+        <option value="10">Elke 10 minuten (aanbevolen)</option>
+        <option value="30">Elke 30 minuten</option>
+        <option value="60">Elk uur</option>
+        <option value="0">Uit (alleen met "Muziek importeren")</option>
+      </select>
       <p class="hint">Leeg = back-up in de servermap op deze pc. Wachtwoordvelden leeg laten = huidige wachtwoord houden.</p>
       <div style="margin-top:14px;display:flex;gap:10px;align-items:center">
         <button class="primary" type="submit">Opslaan</button><span class="hint" id="saved"></span>

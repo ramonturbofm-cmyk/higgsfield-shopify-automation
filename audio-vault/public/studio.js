@@ -805,6 +805,21 @@ function updatePflButtons() {
   document.querySelectorAll('[data-pfl]').forEach((b) => b.classList.toggle('pfl-on', Number(b.dataset.pfl) === S.pfl.fileId));
 }
 
+// New music added on the server (automatically or by hand): tell the DJ and refresh
+// the list, unless they are searching or scrolled down.
+let libraryCount = null;
+async function checkNewMusic() {
+  try {
+    const { count } = await api('GET', '/api/library/stats');
+    if (libraryCount !== null && count > libraryCount) {
+      const n = count - libraryCount;
+      status(`🎵 ${n} ${n === 1 ? 'nieuw nummer' : 'nieuwe nummers'} in de database`);
+      if (!$('lib-search').value.trim() && $('library').scrollTop < 40) searchLibrary();
+    }
+    libraryCount = count;
+  } catch { /* try again next time */ }
+}
+
 // Right-click menu on a library row.
 function fileMenu(e, f) {
   const menu = $('slot-menu');
@@ -1050,6 +1065,8 @@ async function boot() {
   renderOutputsStatus();
   renderQuality();
   searchLibrary();
+  checkNewMusic();
+  setInterval(checkNewMusic, 60 * 1000);
   render();
   cueNext();
   preloadCartPage();

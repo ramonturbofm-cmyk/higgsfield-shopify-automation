@@ -262,6 +262,22 @@ dezelfde bit-voor-bit-controle als de server (`src/convert-archive.js`).
 GitHub bouwt het automatisch (Actions → artifact *Audio-OnAir-Turbo-Omzetter*):
 een installatieprogramma en een losse `.exe` die je zonder installeren start.
 
+## Nieuwe muziek automatisch toevoegen
+
+Zet nieuwe nummers gewoon in je muziekmap (op de Synology of op de pc): de server
+kijkt standaard elke 10 minuten en voegt ze toe (WAV wordt FLAC, elke hoofdmap
+een collectie). Instellen of uitzetten in *Server beheren* → *Nieuwe muziek
+automatisch toevoegen* (of `AUTO_IMPORT_MINUTES`, 0 = uit).
+
+- Een bestand dat nog gekopieerd wordt (minder dan 2 minuten oud), wacht tot de
+  volgende ronde, zodat er nooit een half bestand in komt.
+- Er loopt nooit meer dan één import tegelijk (handmatig of automatisch).
+- Een bestand dat niet lukt, wordt pas opnieuw geprobeerd als het verandert.
+- De studio meldt "🎵 3 nieuwe nummers in de database" en ververst de lijst;
+  nieuwe nummers doen meteen mee in de uurklok (nooit gedraaid gaat voor).
+- Nummers die je uit de map weghaalt, blijven in de database staan, zodat er
+  nooit per ongeluk iets uit je uitzending verdwijnt.
+
 ## Zuinige modus (MP3 320)
 
 In de studio onder ⚙ Instellingen → *Geluidskwaliteit*:

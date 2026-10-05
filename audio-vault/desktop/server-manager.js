@@ -125,6 +125,7 @@ function createServerManager({ sourceDir, version, onLog, dir, project = 'audioo
         nasHost: env.NAS_HOST || '', nasShare: env.NAS_SHARE || '', nasUser: env.NAS_USER || '', hasNasPassword: Boolean(env.NAS_PASSWORD),
         backupShare: env.NAS_BACKUP_SHARE || '', backupUser: env.NAS_BACKUP_USER || '', hasBackupPassword: Boolean(env.NAS_BACKUP_PASSWORD),
         publicUrl: env.PUBLIC_URL || '',
+        autoImportMinutes: env.AUTO_IMPORT_MINUTES ?? '10',
         archiveTarget: env.NAS_ARCHIVE_PASSWORD ? 'nas' : env.ARCHIVE_DIR && env.ARCHIVE_DIR !== './data/archief' ? 'folder' : '',
         archiveShare: env.NAS_ARCHIVE_SHARE || '', archiveUser: env.NAS_ARCHIVE_USER || '', hasArchivePassword: Boolean(env.NAS_ARCHIVE_PASSWORD),
         archiveDir: env.ARCHIVE_DIR && env.ARCHIVE_DIR !== './data/archief' ? env.ARCHIVE_DIR : '',
@@ -145,6 +146,7 @@ function createServerManager({ sourceDir, version, onLog, dir, project = 'audioo
       result.web = res.ok;
     } catch { /* not reachable */ }
     result.archive = await archiveStatus(env);
+    try { result.autoImport = JSON.parse(fs.readFileSync(path.join(serverDir, 'data', 'audio', 'autoimport.json'), 'utf8')); } catch { result.autoImport = null; }
     if (result.containers.some((c) => c.service === 'backup' && c.state === 'running')) {
       const log = await capture(['compose', '-p', PROJECT, ...composeFiles(env), 'exec', '-T', 'backup', 'sh', '-c', 'grep -E "Backup klaar|MISLUKT" /backup/backup.log | tail -n 1']);
       result.lastBackup = log.stdout.trim() || null;
@@ -167,6 +169,7 @@ function createServerManager({ sourceDir, version, onLog, dir, project = 'audioo
       MUSIC_DIR: input.musicDir ? input.musicDir.replace(/\\/g, '/') : './import',
       BACKUP_DIR: env.BACKUP_DIR || './data/backup',
       BACKUP_KEEP_DAYS: env.BACKUP_KEEP_DAYS || '30',
+      AUTO_IMPORT_MINUTES: String(input.autoImportMinutes ?? env.AUTO_IMPORT_MINUTES ?? '10'),
       NAS_HOST: input.nasHost || '',
       NAS_SHARE: input.nasShare || '',
       NAS_USER: input.nasUser || '',

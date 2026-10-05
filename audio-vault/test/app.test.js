@@ -310,3 +310,47 @@ test('hour clocks: schedule, rotation and artist separation', { skip: !DB && 'TE
   assert.equal((await owner('DELETE', `/api/clocks/${clock.id}`)).status, 200);
   assert.deepEqual((await owner('GET', '/api/clocks')).data.schedule, []);
 });
+
+test('new music is added automatically; files still copying wait; one import at a time', { skip: !DB && 'TEST_DATABASE_URL not set' }, async () => {
+  const { importFolder } = require('../src/import');
+  const { startAutoImport } = require('../src/autoimport');
+  const src = fs.mkdtempSync(path.join(os.tmpdir(), 'auto-'));
+  fs.mkdirSync(path.join(src, 'Nieuw'));
+  const old = (file) => { const t = new Date(Date.now() - 10 * 60 * 1000); fs.utimesSync(file, t, t); };
+  fs.writeFileSync(path.join(src, 'Nieuw', 'klaar.wav'), wav()); old(path.join(src, 'Nieuw', 'klaar.wav'));
+  fs.writeFileSync(path.join(src, 'Nieuw', 'nog-bezig.wav'), wav()); // just written: may still be copying
+  const filesDir = path.join(storageDir, 'files');
+  const quiet = () => {};
+
+  // Two imports at the same moment: the second one steps aside.
+  const [a, b] = await Promise.all([
+    importFolder({ pool, filesDir, dir: src, minAgeMs: 120000, log: quiet }),
+    importFolder({ pool, filesDir, dir: src, minAgeMs: 120000, log: quiet }),
+  ]);
+  const first = a.busy ? b : a;
+  assert.ok(a.busy !== b.busy, 'exactly one of them ran');
+  assert.equal(first.added, 1);
+  assert.equal(first.waiting, 1, 'the file that is still being written waits');
+
+  // Through the automatic loop: once the file is done copying it is added.
+  old(path.join(src, 'Nieuw', 'nog-bezig.wav'));
+  const statusFile = path.join(storageDir, 'autoimport.json');
+  const auto = startAutoImport({ pool, filesDir, statusFile, dir: src, minutes: 60 });
+  await auto.round();
+  auto.stop();
+  const st = JSON.parse(fs.readFileSync(statusFile, 'utf8'));
+  assert.equal(st.enabled, true);
+  assert.equal(st.lastAdded, 1);
+  assert.equal(st.waiting, 0);
+  assert.ok(st.nextRun && !st.lastError);
+  const { rows } = await pool.query(
+    `SELECT f.title, c.name FROM audio_files f JOIN collections c ON c.id = f.collection_id WHERE f.source_path LIKE $1 ORDER BY f.title`, [`${src}%`]);
+  assert.deepEqual(rows.map((r) => [r.title, r.name]), [['klaar', 'Nieuw'], ['nog-bezig', 'Nieuw']]);
+
+  // Nothing new: nothing happens. A folder that is gone gives a clear message.
+  assert.equal((await importFolder({ pool, filesDir, dir: src, log: quiet })).added, 0);
+  fs.rmSync(src, { recursive: true, force: true });
+  const gone = startAutoImport({ pool, filesDir, statusFile, dir: src, minutes: 60 });
+  await gone.round(); gone.stop();
+  assert.match(JSON.parse(fs.readFileSync(statusFile, 'utf8')).lastError, /niet bereikbaar/);
+});

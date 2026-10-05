@@ -41,6 +41,7 @@ async function refresh() {
   const b = c('backup');
   setDot('dot-backup', s.lastBackup && /MISLUKT/.test(s.lastBackup) ? 'bad' : s.lastBackup ? 'ok' : b && b.state === 'running' ? 'warn' : '');
   $('txt-backup').textContent = s.lastBackup ? s.lastBackup.replace(/^(\S+ \S+) /, '$1 · ') : b && b.state === 'running' ? 'Nog geen back-up' : 'Niet actief';
+  renderAutoImport(s);
   $('txt-dir').textContent = s.freeBytes != null ? `${s.dir} (nog ${gb(s.freeBytes)} vrij)` : s.dir;
 
   if (s.docker === 'missing') banner('Docker Desktop is nodig om de server te draaien.', 'Docker Desktop installeren', () => api.installDocker().then(refresh));
@@ -62,6 +63,7 @@ async function refresh() {
     const st = s.settings;
     $('dir').value = s.dir;
     for (const k of ['nasHost', 'nasShare', 'nasUser', 'musicDir', 'backupShare', 'backupUser', 'publicUrl']) $(k).value = st[k] || '';
+    $('autoImportMinutes').value = String(st.autoImportMinutes ?? '10');
     $('nasPassword').placeholder = st.hasNasPassword ? '•••••••• (ongewijzigd)' : '';
     $('backupPassword').placeholder = st.hasBackupPassword ? '•••••••• (ongewijzigd)' : '';
   }
@@ -76,7 +78,7 @@ document.querySelectorAll('[data-run]').forEach((btn) => btn.addEventListener('c
 $('settings').addEventListener('submit', async (e) => {
   e.preventDefault();
   $('error').textContent = '';
-  const values = Object.fromEntries(['dir', 'nasHost', 'nasShare', 'nasUser', 'nasPassword', 'musicDir', 'backupShare', 'backupUser', 'backupPassword', 'publicUrl']
+  const values = Object.fromEntries(['dir', 'nasHost', 'nasShare', 'nasUser', 'nasPassword', 'musicDir', 'backupShare', 'backupUser', 'backupPassword', 'publicUrl', 'autoImportMinutes']
     .map((k) => [k, $(k).value.trim()]));
   const res = await api.saveSettings(values);
   if (!res.ok) { $('error').textContent = res.error; return; }
@@ -388,3 +390,27 @@ $('db-remove').addEventListener('click', async () => {
 });
 
 loadDatabases().then(() => { if (location.hash === '#nieuw') openDbForm('create'); });
+
+// ---------- automatic import status ----------
+
+function renderAutoImport(s) {
+  const a = s.autoImport;
+  const time = (iso) => new Date(iso).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+  let text = 'Niet actief';
+  let dot = '';
+  if (!s.web) text = 'Start de server om nieuwe muziek automatisch toe te voegen';
+  else if (!a || !a.enabled) text = 'Uit — alleen met "Muziek importeren"';
+  else if (a.running) { text = 'Bezig met kijken naar nieuwe muziek…'; dot = 'warn'; }
+  else if (a.lastError) { text = `Laatste keer (${time(a.lastRun)}): ${a.lastError}`; dot = 'bad'; }
+  else if (a.lastRun) {
+    const parts = [`Gekeken om ${time(a.lastRun)}`];
+    parts.push(a.lastAdded ? `${a.lastAdded} nieuw toegevoegd` : 'niets nieuws');
+    if (a.waiting) parts.push(`${a.waiting} wordt nog gekopieerd`);
+    if (a.failedFiles) parts.push(`${a.failedFiles} lukt niet (zie logboek)`);
+    parts.push(`volgende keer ${time(a.nextRun)}`);
+    text = parts.join(' · ');
+    dot = a.failedFiles ? 'warn' : 'ok';
+  } else if (a.nextRun) { text = `Eerste keer kijken om ${time(a.nextRun)}, daarna elke ${a.intervalMinutes} minuten`; dot = 'ok'; }
+  setDot('dot-auto', dot);
+  $('txt-auto').textContent = text;
+}
