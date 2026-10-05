@@ -262,6 +262,21 @@ dezelfde bit-voor-bit-controle als de server (`src/convert-archive.js`).
 GitHub bouwt het automatisch (Actions → artifact *Audio-OnAir-Turbo-Omzetter*):
 een installatieprogramma en een losse `.exe` die je zonder installeren start.
 
+## Zuinige modus (MP3 320)
+
+In de studio onder ⚙ Instellingen → *Geluidskwaliteit*:
+
+- **Automatisch** (standaard): in je eigen netwerk het verliesvrije origineel,
+  via internet een MP3 320-versie.
+- **Altijd origineel** of **altijd zuinig**.
+
+MP3 320 is ongeveer 1,5–3× kleiner dan FLAC (hoe drukker de muziek, hoe meer
+winst), dus evenveel meer klanten tegelijk op dezelfde uploadsnelheid. De
+server zet elk nummer één keer om en bewaart de MP3 in `data/audio/cache`
+(standaard maximaal 20 GB, `CACHE_MAX_GB`; wat het langst niet gevraagd is,
+gaat er eerst uit). Downloads, M3U-links en de netwerkschijf leveren altijd het
+origineel. De tussenopslag hoort niet bij de back-up; hij vult zich vanzelf.
+
 ## Grote bibliotheken (200.000+ nummers)
 
 Getest met 200.000 nummers en 150.000 gedraaide items: de studio laadt in

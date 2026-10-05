@@ -83,6 +83,7 @@
 
 <footer class="statusbar">
   <span id="status-outputs"></span>
+  <span id="status-quality"></span>
   <span id="status-msg"></span>
   <span class="muted">Spatie = start · N = volgende · P = pauze · F = fade · A = auto</span>
 </footer>
@@ -106,6 +107,12 @@
       <div><label>Overlap bij doorstarten (sec)</label><input type="number" id="set-crossfade" min="0" max="10" step="0.1"></div>
       <div><label>Duur FADE-knop (sec)</label><input type="number" id="set-fadeout" min="0.5" max="15" step="0.5"></div>
     </div>
+    <label>Geluidskwaliteit</label>
+    <select id="set-quality">
+      <option value="auto">Automatisch: origineel in je eigen netwerk, zuinig via internet (aanbevolen)</option>
+      <option value="original">Altijd origineel (FLAC, verliesvrij)</option>
+      <option value="zuinig">Altijd zuinig (MP3 320 — ± 3× minder data)</option>
+    </select>
     <label class="check"><input type="checkbox" id="set-autocue"> Auto-cue: stilte aan begin en eind automatisch overslaan en het mixpunt bepalen (strak doorstarten)</label>
 
     <h3>Nu op de radio</h3>

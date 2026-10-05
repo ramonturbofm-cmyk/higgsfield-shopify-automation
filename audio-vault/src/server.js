@@ -18,6 +18,8 @@ async function main() {
     sessionSecret: sessionSecret || crypto.randomBytes(32).toString('hex'),
     publicUrl: process.env.PUBLIC_URL,
     maxUploadMb: Number(process.env.MAX_UPLOAD_MB || 500),
+    // Disk space for "zuinige modus" MP3 versions (least recently used are removed).
+    cacheMaxBytes: Number(process.env.CACHE_MAX_GB || 20) * 1e9,
   });
   const port = Number(process.env.PORT || 3000);
   app.listen(port, () => console.log(`Audio Vault draait op http://localhost:${port}`));

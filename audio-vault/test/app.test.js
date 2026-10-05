@@ -24,7 +24,7 @@ function wav() {
 
 function client() {
   let cookie = '';
-  return async (method, url, body, headers = {}) => {
+  const call = async (method, url, body, headers = {}) => {
     const opts = { method, headers: { ...headers, cookie } };
     if (body instanceof FormData) opts.body = body;
     else if (body !== undefined) { opts.body = JSON.stringify(body); opts.headers['content-type'] = 'application/json'; }
@@ -35,6 +35,8 @@ function client() {
     const data = type.includes('json') ? await res.json() : await res.text();
     return { status: res.status, data, headers: res.headers };
   };
+  call.cookie = () => cookie;
+  return call;
 }
 
 before(async () => {
@@ -124,6 +126,20 @@ test('full flow: owner, upload, invite member, permissions, mAirList links, WebD
   assert.equal((await sam('GET', '/api/me')).data.user.can_download, false);
   assert.equal((await owner('PATCH', `/api/users/${samId}`, { can_download: true })).status, 200);
   assert.equal((await sam('GET', `/api/files/${file.id}/stream?download=1`)).status, 200);
+
+  const samCookie = () => sam.cookie();
+  // Zuinige modus: MP3 320 version, made once and then served from the cache.
+  const small = await fetch(`${base}/api/files/${file.id}/stream?format=mp3`, { headers: { cookie: samCookie() } });
+  assert.equal(small.status, 200);
+  assert.equal(small.headers.get('x-audio-format'), 'mp3-320');
+  assert.match(small.headers.get('content-type'), /audio\/mpeg/);
+  const mp3 = Buffer.from(await small.arrayBuffer());
+  assert.ok(mp3[0] === 0xff || mp3.slice(0, 3).toString() === 'ID3', 'an MP3 stream');
+  const again = await fetch(`${base}/api/files/${file.id}/stream?format=mp3`, { headers: { cookie: samCookie(), range: 'bytes=0-99' } });
+  assert.equal(again.status, 206, 'seeking works on the small version');
+  const orig = await fetch(`${base}/api/files/${file.id}/stream?format=mp3&download=1`, { headers: { cookie: samCookie() } });
+  assert.equal(orig.headers.get('x-audio-format'), 'original', 'downloads always get the original');
+  assert.equal(fs.readdirSync(path.join(storageDir, 'cache')).filter((f) => f.endsWith('.mp3')).length, 1);
 
   // mAirList / other software via personal token.
   const token = (await sam('POST', '/api/me/token')).data.token;

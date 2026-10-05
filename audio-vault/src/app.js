@@ -7,6 +7,7 @@ const lib = require('./library');
 const { createDavRouter } = require('./dav');
 const { AUDIO_TYPES, ingestFile } = require('./ingest');
 const { createClockRouter } = require('./clocks');
+const { createTranscoder } = require('./transcode');
 
 const INVITE_DAYS = 7;
 
@@ -37,11 +38,12 @@ function publicFile(f) {
   };
 }
 
-function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 500 }) {
+function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 500, cacheMaxBytes = 20e9 }) {
   const filesDir = path.join(storageDir, 'files');
   const tmpDir = path.join(storageDir, 'tmp');
   fs.mkdirSync(filesDir, { recursive: true });
   fs.mkdirSync(tmpDir, { recursive: true });
+  const transcoder = createTranscoder({ filesDir, cacheDir: path.join(storageDir, 'cache'), maxBytes: cacheMaxBytes });
 
   const app = express();
   app.set('trust proxy', 1);
@@ -428,6 +430,7 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
     const file = await editableFile(req);
     await pool.query('DELETE FROM audio_files WHERE id = $1', [file.id]);
     fs.rm(path.join(filesDir, file.storage_key), { force: true }, () => {});
+    transcoder.forget(file);
     res.json({ ok: true });
   }));
 
@@ -450,6 +453,15 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
     // Downloads are always logged (they hand out the file). Plain playing is only
     // logged for owners/admins: what customers play is their own business.
     if (isFirstChunk(req) && (download || lib.isAdmin(req.user))) lib.logAccess(pool, req.user.id, file.id, download ? 'download' : 'play', 'web');
+    // Zuinige modus: an MP3 320 version, about 3x less data (never for downloads).
+    if (req.query.format === 'mp3' && !download) {
+      const small = await transcoder.mp3(file);
+      if (small) {
+        res.type('audio/mpeg').set('X-Audio-Format', 'mp3-320');
+        return res.sendFile(small, (err) => { if (err && !res.headersSent) res.status(err.status || 500).end(); });
+      }
+    }
+    res.set('X-Audio-Format', 'original');
     sendAudio(req, res, file, { download });
   }));
 

@@ -27,6 +27,7 @@ const DEFAULT_SETTINGS = {
   cartPage: 0,
   cart: [],
   clockAuto: false,
+  quality: 'auto',
   plannedUntil: null,
 };
 
@@ -139,9 +140,22 @@ async function analyse(file, blob) {
 // ---------- audio loading (fully buffered in memory so playback never stalls) ----------
 
 const blobCache = new Map(); // fileId -> Promise<objectURL>
+// Zuinige modus: MP3 320 instead of the lossless original, ± 3x less data. "auto"
+// uses the original inside your own network and the small version over the internet.
+function isLocalNetwork() {
+  const h = location.hostname;
+  return h === 'localhost' || h.endsWith('.local') || /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h) || h === '[::1]';
+}
+function useSmall() {
+  return S.settings.quality === 'zuinig' || (S.settings.quality !== 'original' && !isLocalNetwork());
+}
+function renderQuality() {
+  $('status-quality').textContent = useSmall() ? 'Kwaliteit: zuinig (MP3 320)' : 'Kwaliteit: origineel (verliesvrij)';
+}
+
 function fileUrl(file) {
   if (!blobCache.has(file.id)) {
-    const p = fetch(`/api/files/${file.id}/stream`)
+    const p = fetch(`/api/files/${file.id}/stream${useSmall() ? '?format=mp3' : ''}`)
       .then((r) => { if (!r.ok) throw new Error(`Kan "${file.title}" niet laden (${r.status})`); return r.blob(); })
       .then(async (blob) => {
         if (S.settings.autoCue && file.cue_out === null) await analyse(file, blob).catch(() => {});
@@ -889,6 +903,7 @@ async function renderSettings() {
   $('set-crossfade').value = st.crossfade;
   $('set-fadeout').value = st.fadeOut;
   $('set-autocue').checked = st.autoCue;
+  $('set-quality').value = st.quality || 'auto';
   $('set-clockauto').checked = st.clockAuto;
   $('set-cartsize').value = st.cartSize;
   $('set-background').replaceChildren(...Object.entries(BACKGROUNDS).map(([key, b]) => h('button', {
@@ -939,6 +954,12 @@ function bindSettings() {
   $('set-crossfade').addEventListener('change', (e) => { S.settings.crossfade = Math.min(10, Math.max(0, Number(e.target.value) || 0)); saveSettingsSoon(); render(); });
   $('set-fadeout').addEventListener('change', (e) => { S.settings.fadeOut = Math.min(15, Math.max(0.5, Number(e.target.value) || 3)); saveSettingsSoon(); });
   $('set-clockauto').addEventListener('change', (e) => { S.settings.clockAuto = e.target.checked; saveSettingsSoon(); });
+  $('set-quality').addEventListener('change', (e) => {
+    S.settings.quality = e.target.value; saveSettingsSoon(); renderQuality();
+    // New loads use the new quality; what is already loaded keeps playing.
+    blobCache.clear();
+    cueNext(); preloadCartPage();
+  });
   $('set-autocue').addEventListener('change', (e) => { S.settings.autoCue = e.target.checked; saveSettingsSoon(); });
   $('set-cartsize').addEventListener('change', (e) => {
     // Keep each page's buttons in place when the grid size changes.
@@ -1027,6 +1048,7 @@ async function boot() {
   applyTheme();
   applySink(S.pfl.audio, 'pfl');
   renderOutputsStatus();
+  renderQuality();
   searchLibrary();
   render();
   cueNext();
