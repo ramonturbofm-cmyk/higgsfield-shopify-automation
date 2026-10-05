@@ -408,5 +408,13 @@ async function renderActivity(root) {
 window.addEventListener('hashchange', boot);
 boot();
 </script>
+<script>
+// Opened from the studio (its own window): the studio link goes back to that window
+// instead of starting a second studio here.
+document.addEventListener('click', (e) => {
+  const a = e.target.closest && e.target.closest('a[href="/studio.html"]');
+  if (a && window.name === 'aot-beheer' && window.opener && !window.opener.closed) { e.preventDefault(); window.opener.focus(); }
+});
+</script>
 </body>
 </html>

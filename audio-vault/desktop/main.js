@@ -63,7 +63,7 @@ function managerFor(db) {
       sourceDir: app.isPackaged ? path.join(process.resourcesPath, 'server') : path.join(__dirname, '..'),
       version: app.getVersion(),
       dir: db.dir, project: db.project, port: db.port, cookie: db.cookie,
-      onLog: (text) => { if (win && !win.isDestroyed()) win.webContents.send('server-log', text); },
+      onLog: (text) => sendAll('server-log', text),
     }));
   }
   return managers.get(db.id);
@@ -96,16 +96,51 @@ function createDatabase(name) {
   return db;
 }
 
-function showServer() {
-  win.loadFile(path.join(__dirname, 'server.html'));
+// ---------- windows ----------
+// The studio keeps its own window so the music never stops: every other screen
+// (server management, library, clocks, …) opens in a second window while the studio
+// is open, instead of replacing it.
+let side = null;
+const isStudioUrl = (url) => /\/studio\.html(\?|#|$)/.test(url || '');
+const studioOpen = () => win && !win.isDestroyed() && isStudioUrl(win.webContents.getURL());
+const allWindows = () => BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed());
+const sendAll = (channel, payload) => { for (const w of allWindows()) w.webContents.send(channel, payload); };
+function sideWindow() {
+  if (side && !side.isDestroyed()) { if (side.isMinimized()) side.restore(); side.focus(); return side; }
+  const [x, y] = win.getPosition();
+  side = new BrowserWindow({
+    width: 1300, height: 900, x: x + 40, y: y + 40, minWidth: 900, minHeight: 600,
+    title: 'Audio OnAir Turbo Database', icon: ICON, backgroundColor: '#000000', autoHideMenuBar: true,
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  guardNavigation(side);
+  side.webContents.on('did-fail-load', (e, code, description, url, isMainFrame) => {
+    if (isMainFrame && !url.startsWith('file:')) side.loadFile(path.join(__dirname, 'server.html'));
+  });
+  side.on('closed', () => { side = null; });
+  return side;
+}
+// Where a page goes: the studio window, unless the studio is open there.
+function target() { return studioOpen() ? sideWindow() : win; }
+function loadPage(page) {
+  if (isStudioUrl(page)) return openStudio(page);
+  return target().loadURL(serverOrigin + page);
+}
+
+function showServer(hash) {
+  target().loadFile(path.join(__dirname, 'server.html'), hash ? { hash } : {});
 }
 
 function showConnect(error) {
-  win.loadFile(path.join(__dirname, 'connect.html'), { query: error ? { error } : {} });
+  target().loadFile(path.join(__dirname, 'connect.html'), { query: error ? { error } : {} });
 }
 
-function openStudio(page = '/studio.html') {
-  win.loadURL(serverOrigin + page);
+function openStudio(page = '/studio.html', { reload = false } = {}) {
+  const url = serverOrigin + page;
+  // Already playing in the studio window: just bring it forward, never reload it.
+  if (!reload && studioOpen() && win.webContents.getURL().startsWith(serverOrigin)) { if (win.isMinimized()) win.restore(); win.focus(); return; }
+  win.loadURL(url);
+  win.focus();
 }
 
 async function checkServer(origin) {
@@ -122,7 +157,7 @@ async function switchTo(db) {
 }
 
 function buildMenu() {
-  const go = (page) => () => serverOrigin && openStudio(page);
+  const go = (page) => () => serverOrigin && loadPage(page);
   const active = activeDb();
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     {
@@ -146,7 +181,7 @@ function buildMenu() {
           label: `${db.name}   (poort ${db.port})`, type: 'radio', checked: db.id === active.id, click: () => switchTo(db),
         })),
         { type: 'separator' },
-        { label: 'Nieuwe database…', click: () => win.loadFile(path.join(__dirname, 'server.html'), { hash: 'nieuw' }) },
+        { label: 'Nieuwe database…', click: () => showServer('nieuw') },
       ],
     },
     {
@@ -209,7 +244,7 @@ async function fetchLatest() {
   return updateInfo;
 }
 function sendUpdateStatus(status) {
-  if (win && !win.isDestroyed()) win.webContents.send('update-status', { current: app.getVersion(), ...status });
+  sendAll('update-status', { current: app.getVersion(), ...status });
 }
 
 async function checkForUpdates({ manual = false } = {}) {
@@ -292,11 +327,11 @@ async function updateServers() {
         if (code) throw new Error(`server bijwerken gaf code ${code}`);
         if (db === (active && active.db)) {
           serverOrigin = `http://localhost:${db.port}`;
-          setTimeout(() => openStudio(), 3000);
+          setTimeout(() => openStudio('/studio.html', { reload: true }), 3000);
         }
         break;
       } catch (err) {
-        if (win && !win.isDestroyed()) win.webContents.send('server-log', `Server bijwerken: ${err.message} — opnieuw over 30 seconden…\n`);
+        sendAll('server-log', `Server bijwerken: ${err.message} — opnieuw over 30 seconden…\n`);
         await new Promise((r) => setTimeout(r, 30000));
       }
     }
@@ -312,6 +347,24 @@ ipcMain.handle('update', async (e, action) => {
     return { ok: false, error: err.message, current: app.getVersion() };
   }
 });
+
+// Stay on the own server; everything else opens in the normal browser. A link from
+// the studio to another page opens in the second window; a link back to the studio
+// brings the studio window forward.
+function guardNavigation(w) {
+  const allowed = (url) => url.startsWith('file:') || (serverOrigin && new URL(url).origin === serverOrigin);
+  const route = (url) => {
+    if (!allowed(url)) { if (/^https?:/.test(url)) shell.openExternal(url); return true; }
+    if (w === win && studioOpen() && !isStudioUrl(url)) { sideWindow().loadURL(url); return true; }
+    if (w !== win && isStudioUrl(url)) { openStudio(); return true; }
+    return false;
+  };
+  w.webContents.on('will-navigate', (e, url) => { if (route(url)) e.preventDefault(); });
+  w.webContents.setWindowOpenHandler(({ url }) => {
+    if (!route(url)) w.loadURL(url);
+    return { action: 'deny' };
+  });
+}
 
 function createWindow() {
   const cfg = readConfig();
@@ -336,13 +389,7 @@ function createWindow() {
   if (cfg.maximized) win.maximize();
   win.once('ready-to-show', () => win.show());
 
-  // Stay on the own server; everything else opens in the normal browser.
-  const allowed = (url) => url.startsWith('file:') || (serverOrigin && new URL(url).origin === serverOrigin);
-  win.webContents.on('will-navigate', (e, url) => { if (!allowed(url)) { e.preventDefault(); shell.openExternal(url); } });
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (allowed(url)) { win.loadURL(url); } else if (/^https?:/.test(url)) shell.openExternal(url);
-    return { action: 'deny' };
-  });
+  guardNavigation(win);
   win.webContents.on('page-title-updated', (e, title) => {
     const db = !win.webContents.getURL().startsWith('file:') && databaseForOrigin(serverOrigin);
     if (db && databases().length > 1) { e.preventDefault(); win.setTitle(`${title} — ${db.name}`); }
@@ -385,6 +432,8 @@ function createWindow() {
     confirmed = true;
     win.close();
   });
+  // Closing the studio window closes the app, second window included.
+  win.on('closed', () => { if (side && !side.isDestroyed()) side.destroy(); });
 
   if (cfg.server) {
     serverOrigin = cfg.server;
@@ -432,7 +481,7 @@ ipcMain.handle('server', async (e, method, ...args) => {
         return { ok: true, dir: db.dir };
       }
       case 'chooseFolder': {
-        const r = await dialog.showOpenDialog(win, {
+        const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender) || win, {
           title: { music: 'Map met muziek kiezen', archive: 'Map voor het nieuwe FLAC-archief kiezen' }[args[0]] || 'Map voor de server kiezen',
           properties: ['openDirectory', 'createDirectory'],
         });
