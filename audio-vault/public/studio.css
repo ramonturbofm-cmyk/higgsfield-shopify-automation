@@ -143,14 +143,23 @@ button { font: inherit; color: inherit; }
 .pl-marker:hover button { opacity: 1; }
 
 /* library */
-.library-filters { display: grid; grid-template-columns: 160px 1fr; gap: 6px; margin-bottom: 6px; }
+.library-filters { display: grid; grid-template-columns: 150px 1fr 120px; gap: 6px; margin-bottom: 6px; }
+.lib-more { color: var(--muted); text-align: center; padding: 10px; font-size: 12px; }
+.lib-row.flash { animation: flash .9s ease-out; }
+@keyframes flash { from { background: color-mix(in srgb, var(--accent) 35%, transparent); } }
+.menu.ctx { display: block; min-width: 210px; padding: 6px; }
+.menu.ctx .ctx-title { color: var(--muted); font-size: 11px; padding: 4px 8px 6px; border-bottom: 1px solid var(--line); margin-bottom: 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+.menu.ctx button { display: block; width: 100%; text-align: left; background: none; border: 0; color: var(--text); padding: 7px 8px; border-radius: 5px; cursor: pointer; font-size: 13px; }
+.menu.ctx button:hover { background: var(--panel2); }
+.menu.ctx button.live { color: var(--accent); font-weight: 700; }
 input, select {
   background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: 6px; padding: 7px 9px; font: inherit; width: 100%;
 }
 input:focus, select:focus { outline: none; border-color: var(--accent); }
 .library { overflow-y: auto; flex: 1; min-height: 0; border-top: 1px solid var(--line); }
 .lib-row {
-  display: grid; grid-template-columns: 1fr 46px 56px; gap: 6px; align-items: center;
+  display: grid; grid-template-columns: 1fr 46px 86px; gap: 6px; align-items: center;
   padding: 6px 4px; border-bottom: 1px solid var(--line); cursor: grab; user-select: none;
 }
 .lib-row:hover { background: var(--panel2); }

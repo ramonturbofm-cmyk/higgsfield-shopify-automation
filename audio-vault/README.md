@@ -83,6 +83,13 @@ studio vult **◔ Plan uur** het volgende uur, of zet in Instellingen
 *Automatisch bijplannen* aan: dan wordt de playlist steeds aangevuld en draait
 het station 24/7 zelfstandig (AUTO moet aan staan).
 
+**Database doorbladeren en "als volgende"**: de lijst in de studio laadt vanzelf
+verder als je naar beneden scrolt, door je hele database heen (sorteer op
+artiest, titel of nieuwste). Per nummer: **⤴** = als volgende afspelen (komt
+direct na wat nu speelt en wordt meteen klaargezet), **+** = achteraan.
+Rechtsklik geeft ook **Direct afspelen** (neemt over met een korte overvloei)
+en **Voorbeluisteren**.
+
 Sneltoetsen: spatie = start/volgende, N = volgende, P = pauze, F = fade,
 A = auto aan/uit.
 

@@ -368,7 +368,7 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
     }
     const limit = Math.min(1000, Math.max(1, Number(req.query.limit) || 1000));
     const offset = Math.max(0, Number(req.query.offset) || 0);
-    const order = req.query.sort === 'name' ? 'lower(artist), lower(title), id' : 'created_at DESC, id DESC';
+    const order = { name: 'lower(artist), lower(title), id', title: 'lower(title), lower(artist), id' }[req.query.sort] || 'created_at DESC, id DESC';
     const [{ rows }, { rows: [{ n }] }] = await Promise.all([
       pool.query(`SELECT * FROM audio_files WHERE ${where} ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`, params),
       pool.query(`SELECT count(*)::int AS n FROM audio_files WHERE ${where}`, params),

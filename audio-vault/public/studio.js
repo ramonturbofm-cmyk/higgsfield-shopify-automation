@@ -414,18 +414,18 @@ function preloadCartPage() {
 
 async function togglePfl(file) {
   const p = S.pfl;
-  if (p.fileId === file.id) { p.audio.pause(); p.fileId = null; renderLibrary(); return; }
+  if (p.fileId === file.id) { p.audio.pause(); p.fileId = null; updatePflButtons(); return; }
   p.fileId = file.id;
-  renderLibrary();
+  updatePflButtons();
   try {
     p.audio.src = await fileUrl(file);
     applySink(p.audio, 'pfl');
     await once(p.audio, 'loadedmetadata');
     p.audio.currentTime = cueIn(file);
     await p.audio.play();
-  } catch (e) { status(e.message); p.fileId = null; renderLibrary(); }
+  } catch (e) { status(e.message); p.fileId = null; updatePflButtons(); }
 }
-S.pfl.audio.addEventListener('ended', () => { S.pfl.fileId = null; renderLibrary(); });
+S.pfl.audio.addEventListener('ended', () => { S.pfl.fileId = null; updatePflButtons(); });
 
 // ---------- playlist editing ----------
 
@@ -434,6 +434,27 @@ function addToPlaylist(id, beforeUid) {
   const at = beforeUid ? S.playlist.findIndex((i) => i.uid === beforeUid) : -1;
   if (at >= 0) S.playlist.splice(at, 0, item); else S.playlist.push(item);
   afterPlaylistChange();
+}
+// Insert right after the item that is on air (or before the first waiting item).
+function addNext(id) {
+  const item = { uid: newUid(), id, stopAfter: false, state: 'queued' };
+  const playing = S.live && S.live.item ? S.playlist.indexOf(S.live.item) : -1;
+  const at = playing >= 0 ? playing + 1 : S.playlist.findIndex((i) => i.state === 'queued');
+  if (at >= 0) S.playlist.splice(at, 0, item); else S.playlist.push(item);
+  afterPlaylistChange();
+  const f = S.files.get(id);
+  if (f) status(`Als volgende: ${label(f)}`);
+  return item;
+}
+// Put it next and take over right away with a short crossfade, like a hot start.
+async function playNow(id) {
+  const item = addNext(id);
+  const end = Date.now() + 20000;
+  while (Date.now() < end) {
+    if (decks.some((d) => d.item === item && d.state === 'cued')) { cmdStart(); return; }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  status('Laden duurde te lang; het nummer staat als volgende klaar');
 }
 function movePlaylistItem(uid, beforeUid) {
   const from = S.playlist.findIndex((i) => i.uid === uid);
@@ -694,40 +715,99 @@ async function ensureFiles(ids) {
   }
 }
 
-const LIBRARY_PAGE = 300;
-const lib = { files: [], total: 0, token: 0 };
+const LIBRARY_PAGE = 200;
+const lib = { files: [], total: 0, token: 0, loading: false };
 let libTimer;
 function searchLibrarySoon() { clearTimeout(libTimer); libTimer = setTimeout(searchLibrary, 200); }
-async function searchLibrary() {
-  const token = ++lib.token;
-  const params = new URLSearchParams({ limit: LIBRARY_PAGE, sort: 'name' });
+
+function libraryParams(offset) {
+  const params = new URLSearchParams({ limit: LIBRARY_PAGE, offset, sort: $('lib-sort').value });
   if ($('lib-collection').value) params.set('collection_id', $('lib-collection').value);
   if ($('lib-search').value.trim()) params.set('q', $('lib-search').value.trim());
+  return params;
+}
+const remember = (files) => files.map((f) => { if (!S.files.has(f.id)) S.files.set(f.id, f); return S.files.get(f.id); });
+
+// New search: first page. Scrolling down loads the next pages, through the whole database.
+async function searchLibrary() {
+  const token = ++lib.token;
+  lib.loading = true;
   try {
-    const { files, total } = await api('GET', `/api/files?${params}`);
+    const { files, total } = await api('GET', `/api/files?${libraryParams(0)}`);
     if (token !== lib.token) return; // a newer search is already running
-    for (const f of files) if (!S.files.has(f.id)) S.files.set(f.id, f);
-    lib.files = files.map((f) => S.files.get(f.id)); lib.total = total;
-  } catch (e) { status(`Zoeken mislukt: ${e.message}`); }
-  renderLibrary();
+    lib.files = remember(files); lib.total = total;
+    renderLibrary();
+    $('library').scrollTop = 0;
+  } catch (e) { status(`Zoeken mislukt: ${e.message}`); } finally { if (token === lib.token) lib.loading = false; }
+}
+async function loadMoreLibrary() {
+  if (lib.loading || lib.files.length >= lib.total) return;
+  const token = lib.token;
+  lib.loading = true;
+  try {
+    const { files } = await api('GET', `/api/files?${libraryParams(lib.files.length)}`);
+    if (token !== lib.token) return;
+    const added = remember(files);
+    lib.files.push(...added);
+    const more = $('library').querySelector('.lib-more');
+    if (more) more.remove();
+    $('library').append(...added.map(libraryRow), ...libraryTail());
+    updateLibraryCount();
+  } catch (e) { status(`Laden mislukt: ${e.message}`); } finally { if (token === lib.token) lib.loading = false; }
 }
 
-function renderLibrary() {
-  const shown = lib.files;
-  $('library-count').textContent = lib.total > shown.length
-    ? `${shown.length.toLocaleString('nl-NL')} van ${lib.total.toLocaleString('nl-NL')} · zoek om te verfijnen`
-    : `${lib.total.toLocaleString('nl-NL')} items`;
-  $('library').replaceChildren(...(shown.length ? shown.map((f) => h('div', {
-    class: 'lib-row', draggable: 'true',
+function updateLibraryCount() {
+  const n = (x) => x.toLocaleString('nl-NL');
+  $('library-count').textContent = lib.total > lib.files.length ? `${n(lib.files.length)} van ${n(lib.total)}` : `${n(lib.total)} items`;
+}
+const libraryTail = () => (lib.files.length < lib.total ? [h('div', { class: 'lib-more' }, 'Scroll verder voor meer…')] : []);
+
+function libraryRow(f) {
+  return h('div', {
+    class: 'lib-row', draggable: 'true', 'data-file': f.id,
     ondragstart: (e) => { e.dataTransfer.setData('text/aot-file', String(f.id)); e.dataTransfer.effectAllowed = 'copy'; },
     ondblclick: () => addToPlaylist(f.id),
+    oncontextmenu: (e) => { e.preventDefault(); fileMenu(e, f); },
   },
   h('div', { class: 'pl-main' }, h('div', { class: 'pl-title' }, f.title), h('div', { class: 'pl-artist' }, f.artist || ' ')),
   h('div', { class: 'pl-dur' }, fmt(cueOut(f) !== null ? cueOut(f) - cueIn(f) : null)),
   h('div', { class: 'lib-actions' },
-    h('button', { title: 'Voorbeluisteren', class: S.pfl.fileId === f.id ? 'pfl-on' : '', onclick: () => togglePfl(f) }, '🎧'),
-    h('button', { title: 'Achteraan de playlist', onclick: () => addToPlaylist(f.id) }, '+'))))
+    h('button', { title: 'Voorbeluisteren', 'data-pfl': f.id, class: S.pfl.fileId === f.id ? 'pfl-on' : '', onclick: () => togglePfl(f) }, '🎧'),
+    h('button', { title: 'Als volgende afspelen', onclick: (e) => { addNext(f.id); flashRow(e.target); } }, '⤴'),
+    h('button', { title: 'Achteraan de playlist', onclick: (e) => { addToPlaylist(f.id); flashRow(e.target); } }, '+')));
+}
+function flashRow(el) {
+  const row = el.closest('.lib-row');
+  row.classList.remove('flash'); void row.offsetWidth; row.classList.add('flash');
+}
+
+function renderLibrary() {
+  updateLibraryCount();
+  $('library').replaceChildren(...(lib.files.length ? [...lib.files.map(libraryRow), ...libraryTail()]
     : [h('div', { class: 'empty' }, $('lib-search').value.trim() || $('lib-collection').value ? 'Niets gevonden.' : 'De database is nog leeg. Upload muziek via ☰ Bibliotheek.')]));
+}
+// PFL on/off without rebuilding the (possibly very long) list.
+function updatePflButtons() {
+  document.querySelectorAll('[data-pfl]').forEach((b) => b.classList.toggle('pfl-on', Number(b.dataset.pfl) === S.pfl.fileId));
+}
+
+// Right-click menu on a library row.
+function fileMenu(e, f) {
+  const menu = $('slot-menu');
+  const close = () => { menu.classList.add('hidden'); menu.classList.remove('ctx'); document.removeEventListener('mousedown', outside); };
+  const outside = (ev) => { if (!menu.contains(ev.target)) close(); };
+  const item = (text, fn, cls) => h('button', { class: cls || '', onclick: () => { close(); fn(); } }, text);
+  menu.classList.add('ctx');
+  menu.replaceChildren(
+    h('div', { class: 'ctx-title' }, label(f)),
+    item('⤴  Als volgende afspelen', () => addNext(f.id)),
+    item('+  Achteraan de playlist', () => addToPlaylist(f.id)),
+    item('▶  Direct afspelen', () => playNow(f.id), 'live'),
+    item('🎧  Voorbeluisteren', () => togglePfl(f)));
+  menu.style.left = `${Math.min(e.clientX, innerWidth - 240)}px`;
+  menu.style.top = `${Math.min(e.clientY, innerHeight - 200)}px`;
+  menu.classList.remove('hidden');
+  setTimeout(() => document.addEventListener('mousedown', outside), 0);
 }
 
 function renderCart() {
@@ -775,6 +855,7 @@ function renderCart() {
 
 function slotMenu(e, index) {
   const menu = $('slot-menu');
+  menu.classList.remove('ctx');
   const close = () => { menu.classList.add('hidden'); document.removeEventListener('mousedown', outside); };
   const outside = (ev) => { if (!menu.contains(ev.target)) close(); };
   menu.replaceChildren(
@@ -905,6 +986,12 @@ async function boot() {
   $('lib-collection').replaceChildren(h('option', { value: '' }, 'Alle collecties'), ...collections.map((c) => h('option', { value: c.id }, c.name)));
   $('lib-collection').addEventListener('change', searchLibrary);
   $('lib-search').addEventListener('input', searchLibrarySoon);
+  $('lib-sort').value = S.settings.librarySort || 'name';
+  $('lib-sort').addEventListener('change', () => { S.settings.librarySort = $('lib-sort').value; saveSettingsSoon(); searchLibrary(); });
+  $('library').addEventListener('scroll', () => {
+    const el = $('library');
+    if (el.scrollTop + el.clientHeight > el.scrollHeight - 600) loadMoreLibrary();
+  });
 
   $('btn-start').addEventListener('click', cmdStart);
   $('btn-next').addEventListener('click', cmdStart);
