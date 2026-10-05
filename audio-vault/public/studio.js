@@ -205,12 +205,13 @@ function setOutput(key) {
 }
 function route(audio, key) {
   if (!audio._gain) {
-    if (!contexts[key]) { contexts[key] = new AudioContext({ latencyHint: 'playback' }); setOutput(key); }
+    if (!contexts[key]) { contexts[key] = new AudioContext({ latencyHint: 'playback' }); setOutput(key); if (key !== 'pfl') addMeterTap(contexts[key]); }
     const ctx = contexts[key];
     audio._ctx = ctx;
     audio._src = ctx.createMediaElementSource(audio);
     audio._gain = ctx.createGain();
     audio._src.connect(audio._gain).connect(ctx.destination);
+    if (ctx._meter) audio._gain.connect(ctx._meter);
     audio._norm = 1; audio._fade = 1;
   }
   if (audio._ctx.state === 'suspended') audio._ctx.resume().catch(() => {});
@@ -221,6 +222,44 @@ function route(audio, key) {
 for (const type of ['pointerdown', 'keydown']) {
   window.addEventListener(type, () => { for (const ctx of Object.values(contexts)) if (ctx.state === 'suspended') ctx.resume().catch(() => {}); }, true);
 }
+// ---------- level meter ----------
+// Every on-air output (players, jingles; not PFL) feeds a stereo tap; the meter shows
+// the loudest of them, after equal volume and fades — what actually goes out.
+function addMeterTap(ctx) {
+  const mix = ctx.createGain(); // mono sources go to both sides
+  mix.channelCount = 2; mix.channelCountMode = 'explicit'; mix.channelInterpretation = 'speakers';
+  const split = ctx.createChannelSplitter(2);
+  mix.connect(split);
+  ctx._analysers = [0, 1].map((ch) => { const a = ctx.createAnalyser(); a.fftSize = 1024; split.connect(a, ch); return a; });
+  ctx._meter = mix;
+}
+const meter = { level: [-90, -90], peak: [-90, -90], peakAt: [0, 0], buf: new Float32Array(1024), last: 0 };
+const VU_MIN = -48;
+const vuPct = (db) => Math.max(0, Math.min(100, ((db - VU_MIN) / -VU_MIN) * 100));
+function drawMeter(now) {
+  const dt = Math.min(0.2, (now - (meter.last || now)) / 1000);
+  meter.last = now;
+  for (let ch = 0; ch < 2; ch++) {
+    let peak = 0;
+    for (const ctx of Object.values(contexts)) {
+      if (!ctx._analysers || ctx.state !== 'running') continue;
+      ctx._analysers[ch].getFloatTimeDomainData(meter.buf);
+      for (let i = 0; i < meter.buf.length; i++) { const v = Math.abs(meter.buf[i]); if (v > peak) peak = v; }
+    }
+    const db = peak > 0 ? 20 * Math.log10(peak) : -90;
+    // Instant rise, falls back 24 dB per second; the peak line holds 1.5 s.
+    meter.level[ch] = Math.max(db, meter.level[ch] - 24 * dt);
+    if (db >= meter.peak[ch] || now - meter.peakAt[ch] > 1500) { meter.peak[ch] = db; meter.peakAt[ch] = now; }
+    $(ch ? 'vu-r' : 'vu-l').style.width = `${100 - vuPct(meter.level[ch])}%`;
+    const p = $(ch ? 'vu-rp' : 'vu-lp');
+    p.style.left = `calc(${vuPct(meter.peak[ch])}% - 2px)`;
+    p.style.opacity = meter.peak[ch] > VU_MIN ? 1 : 0;
+  }
+  $('vu').classList.toggle('clip', Math.max(...meter.peak) > -0.5);
+  requestAnimationFrame(drawMeter);
+}
+requestAnimationFrame(drawMeter);
+
 function unroute(audio) {
   if (audio._src) { audio._src.disconnect(); audio._gain.disconnect(); audio._src = null; audio._gain = null; }
 }

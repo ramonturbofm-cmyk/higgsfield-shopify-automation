@@ -343,6 +343,14 @@ Zelf toevoegen aan de playlist blijft altijd mogelijk.
   filter dan op map of artiest.
 - Ieder heeft zijn eigen filter; het filter van een klant geldt niet voor jou.
 
+## Geluidsmeter
+
+Bovenin de studio staat een stereo meter (L/R, −48 tot 0 dBFS). Hij meet wat er
+echt naar buiten gaat: beide players en het jingle paneel samen, ná gelijk volume
+en fades (voorbeluisteren telt niet mee). Groen is goed, geel vanaf −12, rood vanaf
+−3; het witte streepje houdt de hoogste piek 1,5 seconde vast. Kleuren L en R rood,
+dan raakt het signaal de 0 dB (vervorming).
+
 ## Gelijk volume (loudness-normalisatie)
 
 Elk nummer en elke jingle klinkt even hard, ook als de ene opname veel zachter
