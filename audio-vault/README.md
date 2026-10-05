@@ -295,6 +295,11 @@ je een heel album tegelijk selecteren.
 - Het volgende item start precies waar het nummer eindigt (getest: binnen
   ±0,03 s).
 - In de lijst staat een ⇥ achter de titel.
+- Naadloze nummers die achter elkaar spelen (een plaatkant, een live-set) houden
+  het volume van het eerste nummer. *Gelijk volume* maakt zo geen sprong op de
+  overgang; de player toont dan *⇥ +x dB*.
+- Ideaal voor vinyl-opnames die per nummer zijn geknipt: de plaat loopt door zoals
+  hij is opgenomen, met het geknisper ertussen.
 - Aanzetten mag de beheerder, of iemand met uploadrechten op die collectie. Het
   geldt voor iedereen die het nummer draait.
 

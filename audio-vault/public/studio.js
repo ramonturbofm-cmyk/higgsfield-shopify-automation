@@ -240,7 +240,7 @@ function setNormalization(audio, file) {
   applyGain(audio);
 }
 function reapplyNormalization() {
-  for (const d of decks) if (d.file) setNormalization(d.audio, d.file);
+  for (const d of decks) if (d.file && !d.chained) setNormalization(d.audio, d.file);
   for (const p of S.cartPlayers.values()) setNormalization(p.audio, p.file);
   const pf = S.pfl.fileId && S.files.get(S.pfl.fileId);
   if (pf) setNormalization(S.pfl.audio, pf);
@@ -270,6 +270,7 @@ function nextQueued() {
 async function loadDeck(deck, item) {
   const token = ++deck.token;
   deck.item = item; deck.file = S.files.get(item.id); deck.state = 'loading'; deck.mixed = false; deck.noAdvance = false; deck.fade = null;
+  deck.chained = false; deck.chainNorm = undefined;
   render();
   try {
     if (!deck.file) throw new Error('Bestand bestaat niet meer');
@@ -332,6 +333,8 @@ function startDeck(deck) {
   deck.state = 'playing';
   deck.mixed = false;
   route(deck.audio, deck.name);
+  if (deck.chainNorm !== undefined) { deck.audio._norm = deck.chainNorm; deck.chained = true; } else deck.chained = false;
+  deck.chainNorm = undefined;
   setFade(deck.audio, 1);
   deck.audio.play().catch((e) => status(`Afspelen geblokkeerd: ${e.message}`));
   S.live = deck;
@@ -451,6 +454,9 @@ function tick() {
         // With analysed cue points the tail is already quiet: let it ring out. Without, fade it.
         // A naadloos track simply plays to its end.
         if (!f.segue && (f.mix_out === null || f.mix_out === undefined)) fadeDeck(d, Math.max(0.1, end - t));
+        // Naadloos into naadloos (one side of an LP, a live set): keep the volume of the
+        // track that is playing, so equal volume doesn't make a step at the join.
+        if (f.segue && next.file && next.file.segue) next.chainNorm = d.audio._norm;
         startDeck(next);
       }
     }
@@ -705,7 +711,7 @@ function renderDecks() {
       h('div', { class: 'deck-head' }, h('span', {}, `PLAYER ${d.name}`), h('span', { class: 'deck-state' }, stateLabel)),
       h('div', { class: 'deck-title' }, d.file ? d.file.title : '—'),
       h('div', { class: 'deck-artist' }, d.file ? d.file.artist || ' ' : ' ',
-        d.file && S.settings.normalize && d.file.loudness_lufs != null ? h('span', { class: 'deck-gain', title: 'Gelijk volume' }, fmtDb(loudnessDb(d.file))) : null),
+        d.file && S.settings.normalize && (d.chained || d.file.loudness_lufs != null) ? h('span', { class: 'deck-gain', title: d.chained ? 'Naadloos: zelfde volume als het vorige nummer' : 'Gelijk volume' }, `${d.chained ? '⇥ ' : ''}${fmtDb(20 * Math.log10(d.audio._norm || 1))}`) : null),
       h('div', { class: 'deck-bar', title: 'Klik of sleep om door te spoelen' }, h('div', { id: `deck-fill-${d.index}` })),
       h('div', { class: 'deck-time' }, h('span', { id: `deck-pos-${d.index}` }, ''), h('span', { id: `deck-rem-${d.index}` }, '')));
   }
