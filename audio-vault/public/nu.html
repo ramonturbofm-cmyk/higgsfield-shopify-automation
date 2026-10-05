@@ -40,14 +40,19 @@
 </div>
 <script>
 // Accent colour can be set with ?kleur=30d158 (handy when embedding on a website).
-const accent = new URLSearchParams(location.search).get('kleur');
+const params = new URLSearchParams(location.search);
+const accent = params.get('kleur');
+// ?station=<key> shows that person's station; without it, the owner's.
+const station = params.get('station');
 if (/^[0-9a-f]{6}$/i.test(accent || '')) document.documentElement.style.setProperty('--accent', `#${accent}`);
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 let current = null;
 
 async function load() {
   try {
-    const data = await (await fetch('/api/now-playing')).json();
+    const res = await fetch(`/api/now-playing${station ? `?station=${encodeURIComponent(station)}` : ''}`);
+    if (!res.ok) { document.getElementById('title').textContent = 'Onbekend station'; return; }
+    const data = await res.json();
     current = data.now_playing;
     document.getElementById('title').textContent = current ? current.title : 'Even stil…';
     document.getElementById('artist').textContent = current ? current.artist : '';

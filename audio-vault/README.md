@@ -292,7 +292,10 @@ Lukt de omzetting niet (bijv. 32-bit float WAV), dan wordt het origineel bewaard
   M3U-links, de netwerkschijf en koppelen aan eigen software (mAirList) staan
   uit tot je per persoon *Mag downloaden en koppelen* aanvinkt.
 - Blokkeren werkt meteen: sessie en koppelingen stoppen direct.
-- In *Activiteit* zie je wie wat heeft afgespeeld.
+- **Privacy van klanten**: wat klanten afspelen is van henzelf. In *Activiteit*
+  zie je alleen downloads, koppelingen en uploads, niet wat klanten draaien.
+- Elke klant heeft een eigen **"Nu op de radio"**-pagina (privélink in de
+  studio-instellingen) en een eigen uurklok-rotatie; jouw pagina is `/nu.html`.
 
 Eerlijk is eerlijk: wat iemand in zijn browser hoort, kan hij met moeite altijd
 opnemen. Geen enkel systeem voorkomt dat volledig; deze opzet maakt het

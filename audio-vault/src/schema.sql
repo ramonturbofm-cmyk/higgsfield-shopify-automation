@@ -69,15 +69,16 @@ CREATE TABLE IF NOT EXISTS user_settings (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- What is on air right now (single row), shown in the studio and on /nu.html.
-CREATE TABLE IF NOT EXISTS now_playing (
-  id               INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+-- What is on air right now, per person: every customer runs their own station.
+-- Shown on /nu.html (the owner's) and /nu.html?station=<station_key> (anyone else's).
+DROP TABLE IF EXISTS now_playing;
+CREATE TABLE IF NOT EXISTS station_now_playing (
+  user_id          INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   file_id          INTEGER REFERENCES audio_files(id) ON DELETE SET NULL,
   title            TEXT NOT NULL,
   artist           TEXT NOT NULL DEFAULT '',
   duration_seconds NUMERIC(10, 3),
-  started_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-  started_by       INTEGER REFERENCES users(id) ON DELETE SET NULL
+  started_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- Members may only play inside the studio unless they get this right (download,
@@ -112,3 +113,8 @@ CREATE INDEX IF NOT EXISTS audio_files_created_idx ON audio_files (created_at DE
 CREATE INDEX IF NOT EXISTS access_log_onair_idx ON access_log (file_id, created_at) WHERE action = 'onair';
 CREATE INDEX IF NOT EXISTS audio_files_title_idx ON audio_files (lower(title), lower(artist), id);
 CREATE INDEX IF NOT EXISTS access_log_file_idx ON access_log (file_id);
+
+-- Private key for someone's public "Nu op de radio" page (not guessable like an id).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS station_key TEXT UNIQUE;
+-- Rotation and "eerder gedraaid" are per person.
+CREATE INDEX IF NOT EXISTS access_log_user_onair_idx ON access_log (user_id, file_id, created_at) WHERE action = 'onair';

@@ -104,7 +104,7 @@ function createClockRouter({ pool, requireUser, requireAdmin, wrap, HttpError })
     // Recently played or already queued files are off limits; recent artists too.
     const { rows: recent } = await pool.query(
       `SELECT l.file_id, f.artist FROM access_log l JOIN audio_files f ON f.id = l.file_id
-        WHERE l.action = 'onair' AND l.created_at > now() - make_interval(hours => $1) ORDER BY l.created_at`, [ROTATION_HOURS]);
+        WHERE l.action = 'onair' AND l.user_id = $2 AND l.created_at > now() - make_interval(hours => $1) ORDER BY l.created_at`, [ROTATION_HOURS, req.user.id]);
     const { rows: queued } = await pool.query('SELECT id, artist FROM audio_files WHERE id = ANY($1)', [exclude]);
     const queuedArtist = new Map(queued.map((r) => [r.id, r.artist]));
     const used = new Set([...recent.map((r) => r.file_id), ...exclude]);
@@ -121,9 +121,9 @@ function createClockRouter({ pool, requireUser, requireAdmin, wrap, HttpError })
           ({ rows } = await pool.query(
             `SELECT f.id, f.artist, lp.last_played FROM audio_files f
                LEFT JOIN (SELECT file_id, max(created_at) AS last_played FROM access_log
-                           WHERE action = 'onair' GROUP BY file_id) lp ON lp.file_id = f.id
+                           WHERE action = 'onair' AND user_id = $3 GROUP BY file_id) lp ON lp.file_id = f.id
               WHERE f.collection_id = $1
-              ORDER BY lp.last_played NULLS FIRST, random() LIMIT $2`, [collectionId, POOL_SIZE]));
+              ORDER BY lp.last_played NULLS FIRST, random() LIMIT $2`, [collectionId, POOL_SIZE, req.user.id]));
         }
         pools.set(collectionId, rows);
       }

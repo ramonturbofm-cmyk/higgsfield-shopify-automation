@@ -40,7 +40,7 @@ function client() {
 before(async () => {
   if (!DB) return;
   pool = createPool(DB);
-  await pool.query('DROP TABLE IF EXISTS clock_schedule, clocks, now_playing, user_settings, access_log, collection_access, audio_files, collections, users CASCADE');
+  await pool.query('DROP TABLE IF EXISTS clock_schedule, clocks, station_now_playing, now_playing, user_settings, access_log, collection_access, audio_files, collections, users CASCADE');
   await migrate(pool);
   storageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-'));
   const app = createApp({ pool, storageDir, sessionSecret: 'test-secret' });
@@ -180,15 +180,30 @@ test('full flow: owner, upload, invite member, permissions, mAirList links, WebD
   assert.equal(cued.status, 200);
   assert.equal(cued.data.file.mix_out, 0.8);
   assert.equal((await sam('PUT', `/api/files/${file.id}/cues`, { cue_in: 0, mix_out: 0, cue_out: 0 })).status, 400);
+  // Every customer has their own station: what Sam plays shows on Sam's page only.
   assert.equal((await client()('GET', '/api/now-playing')).data.now_playing, null);
   assert.equal((await sam('POST', '/api/now-playing', { file_id: file.id })).status, 200);
-  const np = (await client()('GET', '/api/now-playing')).data;
+  const samLink = (await sam('GET', '/api/me/station-link')).data.url;
+  assert.match(samLink, /\/nu\.html\?station=[\w-]{20,}$/);
+  const samStation = `/api/now-playing?station=${samLink.split('station=')[1]}`;
+  const np = (await client()('GET', samStation)).data;
   assert.equal(np.now_playing.title, 'Station ID é');
   assert.equal(np.now_playing.duration_seconds, 0.9);
+  assert.equal((await client()('GET', '/api/now-playing')).data.now_playing, null, "the owner's page stays empty");
+  assert.equal((await client()('GET', '/api/now-playing?station=geraden')).status, 404);
+  assert.equal((await owner('GET', '/api/me/station-link')).data.url.endsWith('/nu.html'), true);
+  // The owner does not see what customers play.
+  const seen = (await owner('GET', '/api/activity')).data.activity;
+  assert.ok(!seen.some((a) => a.action === 'onair' || a.action === 'play'), 'customer plays are private');
+  assert.ok(seen.some((a) => a.action === 'download'), 'downloads stay visible');
   assert.equal((await sam('POST', '/api/now-playing', { file_id: null })).status, 200);
-  const after = (await client()('GET', '/api/now-playing')).data;
+  const after = (await client()('GET', samStation)).data;
   assert.equal(after.now_playing, null);
   assert.equal(after.recent[0].title, 'Station ID é');
+  // The owner's own station.
+  assert.equal((await owner('POST', '/api/now-playing', { file_id: file.id })).status, 200);
+  assert.equal((await client()('GET', '/api/now-playing')).data.now_playing.title, 'Station ID é');
+  assert.equal((await client()('GET', samStation)).data.now_playing, null, "Sam's page is not affected");
 
   // Blocking a user kills both their session and their token immediately.
   assert.equal((await owner('PATCH', `/api/users/${samId}`, { disabled: true })).status, 200);

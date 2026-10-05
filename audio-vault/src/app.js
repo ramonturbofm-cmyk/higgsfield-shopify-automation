@@ -447,7 +447,9 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
     const download = req.query.download === '1';
     if (download && !lib.canDownload(req.user)) throw new HttpError(403, 'Downloaden is voor jou niet toegestaan');
     res.set('Cache-Control', 'private, no-store');
-    if (isFirstChunk(req)) lib.logAccess(pool, req.user.id, file.id, download ? 'download' : 'play', 'web');
+    // Downloads are always logged (they hand out the file). Plain playing is only
+    // logged for owners/admins: what customers play is their own business.
+    if (isFirstChunk(req) && (download || lib.isAdmin(req.user))) lib.logAccess(pool, req.user.id, file.id, download ? 'download' : 'play', 'web');
     sendAudio(req, res, file, { download });
   }));
 
@@ -487,28 +489,44 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
   app.post('/api/now-playing', requireUser, wrap(async (req, res) => {
     const fileId = req.body && req.body.file_id;
     if (fileId === null) {
-      await pool.query('DELETE FROM now_playing');
+      await pool.query('DELETE FROM station_now_playing WHERE user_id = $1', [req.user.id]);
       return res.json({ now_playing: null });
     }
     const file = await lib.readableFile(pool, req.user, Number(fileId));
     if (!file) throw new HttpError(404, 'Bestand niet gevonden');
     const length = file.cue_out !== null ? Number(file.cue_out) - Number(file.cue_in || 0) : file.duration_seconds;
     await pool.query(
-      `INSERT INTO now_playing (id, file_id, title, artist, duration_seconds, started_at, started_by)
-       VALUES (1, $1, $2, $3, $4, now(), $5)
-       ON CONFLICT (id) DO UPDATE SET file_id = EXCLUDED.file_id, title = EXCLUDED.title, artist = EXCLUDED.artist,
-         duration_seconds = EXCLUDED.duration_seconds, started_at = now(), started_by = EXCLUDED.started_by`,
-      [file.id, file.title, file.artist, length, req.user.id]);
+      `INSERT INTO station_now_playing (user_id, file_id, title, artist, duration_seconds, started_at)
+       VALUES ($1, $2, $3, $4, $5, now())
+       ON CONFLICT (user_id) DO UPDATE SET file_id = EXCLUDED.file_id, title = EXCLUDED.title, artist = EXCLUDED.artist,
+         duration_seconds = EXCLUDED.duration_seconds, started_at = now()`,
+      [req.user.id, file.id, file.title, file.artist, length]);
     lib.logAccess(pool, req.user.id, file.id, 'onair', 'studio');
     res.json({ ok: true });
   }));
 
+  // Your own private link for the public "Nu op de radio" page.
+  app.get('/api/me/station-link', requireUser, wrap(async (req, res) => {
+    let key = req.user.station_key;
+    if (!key) {
+      key = auth.randomToken();
+      await pool.query('UPDATE users SET station_key = $1 WHERE id = $2', [key, req.user.id]);
+    }
+    res.json({ url: req.user.role === 'owner' ? `${baseUrl(req)}/nu.html` : `${baseUrl(req)}/nu.html?station=${key}` });
+  }));
+
   // Public: what is on air now plus the last few items (for a website, RDS, a studio screen).
+  // Without ?station= it shows the owner's station; with it, that person's station.
   app.get('/api/now-playing', wrap(async (req, res) => {
-    const { rows } = await pool.query('SELECT title, artist, duration_seconds, started_at FROM now_playing WHERE id = 1');
+    const station = String(req.query.station || '');
+    const { rows: [who] } = station
+      ? await pool.query('SELECT id FROM users WHERE station_key = $1 AND NOT disabled', [station])
+      : await pool.query("SELECT id FROM users WHERE role = 'owner' LIMIT 1");
+    if (!who) throw new HttpError(404, 'Onbekend station');
+    const { rows } = await pool.query('SELECT title, artist, duration_seconds, started_at FROM station_now_playing WHERE user_id = $1', [who.id]);
     const { rows: recent } = await pool.query(
       `SELECT f.title, f.artist, l.created_at AS started_at FROM access_log l JOIN audio_files f ON f.id = l.file_id
-        WHERE l.action = 'onair' ORDER BY l.created_at DESC LIMIT 11`);
+        WHERE l.action = 'onair' AND l.user_id = $1 ORDER BY l.created_at DESC LIMIT 11`, [who.id]);
     const current = rows[0] ? { ...rows[0], duration_seconds: num(rows[0].duration_seconds) } : null;
     res.set('Access-Control-Allow-Origin', '*').json({ now_playing: current, recent: current ? recent.slice(1) : recent.slice(0, 10) });
   }));
@@ -519,6 +537,8 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
     const { rows } = await pool.query(
       `SELECT l.action, l.client, l.created_at, u.name AS user_name, f.title, f.artist
          FROM access_log l LEFT JOIN users u ON u.id = l.user_id LEFT JOIN audio_files f ON f.id = l.file_id
+        -- What customers play stays private; downloads, links and uploads stay visible.
+        WHERE NOT (l.action IN ('onair', 'play') AND (u.role IS NULL OR u.role = 'member'))
         ORDER BY l.created_at DESC LIMIT 200`);
     res.json({ activity: rows });
   }));

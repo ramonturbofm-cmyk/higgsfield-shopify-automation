@@ -926,7 +926,15 @@ async function renderSettings() {
 
 function bindSettings() {
   const dlg = $('settings');
-  $('btn-settings').addEventListener('click', () => { renderSettings(); dlg.showModal(); });
+  $('btn-settings').addEventListener('click', () => {
+    renderSettings(); dlg.showModal();
+    api('GET', '/api/me/station-link').then(({ url }) => { $('set-nowlink').value = url; }).catch(() => {});
+  });
+  $('btn-copy-nowlink').addEventListener('click', async (e) => {
+    $('set-nowlink').select();
+    await navigator.clipboard.writeText($('set-nowlink').value).catch(() => {});
+    e.target.textContent = 'Gekopieerd'; setTimeout(() => (e.target.textContent = 'Kopieer'), 1500);
+  });
   $('set-station').addEventListener('input', (e) => { S.settings.stationName = e.target.value; applyTheme(); saveSettingsSoon(); });
   $('set-crossfade').addEventListener('change', (e) => { S.settings.crossfade = Math.min(10, Math.max(0, Number(e.target.value) || 0)); saveSettingsSoon(); render(); });
   $('set-fadeout').addEventListener('change', (e) => { S.settings.fadeOut = Math.min(15, Math.max(0.5, Number(e.target.value) || 3)); saveSettingsSoon(); });
