@@ -1,8 +1,8 @@
 {
   "name": "audio-onair-turbo",
-  "productName": "Audio OnAir Turbo",
-  "version": "1.5.1",
-  "description": "Audio OnAir Turbo \u2014 radio playout studio",
+  "productName": "Audio OnAir Turbo Database",
+  "version": "2.0.0",
+  "description": "Audio OnAir Turbo Database \u2014 radio playout studio",
   "author": "Turbo FM",
   "license": "UNLICENSED",
   "private": true,
@@ -17,9 +17,9 @@
   },
   "build": {
     "appId": "fm.turbo.audio-onair",
-    "productName": "Audio OnAir Turbo",
+    "productName": "Audio OnAir Turbo Database",
     "copyright": "\u00a9 2026 Turbo FM",
-    "artifactName": "Audio-OnAir-Turbo-Setup-${version}.${ext}",
+    "artifactName": "Audio-OnAir-Turbo-Database-Setup-${version}.${ext}",
     "files": [
       "main.js",
       "preload.js",
@@ -44,7 +44,7 @@
         }
       ],
       "icon": "build/icon.ico",
-      "legalTrademarks": "Audio OnAir Turbo"
+      "legalTrademarks": "Audio OnAir Turbo Database"
     },
     "nsis": {
       "oneClick": false,
@@ -56,7 +56,7 @@
       "uninstallerSidebar": "build/installerSidebar.bmp",
       "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
-      "shortcutName": "Audio OnAir Turbo",
+      "shortcutName": "Audio OnAir Turbo Database",
       "runAfterFinish": true
     },
     "extraResources": [

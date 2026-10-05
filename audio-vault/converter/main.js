@@ -18,6 +18,9 @@ const writeConfig = (patch) => {
   fs.writeFileSync(configFile(), JSON.stringify({ ...readConfig(), ...patch }, null, 2));
 };
 
+// Same settings folder as before the rename, so the last chosen folders are remembered.
+app.setPath('userData', path.join(app.getPath('appData'), 'Audio OnAir Turbo Omzetter'));
+
 let win = null;
 let job = null; // running conversion worker
 let blocker = null;
@@ -80,7 +83,7 @@ ipcMain.handle('open', (e, p) => shell.openPath(p));
 
 function createWindow() {
   win = new BrowserWindow({
-    width: 940, height: 780, minWidth: 760, minHeight: 640, show: false, title: 'Audio OnAir Turbo Omzetter',
+    width: 940, height: 780, minWidth: 760, minHeight: 640, show: false, title: 'Audio OnAir Turbo Database Omzetter',
     icon: ICON, backgroundColor: '#000000', autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true },
   });

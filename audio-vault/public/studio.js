@@ -549,7 +549,7 @@ function applyTheme() {
   const [r, g, b] = [1, 3, 5].map((i) => parseInt(S.settings.accent.slice(i, i + 2), 16));
   root.setProperty('--accent-text', 0.299 * r + 0.587 * g + 0.114 * b > 150 ? '#000' : '#fff');
   $('station-name').textContent = S.settings.stationName;
-  document.title = S.settings.stationName ? `${S.settings.stationName} · Audio OnAir Turbo` : 'Audio OnAir Turbo';
+  document.title = S.settings.stationName ? `${S.settings.stationName} · Audio OnAir Turbo Database` : 'Audio OnAir Turbo Database';
 }
 
 // ---------- rendering ----------

@@ -14,6 +14,9 @@ app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.setAppUserModelId('fm.turbo.audio-onair');
+// Keep using the settings folder of the earlier name ("Audio OnAir Turbo"): server
+// address, login and server folder survive the rename and the update.
+app.setPath('userData', path.join(app.getPath('appData'), 'Audio OnAir Turbo'));
 
 function readConfig() {
   try { return JSON.parse(fs.readFileSync(configFile(), 'utf8')); } catch { return {}; }
@@ -52,14 +55,14 @@ function openStudio(page = '/studio.html') {
 async function checkServer(origin) {
   const res = await net.fetch(`${origin}/health`, { cache: 'no-store' });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok || !body.ok) throw new Error('Dit adres is geen Audio OnAir Turbo-server');
+  if (!res.ok || !body.ok) throw new Error('Dit adres is geen Audio OnAir Turbo Database-server');
 }
 
 function buildMenu() {
   const go = (page) => () => serverOrigin && openStudio(page);
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     {
-      label: 'Audio OnAir Turbo',
+      label: 'Audio OnAir Turbo Database',
       submenu: [
         { label: 'Studio', accelerator: 'CmdOrCtrl+1', click: go('/studio.html') },
         { label: 'Uurklokken', accelerator: 'CmdOrCtrl+2', click: go('/klok.html') },
@@ -86,10 +89,10 @@ function buildMenu() {
     {
       label: 'Help',
       submenu: [{
-        label: 'Over Audio OnAir Turbo',
+        label: 'Over Audio OnAir Turbo Database',
         click: () => dialog.showMessageBox(win, {
-          type: 'info', icon: ICON, title: 'Over Audio OnAir Turbo',
-          message: `Audio OnAir Turbo ${app.getVersion()}`,
+          type: 'info', icon: ICON, title: 'Over Audio OnAir Turbo Database',
+          message: `Audio OnAir Turbo Database ${app.getVersion()}`,
           detail: `Radio playout studio\nVerbonden met: ${serverOrigin || '—'}\n\n© 2026 Turbo FM`,
         }),
       }],
@@ -105,7 +108,7 @@ function createWindow() {
     minWidth: 1100,
     minHeight: 700,
     show: false,
-    title: 'Audio OnAir Turbo',
+    title: 'Audio OnAir Turbo Database',
     icon: ICON,
     backgroundColor: '#000000',
     autoHideMenuBar: true,

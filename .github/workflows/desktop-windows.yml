@@ -1,6 +1,6 @@
 # Builds the Audio OnAir Turbo Windows installer on a real Windows machine.
 # Download it from the run's "Artifacts" section (Actions tab).
-name: Audio OnAir Turbo – Windows installer
+name: Audio OnAir Turbo Database – Windows installer
 
 on:
   workflow_dispatch:
@@ -25,7 +25,7 @@ jobs:
       - run: npx electron-builder --win --x64 --publish never
       - uses: actions/upload-artifact@v4
         with:
-          name: Audio-OnAir-Turbo-Setup
+          name: Audio-OnAir-Turbo-Database-Setup
           path: audio-vault/desktop/dist/*.exe
           if-no-files-found: error
 
@@ -46,6 +46,6 @@ jobs:
       - run: npm run dist
       - uses: actions/upload-artifact@v4
         with:
-          name: Audio-OnAir-Turbo-Omzetter
+          name: Audio-OnAir-Turbo-Database-Omzetter
           path: audio-vault/converter/dist/*.exe
           if-no-files-found: error
