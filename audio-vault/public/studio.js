@@ -1094,6 +1094,7 @@ function fileMenu(e, f, { playlist = false } = {}) {
       h('div', { class: 'ctx-title' }, `${ids.length} nummers geselecteerd`),
       item('⤴  Als volgende afspelen', () => { addNext(ids); clearSelection(); }),
       item('+  Achteraan de playlist', () => { addToPlaylist(ids); clearSelection(); }),
+      item(`🎵  Op jingle-knoppen zetten (${ids.length})`, () => assignToCart(ids)),
       item(`🚫  Niet in nonstop (${ids.length} nummers)`, () => { addNonstopBlocks(ids.map((id) => ({ kind: 'file', value: id }))); clearSelection(); }),
       item(`⇥  Naadloos aansluiten aan (${ids.length} nummers)`, () => { setSegue(ids, true); clearSelection(); }),
       item('⇥  Naadloos aansluiten uit', () => { setSegue(ids, false); clearSelection(); }),
@@ -1107,6 +1108,7 @@ function fileMenu(e, f, { playlist = false } = {}) {
     item('+  Achteraan de playlist', () => addToPlaylist(f.id)),
     item('▶  Direct afspelen', () => playNow(f.id), 'live'),
     item('🎧  Voorbeluisteren', () => togglePfl(f)),
+    item('🎵  Op een jingle-knop zetten', () => assignToCart([f.id])),
     ...nonstopMenuItems(f, item));
   menu.style.left = `${Math.min(e.clientX, innerWidth - 240)}px`;
   menu.style.top = `${Math.min(e.clientY, innerHeight - 200)}px`;
@@ -1185,6 +1187,27 @@ async function renderNonstopGenres() {
   } catch { /* the list is only a help */ }
 }
 
+// Put tracks on jingle buttons: the first at `from` (or the first free button on this
+// page), the rest on the next free buttons.
+function assignToCart(ids, from = null) {
+  const slots = cartSlots();
+  const { count } = cartDims();
+  const page = Array.from({ length: count }, (_, i) => cartIndex(i));
+  let free = page.filter((i) => !slots[i] || !S.files.get(slots[i].id));
+  if (from !== null) free = [from, ...free.filter((i) => i !== from && page.indexOf(i) > page.indexOf(from)), ...free.filter((i) => page.indexOf(i) < page.indexOf(from))];
+  let placed = 0;
+  for (const id of ids) {
+    const at = free.shift();
+    if (at === undefined) break;
+    slots[at] = { id, color: (slots[at] && slots[at].color) || SLOT_COLORS[at % SLOT_COLORS.length] };
+    placed++;
+  }
+  if (!placed) { status('Geen lege jingle-knop meer op deze pagina — kies pagina B, C of D'); return; }
+  status(`🎵 ${placed} ${placed === 1 ? 'jingle' : 'jingles'} op het jingle paneel gezet${placed < ids.length ? ` (${ids.length - placed} pasten niet meer)` : ''}`);
+  clearSelection();
+  saveSettingsSoon(); preloadCartPage(); renderCart();
+}
+
 function renderCart() {
   const { cols, rows, count } = cartDims();
   const root = $('cart');
@@ -1214,7 +1237,16 @@ function renderCart() {
       },
       oncontextmenu: (e) => { e.preventDefault(); if (slot) slotMenu(e, index); },
     };
-    if (!file) return h('div', { ...common, class: 'slot empty-slot' }, slot ? '(bestand weg)' : '+');
+    if (!file) {
+      return h('div', {
+        ...common, class: 'slot empty-slot', title: 'Kies een jingle in de database en klik hier (of sleep hem hierheen)',
+        onclick: () => {
+          const ids = selectedIds();
+          if (!ids.length) { status('Selecteer eerst een of meer jingles in de database (klik erop) en klik dan op een lege knop — of sleep een jingle hierheen'); return; }
+          assignToCart(ids, index);
+        },
+      }, slot ? '(bestand weg)' : '+');
+    }
     return h('button', {
       ...common,
       class: `slot${player ? ' playing' : ''}${player && player.loading ? ' loading' : ''}`,
