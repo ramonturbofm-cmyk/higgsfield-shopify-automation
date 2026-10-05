@@ -284,6 +284,20 @@ automatisch toevoegen* (of `AUTO_IMPORT_MINUTES`, 0 = uit).
 - Nummers die je uit de map weghaalt, blijven in de database staan, zodat er
   nooit per ongeluk iets uit je uitzending verdwijnt.
 
+## Naadloos aansluiten (live-opnames, mixen, medleys)
+
+Nummers die op de opname in elkaar overlopen, zoals een live-cd of een mix, kun
+je **naadloos** zetten: rechtsklik → *⇥ Naadloos aansluiten*. Met Ctrl/Shift kun
+je een heel album tegelijk selecteren.
+
+- Zo'n nummer speelt van het allereerste tot het allerlaatste moment: geen stilte
+  overgeslagen, geen fade en geen overlap.
+- Het volgende item start precies waar het nummer eindigt (getest: binnen
+  ±0,03 s).
+- In de lijst staat een ⇥ achter de titel.
+- Aanzetten mag de beheerder, of iemand met uploadrechten op die collectie. Het
+  geldt voor iedereen die het nummer draait.
+
 ## Nonstop-filter (wat je nooit in de uurklok wilt)
 
 Per persoon stel je in wat de automatische planning (uurklok / 24/7) nooit kiest.

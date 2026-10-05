@@ -37,7 +37,7 @@ function publicFile(f) {
     tags: f.tags, created_at: f.created_at,
     cue_in: num(f.cue_in), mix_out: num(f.mix_out), cue_out: num(f.cue_out),
     loudness_lufs: num(f.loudness_lufs), true_peak_db: num(f.true_peak_db),
-    genre: f.genre || '',
+    genre: f.genre || '', segue: Boolean(f.segue),
     ...(f.nonstop_blocked === undefined ? {} : { nonstop_blocked: Boolean(f.nonstop_blocked) }),
   };
 }
@@ -498,6 +498,21 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
     const { rows } = await pool.query(
       'UPDATE audio_files SET cue_in = $1, mix_out = $2, cue_out = $3 WHERE id = $4 RETURNING *', [...values, file.id]);
     res.json({ file: publicFile(rows[0]) });
+  }));
+
+  // Naadloos aansluiten on/off for one or more files. It changes how the track plays
+  // for everyone, so it needs upload rights on the collection (or admin).
+  app.put('/api/files/segue', requireUser, wrap(async (req, res) => {
+    const ids = (Array.isArray(req.body && req.body.ids) ? req.body.ids : []).map(Number).filter(Number.isInteger).slice(0, 1000);
+    if (!ids.length) throw new HttpError(400, 'Geen bestanden opgegeven');
+    const { rows: files } = await pool.query('SELECT id, collection_id FROM audio_files WHERE id = ANY($1)', [ids]);
+    const allowed = new Map();
+    for (const f of files) {
+      if (!allowed.has(f.collection_id)) allowed.set(f.collection_id, (await lib.collectionAccess(pool, req.user, f.collection_id)).upload);
+      if (!allowed.get(f.collection_id)) throw new HttpError(403, 'Je mag deze nummers niet aanpassen');
+    }
+    const { rows } = await pool.query('UPDATE audio_files SET segue = $1 WHERE id = ANY($2) RETURNING id, segue', [Boolean(req.body.segue), files.map((f) => f.id)]);
+    res.json({ files: rows });
   }));
 
   // ---------- studio (Audio OnAir Turbo) ----------

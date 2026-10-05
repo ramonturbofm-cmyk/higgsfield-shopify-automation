@@ -244,3 +244,4 @@ dialog::backdrop { background: rgba(0, 0, 0, .7); }
 .ns-kind { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); min-width: 120px; }
 .ns-value { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ctx-sep { height: 1px; background: var(--line); margin: 4px 0; }
+.segue-mark { color: var(--accent); font-weight: 700; }

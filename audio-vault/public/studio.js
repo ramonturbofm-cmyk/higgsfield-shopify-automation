@@ -94,9 +94,15 @@ function status(msg) {
 
 // ---------- cue points ----------
 
-const cueIn = (f) => (f.cue_in ?? 0);
-const cueOut = (f) => (f.cue_out ?? f.duration_seconds ?? null);
+// A "naadloos" track (live album, mix, medley) plays from the very start to the very
+// end, and the next item starts exactly where it ends.
+const cueIn = (f) => (f.segue ? 0 : f.cue_in ?? 0);
+const cueOut = (f) => (f.segue ? f.duration_seconds ?? f.cue_out ?? null : f.cue_out ?? f.duration_seconds ?? null);
+// Starting a player takes a few hundredths of a second; start that much early so the
+// join has no gap.
+const SEGUE_LEAD = 0.035;
 function mixPoint(f) {
+  if (f.segue) { const end = cueOut(f); return end === null ? null : Math.max(0, end - SEGUE_LEAD); }
   if (f.mix_out !== null && f.mix_out !== undefined) return f.mix_out;
   const end = cueOut(f);
   return end === null ? null : Math.max(cueIn(f), end - S.settings.crossfade);
@@ -443,7 +449,8 @@ function tick() {
       if (next && mix !== null && t >= mix) {
         d.mixed = true;
         // With analysed cue points the tail is already quiet: let it ring out. Without, fade it.
-        if (f.mix_out === null || f.mix_out === undefined) fadeDeck(d, Math.max(0.1, end - t));
+        // A naadloos track simply plays to its end.
+        if (!f.segue && (f.mix_out === null || f.mix_out === undefined)) fadeDeck(d, Math.max(0.1, end - t));
         startDeck(next);
       }
     }
@@ -810,7 +817,8 @@ function renderPlaylist() {
     },
     h('div', { class: 'pl-time' }),
     h('div', { class: 'pl-main' },
-      h('div', { class: 'pl-title' }, f ? f.title : '(verwijderd bestand)', item.error ? ' ⚠' : ''),
+      h('div', { class: 'pl-title' }, f ? f.title : '(verwijderd bestand)', item.error ? ' ⚠' : '',
+        f && f.segue ? h('span', { class: 'segue-mark', title: 'Naadloos: sluit strak aan op het volgende nummer' }, ' ⇥') : null),
       h('div', { class: 'pl-artist' }, f ? f.artist || ' ' : ' ', item.stopAfter ? h('span', { class: 'pl-stop' }, '  ■ STOP NA DIT ITEM') : null)),
     h('div', { class: 'pl-dur' }, f ? fmt(playLength(f)) : ''),
     h('div', { class: 'pl-actions' },
@@ -856,7 +864,7 @@ function libraryParams(offset) {
 const remember = (files) => files.map((f) => {
   const known = S.files.get(f.id);
   if (!known) { S.files.set(f.id, f); return f; }
-  known.genre = f.genre; known.nonstop_blocked = f.nonstop_blocked;
+  known.genre = f.genre; known.nonstop_blocked = f.nonstop_blocked; known.segue = f.segue;
   return known;
 });
 
@@ -953,7 +961,8 @@ function libraryRow(f) {
     oncontextmenu: (e) => { e.preventDefault(); fileMenu(e, f); },
   },
   h('div', { class: 'pl-main' },
-    h('div', { class: 'pl-title' }, f.nonstop_blocked ? h('span', { class: 'ns-blocked', title: 'Komt niet in de nonstop (uurklok)' }, '🚫 ') : null, f.title),
+    h('div', { class: 'pl-title' }, f.nonstop_blocked ? h('span', { class: 'ns-blocked', title: 'Komt niet in de nonstop (uurklok)' }, '🚫 ') : null, f.title,
+      f.segue ? h('span', { class: 'segue-mark', title: 'Naadloos: sluit strak aan op het volgende nummer' }, ' ⇥') : null),
     h('div', { class: 'pl-artist' }, f.artist || ' ', f.genre ? h('span', { class: 'lib-genre' }, ` · ${f.genre}`) : null)),
   h('div', { class: 'pl-dur' }, fmt(cueOut(f) !== null ? cueOut(f) - cueIn(f) : null)),
   h('div', { class: 'lib-actions' },
@@ -1005,6 +1014,8 @@ function fileMenu(e, f, { playlist = false } = {}) {
       item('⤴  Als volgende afspelen', () => { addNext(ids); clearSelection(); }),
       item('+  Achteraan de playlist', () => { addToPlaylist(ids); clearSelection(); }),
       item(`🚫  Niet in nonstop (${ids.length} nummers)`, () => { addNonstopBlocks(ids.map((id) => ({ kind: 'file', value: id }))); clearSelection(); }),
+      item(`⇥  Naadloos aansluiten aan (${ids.length} nummers)`, () => { setSegue(ids, true); clearSelection(); }),
+      item('⇥  Naadloos aansluiten uit', () => { setSegue(ids, false); clearSelection(); }),
       item('✕  Selectie opheffen', clearSelection));
   } else if (playlist) menu.replaceChildren(
     h('div', { class: 'ctx-title' }, label(f)),
@@ -1047,9 +1058,28 @@ async function removeNonstopBlock(id) {
   renderNonstopBlocks();
   searchLibrary();
 }
+// Naadloos aansluiten: for tracks that flow into each other on the recording.
+async function setSegue(ids, on) {
+  try {
+    const { files } = await api('PUT', '/api/files/segue', { ids, segue: on });
+    for (const r of files) { const f = S.files.get(r.id); if (f) f.segue = r.segue; }
+    status(`⇥ Naadloos ${on ? 'aan' : 'uit'}: ${files.length === 1 && S.files.get(files[0].id) ? label(S.files.get(files[0].id)) : `${files.length} nummers`}`);
+    // A cued player moves to the new start; a playing one keeps its position and the
+    // new end/mix point applies right away.
+    for (const d of decks) if (d.state === 'cued' && d.file && ids.includes(d.file.id)) d.audio.currentTime = cueIn(d.file);
+    document.querySelectorAll('#library .lib-row').forEach((r) => {
+      const f = S.files.get(Number(r.dataset.file));
+      if (f && ids.includes(f.id)) r.replaceWith(libraryRow(f));
+    });
+    render();
+  } catch (e) { status(e.message); }
+}
 function nonstopMenuItems(f, item) {
   const fileBlock = nonstopBlocks.find((b) => b.kind === 'file' && Number(b.value) === f.id);
   const out = [h('div', { class: 'ctx-sep' })];
+  out.push(f.segue
+    ? item('⇥  Naadloos aansluiten uitzetten', () => setSegue([f.id], false))
+    : item('⇥  Naadloos aansluiten (live-opname / mix)', () => setSegue([f.id], true)));
   if (fileBlock) out.push(item('✓  Weer toestaan in de nonstop', () => removeNonstopBlock(fileBlock.id)));
   else out.push(item('🚫  Dit nummer niet in de nonstop', () => addNonstopBlocks([{ kind: 'file', value: f.id }])));
   if (f.artist) out.push(item(`🚫  Artiest niet in de nonstop: ${f.artist}`, () => addNonstopBlocks([{ kind: 'artist', value: f.artist }])));

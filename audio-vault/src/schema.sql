@@ -139,3 +139,8 @@ CREATE TABLE IF NOT EXISTS nonstop_blocks (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (user_id, kind, value)
 );
+
+-- "Naadloos": a track that flows into the next on the recording (live album, mix,
+-- medley). It plays from the very start to the very end and the next item starts
+-- exactly where it ends: no silence skipped, no overlap, no fade.
+ALTER TABLE audio_files ADD COLUMN IF NOT EXISTS segue BOOLEAN NOT NULL DEFAULT FALSE;

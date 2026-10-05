@@ -362,6 +362,18 @@ test('nonstop filter: blocked tracks, artists, genres and folders are never plan
   for (let round = 0; round < 25; round++) for (const id of (await other('POST', '/api/clocks/plan', { hours: [{ day: 2, hour: 9 }] })).data.planned[0].items) seen.add(id);
   assert.ok(seen.size > 3, 'filters are personal');
 
+  // Naadloos aansluiten: admins may switch it, members without upload rights may not.
+  const seg = await owner('PUT', '/api/files/segue', { ids: [ok[0], ok[1]], segue: true });
+  assert.deepEqual(seg.data.files.map((f) => f.segue), [true, true]);
+  assert.equal((await owner('GET', `/api/files?ids=${ok[0]}`)).data.files[0].segue, true);
+  assert.equal((await owner('PUT', '/api/files/segue', { ids: [] })).status, 400);
+  const member = (await owner('POST', '/api/users', { name: 'Lid', email: 'lid-segue@example.com' })).data;
+  const lid = client();
+  await lid('POST', `/api/invite/${member.invite_url.split('#invite=')[1]}`, { password: 'lid-wachtwoord-1' });
+  await owner('PUT', `/api/users/${member.user.id}/access`, { access: [{ collection_id: music.id, can_upload: false }] });
+  assert.equal((await lid('PUT', '/api/files/segue', { ids: [ok[0]], segue: false })).status, 403);
+  await owner('PUT', '/api/files/segue', { ids: [ok[0], ok[1]], segue: false });
+
   // Removing a rule brings the tracks back.
   for (const b of blocks) assert.equal((await owner('DELETE', `/api/me/nonstop-blocks/${b.id}`)).status, 200);
   assert.equal((await owner('GET', `/api/files?collection_id=${music.id}&nonstop=blocked`)).data.total, 0);
