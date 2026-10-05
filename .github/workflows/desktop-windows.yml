@@ -54,7 +54,11 @@ jobs:
   # One release per app version: "Audio OnAir Turbo Database <version>" with both installers.
   release:
     needs: [build, converter]
-    runs-on: ubuntu-latest
+    # Windows like the build jobs (Linux runners were not always available).
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
     permissions:
       contents: write
     steps:
