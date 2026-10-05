@@ -111,3 +111,4 @@ CREATE INDEX IF NOT EXISTS audio_files_name_idx ON audio_files (lower(artist), l
 CREATE INDEX IF NOT EXISTS audio_files_created_idx ON audio_files (created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS access_log_onair_idx ON access_log (file_id, created_at) WHERE action = 'onair';
 CREATE INDEX IF NOT EXISTS audio_files_title_idx ON audio_files (lower(title), lower(artist), id);
+CREATE INDEX IF NOT EXISTS access_log_file_idx ON access_log (file_id);
