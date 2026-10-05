@@ -849,7 +849,7 @@ function renderTimes() {
     const el = document.querySelector(`[data-uid="${item.uid}"] .pl-time`);
     if (item.marker) { if (el) el.textContent = item.state === 'queued' && known ? fmtClock(new Date(at)).slice(0, 5) : ''; continue; }
     const f = S.files.get(item.id);
-    if (item.state !== 'queued' || !f) { if (el) el.textContent = item.state === 'playing' ? 'NU' : ''; continue; }
+    if (item.state !== 'queued' || !f) { if (el) el.textContent = item.state === 'playing' ? '▶ NU' : ''; continue; }
     if (el) el.textContent = known ? fmtClock(new Date(at)) : '';
     const len = playLength(f);
     if (len === null || item.stopAfter) known = false;
@@ -1015,10 +1015,10 @@ function updateSelection() {
   document.querySelectorAll('#library .lib-row').forEach((r) => r.classList.toggle('sel', sel.ids.has(Number(r.dataset.file))));
   const n = selectedIds().length;
   const bar = $('lib-selbar');
-  bar.classList.toggle('hidden', n < 2);
-  if (n >= 2) {
+  bar.classList.toggle('hidden', n < 1);
+  if (n >= 1) {
     bar.replaceChildren(
-      h('span', {}, `${n} geselecteerd`),
+      h('span', {}, n === 1 ? `✓ 1 nummer geselecteerd — Ctrl/Shift+klik voor meer` : `✓ ${n} nummers geselecteerd`),
       h('button', { class: 'mini', onclick: () => { addNext(selectedIds()); clearSelection(); } }, '⤴ Als volgende'),
       h('button', { class: 'mini', onclick: () => { addToPlaylist(selectedIds()); clearSelection(); } }, '+ Achteraan'),
       h('button', { class: 'mini', title: 'Selectie opheffen (Esc)', onclick: clearSelection }, '✕'));

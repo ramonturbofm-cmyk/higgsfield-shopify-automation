@@ -279,7 +279,8 @@ async function installUpdate() {
   if (response !== 0) return { ok: false, cancelled: true };
   installing = true;
   try {
-    const file = path.join(os.tmpdir(), info.name);
+    // A fresh name each time: an earlier download may still be locked by the virus scanner.
+    const file = path.join(os.tmpdir(), info.name.replace(/\.exe$/i, `-${Date.now()}.exe`));
     const res = await net.fetch(info.url);
     if (!res.ok || !res.body) throw new Error(`downloaden mislukt (${res.status})`);
     const total = Number(res.headers.get('content-length')) || info.size || 0;
@@ -299,7 +300,9 @@ async function installUpdate() {
     writeConfig({ updatedFrom: app.getVersion() });
     sendUpdateStatus({ available: true, version: info.version, installing: true });
     // /S = silent install in the same folder, --force-run = start the app again afterwards.
-    require('child_process').spawn(file, ['/S', '--force-run'], { detached: true, stdio: 'ignore' }).unref();
+    // Right after downloading, Windows (the virus scanner) often still has the file open
+    // and starting it fails with EBUSY: keep trying for up to a minute.
+    await startInstaller(file);
     setTimeout(() => app.exit(0), 500);
     return { ok: true };
   } catch (err) {
@@ -309,6 +312,24 @@ async function installUpdate() {
     dialog.showMessageBox(win, { type: 'warning', icon: ICON, title: 'Bijwerken mislukt', message: 'De update kon niet worden geïnstalleerd', detail: `${err.message}\n\nJe kunt hem ook zelf downloaden: ${UPDATES_PAGE}` });
     return { ok: false, error: err.message };
   }
+}
+
+function startInstaller(file) {
+  const once = () => new Promise((resolve, reject) => {
+    let child;
+    try { child = require('child_process').spawn(file, ['/S', '--force-run'], { detached: true, stdio: 'ignore' }); } catch (err) { reject(err); return; }
+    child.once('error', reject);
+    child.once('spawn', () => { child.unref(); resolve(); });
+  });
+  return (async () => {
+    for (let attempt = 1; ; attempt++) {
+      try { return await once(); } catch (err) {
+        if (!/EBUSY|EPERM|EACCES/.test(err.code || err.message) || attempt >= 30) throw err;
+        sendUpdateStatus({ available: true, installing: true });
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
+  })();
 }
 
 // After an app update: rebuild every local server that still runs the old version,
