@@ -29,6 +29,7 @@ const DEFAULT_SETTINGS = {
   cartPage: 0,
   cart: [],
   clockAuto: false,
+  nonstopCollections: null, // null = every collection that doesn't look like jingles/ads
   quality: 'auto',
   plannedUntil: null,
 };
@@ -426,6 +427,37 @@ function seekable(bar, deckFor) {
   };
 }
 
+// NONSTOP: one press and the station keeps going by itself. Turns on automatic
+// continuing and planning, fills the playlist when it is (almost) empty and starts.
+// Hours without an uurklok get music from the nonstop collections.
+const JINGLE_LIKE = /jingle|reclame|commercial|spot|sweeper|stinger|station ?id|\bid\b|nieuws|news|bed|tune|promo/i;
+function nonstopCollectionIds() {
+  if (Array.isArray(S.settings.nonstopCollections)) return S.settings.nonstopCollections;
+  return S.collections.filter((c) => !JINGLE_LIKE.test(c.name)).map((c) => c.id);
+}
+const nonstopOn = () => S.settings.auto && S.settings.clockAuto;
+async function cmdNonstop() {
+  if (nonstopOn()) {
+    S.settings.clockAuto = false;
+    saveSettingsSoon(); render();
+    status('Nonstop uit: de playlist speelt verder af, er wordt niets meer bijgepland');
+    return;
+  }
+  S.settings.auto = true;
+  S.settings.clockAuto = true;
+  saveSettingsSoon(); render();
+  const waiting = () => S.playlist.filter((i) => i.state === 'queued' && !i.marker && !i.error).length;
+  if (waiting() < 3) {
+    // Planning starts from the current hour again when nothing is waiting.
+    if (!waiting()) S.settings.plannedUntil = null;
+    status('Nonstop: playlist vullen…');
+    await planNextHour({ manual: false });
+  }
+  if (!waiting()) return;
+  status('▶ Nonstop aan: speelt automatisch door en plant zelf bij');
+  if (!S.live) cmdStart();
+}
+
 function cmdAuto() {
   S.settings.auto = !S.settings.auto;
   saveSettingsSoon();
@@ -621,11 +653,14 @@ async function planNextHour({ manual }) {
     if (start > Date.now() + 24 * hourMs) { if (manual) status('Er is al 24 uur vooruit gepland'); return; }
     const d = new Date(start);
     const exclude = S.playlist.filter((i) => i.state === 'queued' && i.id).map((i) => i.id);
-    const { planned: [p] } = await api('POST', '/api/clocks/plan', { hours: [{ day: d.getDay(), hour: d.getHours() }], exclude });
+    const { planned: [p] } = await api('POST', '/api/clocks/plan', {
+      hours: [{ day: d.getDay(), hour: d.getHours() }], exclude,
+      fallback: { collections: nonstopCollectionIds(), count: 15 },
+    });
     S.settings.plannedUntil = start + hourMs;
     const when = d.toLocaleString('nl-NL', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
     if (!p.clock) {
-      if (manual) status(`Geen uurklok gepland voor ${when} — stel de weekplanning in via ◔`);
+      if (manual || S.settings.clockAuto) status(`Niets te plannen voor ${when}: geen uurklok en geen muziek in de nonstop-collecties (⚙ Instellingen)`);
       saveSettingsSoon();
       return;
     }
@@ -693,6 +728,7 @@ function render() {
 
 function renderTransport() {
   $('btn-auto').classList.toggle('on', S.settings.auto);
+  $('btn-nonstop').classList.toggle('on', nonstopOn());
   $('btn-pause').classList.toggle('active', Boolean(S.live && S.live.state === 'paused'));
   $('onair-lamp').classList.toggle('live', Boolean(S.live && S.live.state === 'playing'));
 }
@@ -1203,6 +1239,13 @@ async function renderSettings() {
   renderLoudnessStats();
   $('set-quality').value = st.quality || 'auto';
   $('set-clockauto').checked = st.clockAuto;
+  const nsIds = new Set(nonstopCollectionIds());
+  $('set-nonstop-collections').replaceChildren(...S.collections.map((c) => h('label', { class: 'check' },
+    h('input', { type: 'checkbox', checked: nsIds.has(c.id), onchange: () => {
+      S.settings.nonstopCollections = [...document.querySelectorAll('#set-nonstop-collections input')]
+        .map((el, i) => (el.checked ? S.collections[i].id : null)).filter((id) => id !== null);
+      saveSettingsSoon();
+    } }), ` ${c.name}`)));
   loadNonstopBlocks().then(renderNonstopBlocks);
   renderNonstopGenres();
   $('set-cartsize').value = st.cartSize;
@@ -1251,7 +1294,7 @@ function bindSettings() {
   $('set-station').addEventListener('input', (e) => { S.settings.stationName = e.target.value; applyTheme(); saveSettingsSoon(); });
   $('set-crossfade').addEventListener('change', (e) => { S.settings.crossfade = Math.min(10, Math.max(0, Number(e.target.value) || 0)); saveSettingsSoon(); render(); });
   $('set-fadeout').addEventListener('change', (e) => { S.settings.fadeOut = Math.min(15, Math.max(0.5, Number(e.target.value) || 3)); saveSettingsSoon(); });
-  $('set-clockauto').addEventListener('change', (e) => { S.settings.clockAuto = e.target.checked; saveSettingsSoon(); });
+  $('set-clockauto').addEventListener('change', (e) => { S.settings.clockAuto = e.target.checked; saveSettingsSoon(); render(); });
   $('set-quality').addEventListener('change', (e) => {
     S.settings.quality = e.target.value; saveSettingsSoon(); renderQuality();
     // New loads use the new quality; what is already loaded keeps playing.
@@ -1303,6 +1346,7 @@ document.addEventListener('keydown', (e) => {
   else if (k === 'p') cmdPause();
   else if (k === 'f') cmdFade();
   else if (k === 'a') cmdAuto();
+  else if (k === 'o') cmdNonstop();
   else if (k === 'arrowright') { e.preventDefault(); seekBy(e.shiftKey ? 30 : 5); }
   else if (k === 'arrowleft') { e.preventDefault(); seekBy(e.shiftKey ? -30 : -5); }
   else if (/^[0-9]$/.test(k)) {
@@ -1350,6 +1394,7 @@ async function boot() {
   $('btn-stop').addEventListener('click', cmdStop);
   $('btn-fade').addEventListener('click', cmdFade);
   $('btn-auto').addEventListener('click', cmdAuto);
+  $('btn-nonstop').addEventListener('click', cmdNonstop);
   $('btn-cart-stop').addEventListener('click', () => [...S.cartPlayers.keys()].forEach(stopCart));
   $('btn-plan').addEventListener('click', () => planNextHour({ manual: true }));
   setInterval(() => {

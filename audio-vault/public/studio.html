@@ -40,6 +40,7 @@
       <button class="tbtn" id="btn-fade" title="Uitfaden (F)">◢<span>FADE</span></button>
       <button class="tbtn" id="btn-next" title="Volgende nummer (N)">⏭<span>VOLGENDE</span></button>
       <button class="tbtn auto" id="btn-auto" title="Automatisch doorstarten (A)">AUTO</button>
+      <button class="tbtn auto nonstop" id="btn-nonstop" title="Nonstop: speelt automatisch door en vult zelf bij (O)">NON<br>STOP</button>
     </div>
     <div class="decks">
       <div class="deck" id="deck-0"></div>
@@ -86,7 +87,7 @@
   <span id="status-outputs"></span>
   <span id="status-quality"></span>
   <span id="status-msg"></span>
-  <span class="muted">Spatie = start · N = volgende · P = pauze · F = fade · A = auto · ← → = doorspoelen</span>
+  <span class="muted">Spatie = start · N = volgende · P = pauze · F = fade · A = auto · O = nonstop · ← → = doorspoelen</span>
 </footer>
 
 <div class="menu hidden" id="slot-menu"></div>
@@ -133,6 +134,8 @@
     <h3>Uurklok</h3>
     <label class="check"><input type="checkbox" id="set-clockauto"> Automatisch bijplannen: zodra de playlist bijna leeg is, wordt het volgende uur gevuld volgens de weekplanning (24/7 automatisch)</label>
     <p class="muted" style="margin:6px 0 0">Klokken en weekplanning beheer je via ◔ rechtsboven.</p>
+    <label>Nonstop speelt uit (voor uren zonder uurklok)</label>
+    <div class="ns-collections" id="set-nonstop-collections"></div>
 
     <h3>Nonstop-filter</h3>
     <p class="muted" style="margin:0 0 6px">Wat je hier zet, komt nooit in de automatisch geplande uren. Zelf toevoegen kan altijd nog. Tip: rechtsklik op een nummer → 🚫. Tekst werkt als "bevat": <em>schlager</em> filtert ook "Volksmusik, Schlager".</p>

@@ -284,6 +284,21 @@ automatisch toevoegen* (of `AUTO_IMPORT_MINUTES`, 0 = uit).
 - Nummers die je uit de map weghaalt, blijven in de database staan, zodat er
   nooit per ongeluk iets uit je uitzending verdwijnt.
 
+## NONSTOP-knop (alles automatisch verder)
+
+Is het afspelen gestopt, of wil je de zender aan zichzelf overlaten? Druk op
+**NONSTOP** (of de toets **O**):
+
+- automatisch doorstarten (AUTO) en automatisch bijplannen gaan aan;
+- is de playlist (bijna) leeg, dan wordt hij meteen gevuld vanaf het huidige uur,
+  en de muziek start direct;
+- uren met een uurklok volgen de weekplanning. Uren **zonder** uurklok krijgen
+  muziek uit de *nonstop-collecties* (⚙ Instellingen → Uurklok), met dezelfde
+  rotatieregels en zonder wat in je nonstop-filter staat. Standaard zijn dat alle
+  collecties behalve jingles, reclames, sweepers en dergelijke;
+- nog een keer drukken zet nonstop uit: wat in de playlist staat, speelt af, maar
+  er wordt niets meer bijgepland.
+
 ## Naadloos aansluiten (live-opnames, mixen, medleys)
 
 Nummers die op de opname in elkaar overlopen, zoals een live-cd of een mix, kun

@@ -354,6 +354,13 @@ test('nonstop filter: blocked tracks, artists, genres and folders are never plan
     const { items } = (await owner('POST', '/api/clocks/plan', { hours: [{ day: 2, hour: 9 }] })).data.planned[0];
     assert.deepEqual([...items].sort(), [...ok].sort(), 'only unfiltered tracks are planned');
   }
+  // An hour without a clock: empty, unless the studio asks for nonstop fallback music.
+  assert.deepEqual((await owner('POST', '/api/clocks/plan', { hours: [{ day: 3, hour: 9 }] })).data.planned[0].items, []);
+  for (let round = 0; round < 10; round++) {
+    const fb = (await owner('POST', '/api/clocks/plan', { hours: [{ day: 3, hour: 9 }], fallback: { collections: [music.id, 999999], count: 3 } })).data.planned[0];
+    assert.equal(fb.clock.name, 'Nonstop');
+    assert.deepEqual([...fb.items].sort(), [...ok].sort(), 'fallback follows the filter and rotation too');
+  }
   // Someone else's filter does not apply to me.
   const other = client();
   const inv = (await owner('POST', '/api/users', { name: 'Noor', email: 'noor-nonstop@example.com', role: 'admin' })).data;

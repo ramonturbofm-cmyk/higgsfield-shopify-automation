@@ -95,7 +95,9 @@ function createClockRouter({ pool, requireUser, requireAdmin, wrap, HttpError })
 
   // Plan one or more hours. The studio sends the local day/hour (so time zones
   // never matter) and the files already waiting in its playlist.
-  //   { hours: [{ day, hour }], exclude: [fileId, ...] }
+  //   { hours: [{ day, hour }], exclude: [fileId, ...], fallback: { collections: [id, ...], count } }
+  // With `fallback`, an hour without a clock is filled with music from those
+  // collections (same rotation rules and nonstop filter) instead of staying empty.
   router.post('/clocks/plan', requireUser, wrap(async (req, res) => {
     const hours = Array.isArray(req.body && req.body.hours) ? req.body.hours.slice(0, 24) : [];
     if (!hours.length) throw new HttpError(400, 'Geef minstens één uur op');
@@ -158,9 +160,28 @@ function createClockRouter({ pool, requireUser, requireAdmin, wrap, HttpError })
       return pickRandom(list.slice(0, Math.max(1, Math.ceil(list.length / 3))));
     }
 
+    const fb = req.body.fallback && typeof req.body.fallback === 'object' ? req.body.fallback : null;
+    const fallbackCollections = fb ? (Array.isArray(fb.collections) ? fb.collections : []).map(Number).filter((id) => readable.has(id)) : [];
+    const fallbackCount = Math.min(40, Math.max(1, Number(fb && fb.count) || 15));
+    // Music from several collections, in proportion to how much each one holds.
+    async function fallbackHour() {
+      const sizes = [];
+      for (const id of fallbackCollections) sizes.push([id, (await candidates(id)).length]);
+      const total = sizes.reduce((a, [, n]) => a + n, 0);
+      if (!total) return null;
+      const slots = [];
+      for (let i = 0; i < fallbackCount; i++) {
+        let r = Math.random() * total;
+        const [id] = sizes.find(([, n]) => (r -= n) < 0) || sizes[sizes.length - 1];
+        slots.push({ type: 'muziek', collection_id: id });
+      }
+      return { id: null, name: 'Nonstop', color: '#30d158', slots };
+    }
+
     const planned = [];
     for (const { day, hour } of hours) {
-      const clock = clockById.get(scheduled.get(`${Number(day)}:${Number(hour)}`));
+      let clock = clockById.get(scheduled.get(`${Number(day)}:${Number(hour)}`));
+      if (!clock && fallbackCollections.length) clock = await fallbackHour();
       if (!clock) { planned.push({ day, hour, clock: null, items: [], missing: 0 }); continue; }
       const items = [];
       let missing = 0;
