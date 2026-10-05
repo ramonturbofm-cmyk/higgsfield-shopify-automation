@@ -278,6 +278,25 @@ automatisch toevoegen* (of `AUTO_IMPORT_MINUTES`, 0 = uit).
 - Nummers die je uit de map weghaalt, blijven in de database staan, zodat er
   nooit per ongeluk iets uit je uitzending verdwijnt.
 
+## Gelijk volume (loudness-normalisatie)
+
+Elk nummer en elke jingle klinkt even hard, ook als de ene opname veel zachter
+gemasterd is dan de andere. De server meet elk bestand één keer volgens de
+omroepnorm EBU R128 (luidheid in LUFS en de echte piek). De studio past daarna
+per nummer het volume aan tijdens het afspelen; **de bestanden zelf veranderen
+nooit**.
+
+- Aan/uit en het doelvolume staan in de studio onder ⚙ Instellingen → *Afspelen*.
+  −16 LUFS is standaard en past bij een webstream; kies −23 LUFS als er nog een
+  eigen audioprocessor achter zit.
+- Zachte nummers gaan maximaal 6 dB omhoog en nooit verder dan −1 dB onder de
+  maximale piek, dus er gaat niets vervormen. Harde nummers gaan gewoon omlaag.
+- Op elke player staat hoeveel er gecorrigeerd wordt (bijv. *+3,2 dB*).
+- Nieuwe muziek is binnen een minuut gemeten. Een bestaande bibliotheek wordt op
+  de achtergrond gemeten (ca. 2 seconden per nummer, één processorkern: 200.000
+  nummers duurt een paar dagen). Bij Instellingen zie je hoe ver het is; nummers
+  die nog niet gemeten zijn, spelen ongewijzigd af.
+
 ## Zuinige modus (MP3 320)
 
 In de studio onder ⚙ Instellingen → *Geluidskwaliteit*:

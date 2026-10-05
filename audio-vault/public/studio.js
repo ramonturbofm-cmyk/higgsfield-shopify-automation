@@ -21,6 +21,8 @@ const DEFAULT_SETTINGS = {
   crossfade: 1,
   fadeOut: 3,
   autoCue: true,
+  normalize: true,
+  loudnessTarget: -16,
   auto: true,
   playlist: [],
   cartSize: '4x4',
@@ -182,10 +184,61 @@ function trimCache() {
   }
 }
 
-function applySink(audio, key) {
-  const id = S.outputs[key];
-  if (typeof audio.setSinkId !== 'function') return;
-  audio.setSinkId(id || '').catch((e) => status(`Geluidskaart voor ${key} niet beschikbaar: ${e.message}`));
+// ---------- audio routing ----------
+// Every output (Player A, Player B, jingle panel, PFL) is its own Web Audio context on
+// its own sound card. Each sound passes a gain stage: loudness correction (equal
+// volume for every track) times the fade. The audio files themselves never change.
+const contexts = {};
+const canPickOutput = () => typeof AudioContext !== 'undefined' && typeof AudioContext.prototype.setSinkId === 'function';
+
+function setOutput(key) {
+  const ctx = contexts[key];
+  if (!ctx || typeof ctx.setSinkId !== 'function') return;
+  ctx.setSinkId(S.outputs[key] || '').catch((e) => status(`Geluidskaart voor ${key} niet beschikbaar: ${e.message}`));
+}
+function route(audio, key) {
+  if (!audio._gain) {
+    if (!contexts[key]) { contexts[key] = new AudioContext({ latencyHint: 'playback' }); setOutput(key); }
+    const ctx = contexts[key];
+    audio._ctx = ctx;
+    audio._src = ctx.createMediaElementSource(audio);
+    audio._gain = ctx.createGain();
+    audio._src.connect(audio._gain).connect(ctx.destination);
+    audio._norm = 1; audio._fade = 1;
+  }
+  if (audio._ctx.state === 'suspended') audio._ctx.resume().catch(() => {});
+  return audio;
+}
+// A browser only lets sound start after the user has clicked or typed once; contexts
+// created in between (e.g. the next track being cued) are woken up at the next touch.
+for (const type of ['pointerdown', 'keydown']) {
+  window.addEventListener(type, () => { for (const ctx of Object.values(contexts)) if (ctx.state === 'suspended') ctx.resume().catch(() => {}); }, true);
+}
+function unroute(audio) {
+  if (audio._src) { audio._src.disconnect(); audio._gain.disconnect(); audio._src = null; audio._gain = null; }
+}
+const applyGain = (audio) => { if (audio._gain) audio._gain.gain.value = audio._norm * audio._fade; };
+const setFade = (audio, v) => { audio._fade = v; applyGain(audio); };
+const getFade = (audio) => (audio._fade === undefined ? 1 : audio._fade);
+
+// Equal volume: bring the track's measured loudness (EBU R128) to the target level.
+// Turning up is limited to +6 dB and never above -1 dB true peak, so nothing clips.
+function loudnessDb(file) {
+  if (!S.settings.normalize || !file || file.loudness_lufs === null || file.loudness_lufs === undefined) return 0;
+  let db = S.settings.loudnessTarget - file.loudness_lufs;
+  if (db > 0) db = Math.max(0, Math.min(db, 6, file.true_peak_db === null || file.true_peak_db === undefined ? 6 : -1 - file.true_peak_db));
+  return Math.max(-24, db);
+}
+function setNormalization(audio, file) {
+  audio._norm = 10 ** (loudnessDb(file) / 20);
+  applyGain(audio);
+}
+function reapplyNormalization() {
+  for (const d of decks) if (d.file) setNormalization(d.audio, d.file);
+  for (const p of S.cartPlayers.values()) setNormalization(p.audio, p.file);
+  const pf = S.pfl.fileId && S.files.get(S.pfl.fileId);
+  if (pf) setNormalization(S.pfl.audio, pf);
+  renderDecks();
 }
 
 const once = (el, ev) => new Promise((resolve, reject) => {
@@ -216,7 +269,8 @@ async function loadDeck(deck, item) {
     if (!deck.file) throw new Error('Bestand bestaat niet meer');
     const url = await fileUrl(deck.file);
     if (token !== deck.token) return;
-    applySink(deck.audio, deck.name);
+    route(deck.audio, deck.name);
+    setNormalization(deck.audio, deck.file);
     if (deck.audio.src !== url) {
       deck.audio.src = url;
       await once(deck.audio, 'loadedmetadata');
@@ -224,7 +278,7 @@ async function loadDeck(deck, item) {
     if (token !== deck.token) return;
     if (deck.file.duration_seconds === null) deck.file.duration_seconds = deck.audio.duration;
     deck.audio.currentTime = cueIn(deck.file);
-    deck.audio.volume = 1;
+    setFade(deck.audio, 1);
     deck.state = 'cued';
     // Auto mode with nothing on air (e.g. the previous item ended before this one was ready).
     if (deck.pendingStart && !S.live) startDeck(deck);
@@ -271,7 +325,8 @@ function startDeck(deck) {
   deck.item.state = 'playing';
   deck.state = 'playing';
   deck.mixed = false;
-  deck.audio.volume = 1;
+  route(deck.audio, deck.name);
+  setFade(deck.audio, 1);
   deck.audio.play().catch((e) => status(`Afspelen geblokkeerd: ${e.message}`));
   S.live = deck;
   api('POST', '/api/now-playing', { file_id: deck.file.id }).catch(() => {});
@@ -281,7 +336,7 @@ function startDeck(deck) {
 }
 
 function fadeDeck(deck, seconds, { stop = true } = {}) {
-  deck.fade = { start: performance.now(), dur: Math.max(0.05, seconds) * 1000, from: deck.audio.volume, stop };
+  deck.fade = { start: performance.now(), dur: Math.max(0.05, seconds) * 1000, from: getFade(deck.audio), stop };
 }
 
 function finishDeck(deck, { advance }) {
@@ -339,7 +394,7 @@ function tick() {
     const t = d.audio.currentTime;
     if (d.fade) {
       const p = Math.min(1, (now - d.fade.start) / d.fade.dur);
-      d.audio.volume = Math.max(0, d.fade.from * (1 - p) * (1 - p));
+      setFade(d.audio, Math.max(0, d.fade.from * (1 - p) * (1 - p)));
       if (p >= 1 && d.fade.stop) { finishDeck(d, { advance: !d.noAdvance }); continue; }
     }
     const end = cueOut(f) ?? d.audio.duration;
@@ -391,7 +446,8 @@ async function cartTrigger(index) {
   renderCart();
   try {
     audio.src = await fileUrl(file);
-    applySink(audio, 'cart');
+    route(audio, 'cart');
+    setNormalization(audio, file);
     await once(audio, 'loadedmetadata');
     if (S.cartPlayers.get(index) !== player) return;
     audio.currentTime = cueIn(file);
@@ -405,7 +461,7 @@ async function cartTrigger(index) {
 }
 function stopCart(index) {
   const p = S.cartPlayers.get(index);
-  if (p) { p.audio.pause(); S.cartPlayers.delete(index); }
+  if (p) { p.audio.pause(); unroute(p.audio); S.cartPlayers.delete(index); }
   renderCart();
 }
 function tickCart() {
@@ -433,7 +489,8 @@ async function togglePfl(file) {
   updatePflButtons();
   try {
     p.audio.src = await fileUrl(file);
-    applySink(p.audio, 'pfl');
+    route(p.audio, 'pfl');
+    setNormalization(p.audio, file);
     await once(p.audio, 'loadedmetadata');
     p.audio.currentTime = cueIn(file);
     await p.audio.play();
@@ -582,6 +639,11 @@ function renderTransport() {
   $('onair-lamp').classList.toggle('live', Boolean(S.live && S.live.state === 'playing'));
 }
 
+function fmtDb(db) {
+  const r = Math.round(db * 10) / 10;
+  return `${r > 0 ? '+' : r < 0 ? '−' : '±'}${Math.abs(r).toFixed(1).replace('.', ',')} dB`;
+}
+
 function renderDecks() {
   for (const d of decks) {
     const el = $(`deck-${d.index}`);
@@ -590,7 +652,8 @@ function renderDecks() {
     el.replaceChildren(
       h('div', { class: 'deck-head' }, h('span', {}, `PLAYER ${d.name}`), h('span', { class: 'deck-state' }, stateLabel)),
       h('div', { class: 'deck-title' }, d.file ? d.file.title : '—'),
-      h('div', { class: 'deck-artist' }, d.file ? d.file.artist || ' ' : ' '),
+      h('div', { class: 'deck-artist' }, d.file ? d.file.artist || ' ' : ' ',
+        d.file && S.settings.normalize && d.file.loudness_lufs != null ? h('span', { class: 'deck-gain', title: 'Gelijk volume' }, fmtDb(loudnessDb(d.file))) : null),
       h('div', { class: 'deck-bar' }, h('div', { id: `deck-fill-${d.index}` })),
       h('div', { class: 'deck-time' }, h('span', { id: `deck-pos-${d.index}` }, ''), h('span', { id: `deck-rem-${d.index}` }, '')));
   }
@@ -897,7 +960,7 @@ function slotMenu(e, index) {
 }
 
 function renderOutputsStatus() {
-  const sinks = typeof HTMLMediaElement.prototype.setSinkId === 'function';
+  const sinks = canPickOutput();
   const named = OUTPUTS.filter(([k]) => S.outputs[k]).length;
   $('status-outputs').textContent = sinks
     ? `Uitgangen: ${named ? `${named} van 4 toegewezen` : 'alles via standaard geluidskaart'}`
@@ -912,12 +975,24 @@ async function listDevices() {
   return devices.filter((d) => d.kind === 'audiooutput');
 }
 
+async function renderLoudnessStats() {
+  try {
+    const stats = await api('GET', '/api/library/stats');
+    $('loudness-stats').textContent = stats.count
+      ? `Gemeten: ${stats.measured.toLocaleString('nl-NL')} van ${stats.count.toLocaleString('nl-NL')} nummers${stats.measured < stats.count ? ' (de rest wordt op de achtergrond gemeten)' : ''}.`
+      : '';
+  } catch { $('loudness-stats').textContent = ''; }
+}
+
 async function renderSettings() {
   const st = S.settings;
   $('set-station').value = st.stationName;
   $('set-crossfade').value = st.crossfade;
   $('set-fadeout').value = st.fadeOut;
   $('set-autocue').checked = st.autoCue;
+  $('set-normalize').checked = st.normalize;
+  $('set-target').value = String(st.loudnessTarget);
+  renderLoudnessStats();
   $('set-quality').value = st.quality || 'auto';
   $('set-clockauto').checked = st.clockAuto;
   $('set-cartsize').value = st.cartSize;
@@ -932,7 +1007,7 @@ async function renderSettings() {
     onclick: () => { st.accent = c; applyTheme(); saveSettingsSoon(); renderSettings(); },
   })), picker);
 
-  const sinks = typeof HTMLMediaElement.prototype.setSinkId === 'function';
+  const sinks = canPickOutput();
   $('sink-support').textContent = sinks
     ? 'Kies per onderdeel een eigen uitgang. Klik eerst op "Geluidskaarten zoeken" zodat de browser de namen mag tonen.'
     : 'Deze browser kan het geluid niet naar meerdere geluidskaarten sturen. Gebruik Google Chrome of Microsoft Edge.';
@@ -945,9 +1020,7 @@ async function renderSettings() {
     select.addEventListener('change', () => {
       S.outputs[key] = select.value;
       writeLocal('aot_outputs', S.outputs);
-      for (const d of decks) if (d.name === key) applySink(d.audio, key);
-      if (key === 'pfl') applySink(S.pfl.audio, 'pfl');
-      if (key === 'cart') for (const p of S.cartPlayers.values()) applySink(p.audio, 'cart');
+      setOutput(key);
       renderOutputsStatus();
     });
     return h('div', {}, h('label', {}, name), select);
@@ -976,6 +1049,8 @@ function bindSettings() {
     cueNext(); preloadCartPage();
   });
   $('set-autocue').addEventListener('change', (e) => { S.settings.autoCue = e.target.checked; saveSettingsSoon(); });
+  $('set-normalize').addEventListener('change', (e) => { S.settings.normalize = e.target.checked; saveSettingsSoon(); reapplyNormalization(); });
+  $('set-target').addEventListener('change', (e) => { S.settings.loudnessTarget = Number(e.target.value); saveSettingsSoon(); reapplyNormalization(); });
   $('set-cartsize').addEventListener('change', (e) => {
     // Keep each page's buttons in place when the grid size changes.
     const oldCount = cartDims().count;
@@ -1061,7 +1136,6 @@ async function boot() {
 
   bindSettings();
   applyTheme();
-  applySink(S.pfl.audio, 'pfl');
   renderOutputsStatus();
   renderQuality();
   searchLibrary();

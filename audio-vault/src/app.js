@@ -35,6 +35,7 @@ function publicFile(f) {
     size_bytes: Number(f.size_bytes), duration_seconds: num(f.duration_seconds),
     tags: f.tags, created_at: f.created_at,
     cue_in: num(f.cue_in), mix_out: num(f.mix_out), cue_out: num(f.cue_out),
+    loudness_lufs: num(f.loudness_lufs), true_peak_db: num(f.true_peak_db),
   };
 }
 
@@ -381,7 +382,9 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
   // Lets the studio notice new music without loading the library.
   app.get('/api/library/stats', requireUser, wrap(async (req, res) => {
     const visible = (await lib.listCollections(pool, req.user)).map((c) => c.id);
-    const { rows: [r] } = await pool.query('SELECT count(*)::int AS count, coalesce(max(id), 0) AS newest FROM audio_files WHERE collection_id = ANY($1)', [visible]);
+    const { rows: [r] } = await pool.query(
+      `SELECT count(*)::int AS count, coalesce(max(id), 0) AS newest, count(*) FILTER (WHERE loudness_checked)::int AS measured
+         FROM audio_files WHERE collection_id = ANY($1)`, [visible]);
     res.json(r);
   }));
 

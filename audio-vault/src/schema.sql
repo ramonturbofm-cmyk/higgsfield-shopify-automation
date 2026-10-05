@@ -118,3 +118,9 @@ CREATE INDEX IF NOT EXISTS access_log_file_idx ON access_log (file_id);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS station_key TEXT UNIQUE;
 -- Rotation and "eerder gedraaid" are per person.
 CREATE INDEX IF NOT EXISTS access_log_user_onair_idx ON access_log (user_id, file_id, created_at) WHERE action = 'onair';
+
+-- Loudness (EBU R128) per track so the studio can play everything at the same level.
+ALTER TABLE audio_files ADD COLUMN IF NOT EXISTS loudness_lufs NUMERIC(6, 2);
+ALTER TABLE audio_files ADD COLUMN IF NOT EXISTS true_peak_db NUMERIC(6, 2);
+ALTER TABLE audio_files ADD COLUMN IF NOT EXISTS loudness_checked BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE INDEX IF NOT EXISTS audio_files_loudness_todo_idx ON audio_files (id) WHERE NOT loudness_checked;

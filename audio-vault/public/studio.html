@@ -113,6 +113,16 @@
       <option value="original">Altijd origineel (FLAC, verliesvrij)</option>
       <option value="zuinig">Altijd zuinig (MP3 320 — ± 3× minder data)</option>
     </select>
+    <label class="check"><input type="checkbox" id="set-normalize"> Gelijk volume (aanbevolen): elk nummer en elke jingle even hard, gemeten volgens de omroepnorm EBU R128</label>
+    <div class="grid2">
+      <div><label>Doelvolume</label><select id="set-target">
+        <option value="-14">−14 LUFS · luid</option>
+        <option value="-16">−16 LUFS · aanbevolen</option>
+        <option value="-18">−18 LUFS · rustig</option>
+        <option value="-23">−23 LUFS · EBU-norm</option>
+      </select></div>
+      <div><label>&nbsp;</label><p class="muted" id="loudness-stats" style="margin:4px 0 0"></p></div>
+    </div>
     <label class="check"><input type="checkbox" id="set-autocue"> Auto-cue: stilte aan begin en eind automatisch overslaan en het mixpunt bepalen (strak doorstarten)</label>
 
     <h3>Nu op de radio</h3>
