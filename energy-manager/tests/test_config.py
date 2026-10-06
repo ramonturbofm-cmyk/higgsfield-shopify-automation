@@ -73,3 +73,16 @@ def test_settings_schema_has_ui_metadata():
     assert min_soc["unit"] == "%"
     degradation = schema["$defs"]["BatteryPolicy"]["properties"]["degradation_cost_per_kwh"]
     assert degradation["level"] == "advanced"
+
+
+def test_save_keeps_env_references(tmp_path):
+    from ems.core.config import save_config
+    data = {"prices": {"provider": "entsoe", "entsoe_token": "${ENTSOE_TOKEN}"}, "devices": []}
+    cfg = config_from_dict(data, {"ENTSOE_TOKEN": "super-secret"})
+    assert cfg.prices.entsoe_token == "super-secret"
+    path = tmp_path / "ems.yaml"
+    save_config(cfg, path)
+    text = path.read_text()
+    assert "super-secret" not in text and "${ENTSOE_TOKEN}" in text
+    again = load_config(path, env={"ENTSOE_TOKEN": "super-secret"})
+    assert again.prices.entsoe_token == "super-secret"

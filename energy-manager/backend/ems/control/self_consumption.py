@@ -96,9 +96,10 @@ class SelfConsumptionController(Controller):
         reasons: list[str] = []
         data: dict = {"mode": mode}
 
-        if mode == "max":
+        if mode in ("max", "smart"):
             target = max_a
-            reasons.append(f"Laadmodus 'maximaal': {max_a:.0f} A")
+            reasons.append(f"Laadmodus 'maximaal': {max_a:.0f} A" if mode == "max" else
+                           "Slim laden zonder planning: normaal laden om het vertrekdoel te halen")
         elif mode == "off":
             target = 0.0
             reasons.append("Laadmodus 'uit'")

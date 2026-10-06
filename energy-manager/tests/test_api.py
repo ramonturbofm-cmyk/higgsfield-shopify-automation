@@ -1,0 +1,279 @@
+"""API v1 against a real Demo Mode runtime (loops off; the test drives the clock)."""
+
+import asyncio
+import io
+import zipfile
+
+import httpx
+import pytest
+from fastapi.testclient import TestClient
+
+from ems.api.app import create_app
+from ems.server.runtime import EMSRuntime
+
+
+@pytest.fixture
+async def env(tmp_path):
+    rt = EMSRuntime(tmp_path / "data", mode="demo", env={})
+    await rt.start(loops=False)
+    for _ in range(3):
+        await rt.tick_once()
+    app = create_app(rt, start_runtime=False)
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+    r = await client.post("/api/v1/auth/login", json={"username": "demo", "password": "demo"})
+    client.headers["Authorization"] = f"Bearer {r.json()['token']}"
+    yield rt, client
+    await client.aclose()
+    await rt.stop()
+
+
+async def test_public_info_and_auth(env):
+    rt, c = env
+    anon = httpx.AsyncClient(transport=c._transport, base_url="http://test")
+    info = (await anon.get("/api/v1/system/info")).json()
+    assert info["mode"] == "demo" and info["setup_required"] is False and info["demo_login"]
+    assert (await anon.get("/api/v1/energy/live")).status_code == 401
+    assert (await anon.post("/api/v1/auth/login", json={"username": "demo", "password": "x"})).status_code == 401
+    for _ in range(10):
+        await anon.post("/api/v1/auth/login", json={"username": "demo", "password": "x"})
+    assert (await anon.post("/api/v1/auth/login", json={"username": "demo", "password": "demo"})).status_code == 429
+    assert (await c.get("/api/v1/auth/me")).json()["role"] == "installer"
+    assert (await anon.get("/healthz")).json()["ok"] is True
+    assert (await anon.get("/api/openapi.json")).status_code == 200
+    await anon.aclose()
+
+
+async def test_roles_enforced(env):
+    rt, c = env
+    assert (await c.post("/api/v1/users", json={"username": "kijker", "password": "geheim123",
+                                                "role": "viewer"})).status_code == 200
+    v = httpx.AsyncClient(transport=c._transport, base_url="http://test")
+    tok = (await v.post("/api/v1/auth/login", json={"username": "kijker", "password": "geheim123"})).json()["token"]
+    v.headers["Authorization"] = f"Bearer {tok}"
+    assert (await v.get("/api/v1/energy/live")).status_code == 200
+    assert (await v.put("/api/v1/settings", json={"battery": {"min_soc": 20}})).status_code == 403
+    assert (await v.post("/api/v1/overrides", json={"device": "battery", "action": "battery_standby"})).status_code == 403
+    await v.aclose()
+    t = (await c.post("/api/v1/auth/tokens", json={"name": "ha", "role": "viewer"})).json()["token"]
+    api = httpx.AsyncClient(transport=c._transport, base_url="http://test", headers={"Authorization": f"Bearer {t}"})
+    assert (await api.get("/api/v1/devices")).status_code == 200
+    await api.aclose()
+
+
+async def test_live_shows_real_simulated_values(env):
+    rt, c = env
+    live = (await c.get("/api/v1/energy/live")).json()
+    assert live["mode"] == "demo" and live["flows"]["soc_pct"] is not None
+    assert live["grid_meter"]["device_id"] == "p1" and live["grid_meter"]["status"] == "primary_explicit"
+    assert live["features"]["zero_export_closed_loop"]["available"] is True
+    assert set(live["devices"]) == {"p1", "pv_roof", "pv_garage", "battery", "heatpump", "ev"}
+    assert live["price"]["import"] is not None
+
+
+async def test_devices_crud_test_and_commissioning(env):
+    rt, c = env
+    devs = (await c.get("/api/v1/devices")).json()
+    assert any(d["is_primary_grid_meter"] for d in devs)
+    drivers = (await c.get("/api/v1/drivers")).json()
+    hw = next(d for d in drivers if d["driver_id"] == "homewizard.p1")
+    assert hw["grid_meter_kind"] == "homewizard_p1" and hw["verified"] is False
+    r = await c.post("/api/v1/devices/test", json={"driver": "mock.battery", "category": "battery"})
+    assert r.status_code == 200
+    r = await c.post("/api/v1/devices", json={"name": "Batterij 2", "category": "battery", "driver": "mock.battery",
+                                              "params": {"capacity_kwh": 5}})
+    assert r.status_code == 200          # demo: simulated devices can be added, the demo world keeps its state
+    assert "batterij_2" in rt.live()["devices"]
+    r = await c.post("/api/v1/devices", json={"name": "Garage P1", "category": "smart_meter",
+                                              "driver": "homewizard.p1", "connection": {"host": "192.0.2.10"}})
+    assert r.status_code == 200, r.text
+    new = r.json()
+    assert new["control_level"] == "read_only" and new["status"] in ("offline", "unknown")
+    com = (await c.get(f"/api/v1/devices/{new['id']}/commissioning")).json()
+    assert com["levels"]["shadow"]["allowed"] is False and "niet bestuurbaar" in com["levels"]["shadow"]["reason"]
+    assert (await c.delete(f"/api/v1/devices/{new['id']}")).status_code == 200
+    com = (await c.get("/api/v1/devices/battery/commissioning")).json()
+    assert com["level"] == "full" and com["levels"]["shadow"]["allowed"]
+    r = await c.put("/api/v1/devices/battery/commissioning", json={"level": "shadow"})
+    assert r.status_code == 200 and r.json()["level"] == "shadow"
+    assert (await c.put("/api/v1/devices/battery/commissioning", json={"level": "full"})).status_code == 409
+    assert (await c.put("/api/v1/devices/battery/commissioning", json={"level": "full", "confirm": True})).status_code == 200
+
+
+async def test_shadow_mode_reports_without_writing(env):
+    rt, c = env
+    await c.put("/api/v1/devices/battery/commissioning", json={"level": "shadow"})
+    await rt.optimizer.run(rt.engine.last_snapshot, rt.now(), "test")
+    rt.site.components["battery"].mode = "auto"
+    applied_before = len(rt.devices.driver("battery").applied)
+    for _ in range(3):
+        await rt.tick_once()
+    assert len(rt.devices.driver("battery").applied) == applied_before
+    com = (await c.get("/api/v1/devices/battery/commissioning")).json()
+    assert com["ems_would_do"]["outcome"] in ("shadow", "skipped") and com["ems_would_do"]["reasons"]
+    assert "battery_soc_pct" in com["actual"]
+
+
+async def test_demo_world_survives_settings_change(env):
+    rt, c = env
+    rt.site.components["battery"].soc_pct = 77.0
+    t_before = rt.now()
+    await c.put("/api/v1/settings", json={"battery": {"min_soc": 11}})
+    assert rt.site.components["battery"].soc_pct == pytest.approx(77.0, abs=0.1)
+    assert rt.now() >= t_before
+
+
+async def test_override_is_applied_and_expires(env):
+    rt, c = env
+    r = await c.post("/api/v1/overrides", json={"device": "battery", "action": "battery_charge", "value": 3000,
+                                                "duration_min": 30})
+    assert r.status_code == 200
+    await rt.tick_once()
+    assert rt.site.components["battery"].mode == "charge"
+    assert len((await c.get("/api/v1/overrides")).json()) == 1
+    assert (await c.post("/api/v1/overrides", json={"device": "p1", "action": "battery_charge"})).status_code == 422
+    assert (await c.delete("/api/v1/overrides/battery")).json()["cleared"] == 1
+
+
+async def test_prices_tariff_plan(env):
+    rt, c = env
+    prices = (await c.get("/api/v1/prices?hours=24")).json()
+    assert len(prices["points"]) > 50 and prices["status"]["provider"] == "demo"
+    p0 = prices["points"][0]
+    assert p0["import"] > p0["spot"]
+    prev = (await c.get("/api/v1/tariff/preview?spot=0.10")).json()
+    assert prev["import_price"] == pytest.approx((0.10 + 0.02 + 0.10) * 1.21)
+    r = await c.put("/api/v1/tariff", json={"import_markup_eur_kwh": 0.03})
+    assert r.status_code == 200 and r.json()["import_markup_eur_kwh"] == 0.03
+    assert (await c.put("/api/v1/tariff", json={"vat_pct": 500})).status_code == 422
+    plan = (await c.post("/api/v1/optimizer/run")).json()
+    assert plan["status"] == "optimal" and len(plan["slots"]) > 50
+    assert plan["expected_benefit"] is not None
+    fc = (await c.get("/api/v1/forecast?hours=24")).json()
+    assert fc["sources"]["pv"].startswith("demo")
+
+
+async def test_settings_validation_and_versions(env):
+    rt, c = env
+    bad = await c.put("/api/v1/settings", json={"battery": {"min_soc": 50, "reserve_soc": 20}})
+    assert bad.status_code == 422 and "min_soc" in bad.json()["detail"]
+    ok = await c.put("/api/v1/settings", json={"battery": {"min_soc": 12}})
+    assert ok.status_code == 200 and ok.json()["battery"]["min_soc"] == 12
+    assert rt.config.battery.min_soc == 12
+    versions = (await c.get("/api/v1/settings/versions")).json()
+    assert versions and versions[0]["comment"].startswith("instellingen")
+    exported = (await c.get("/api/v1/config/export")).text
+    assert "Demo Home" in exported
+    assert (await c.get("/api/v1/settings/schema")).json()["$defs"]["TariffConfig"]
+
+
+async def test_history_export_finance(env):
+    rt, c = env
+    for _ in range(400):         # ~33 simulated minutes at 5 s per tick
+        await rt.tick_once()
+    await asyncio.to_thread(rt.recorder.aggregate, rt.now())
+    raw = (await c.get("/api/v1/history?hours=1&resolution=raw")).json()["rows"]
+    assert len(raw) > 100 and raw[-1]["pv_w"] is not None
+    slots = (await c.get("/api/v1/history?hours=2&resolution=15m")).json()["rows"]
+    assert slots and slots[0]["import_kwh"] is not None
+    csv_text = (await c.get("/api/v1/history/export?hours=2&fmt=csv&resolution=15m")).text
+    assert csv_text.startswith("local_time,")
+    excel = (await c.get("/api/v1/history/export?hours=2&fmt=excel&resolution=15m")).text
+    assert excel.startswith("﻿local_time;")
+    fin = (await c.get("/api/v1/finance/summary?period=1d")).json()
+    assert fin["available"] and "with_ems_eur" in fin["comparison"]
+
+
+async def test_automation_fires_override(env):
+    rt, c = env
+    bad = await c.post("/api/v1/automations", json={"name": "x", "definition": {"if": {"metric": "nope", "op": "<",
+                                                                                       "value": 1}}})
+    assert bad.status_code == 422
+    rule = {"name": "Goedkoop laden", "definition": {
+        "if": {"all": [{"metric": "price.import", "op": ">", "value": -10},
+                       {"metric": "battery.soc", "op": "<", "value": 100}]},
+        "then": [{"type": "override", "device": "battery", "action": "battery_charge", "value": 2000,
+                  "duration_min": 15}, {"type": "notify", "message": "Laden gestart"}]}}
+    r = await c.post("/api/v1/automations", json=rule)
+    assert r.status_code == 200
+    aid = r.json()["id"]
+    ev = (await c.post(f"/api/v1/automations/{aid}/evaluate")).json()
+    assert ev["result"] is True
+    rt._last_automation = 0
+    await rt.tick_once()
+    assert any(o.user.startswith("automatisering") for o in rt.engine.overrides.active())
+    notes = (await c.get("/api/v1/notifications")).json()
+    assert any(n["message"] == "Laden gestart" for n in notes)
+
+
+async def test_backtest_and_autotune_jobs(env):
+    rt, c = env
+    job = (await c.post("/api/v1/backtest", json={"days": 1, "overrides": {"battery": {"min_arbitrage_spread_eur": 0.2}}})).json()
+    for _ in range(200):
+        j = (await c.get(f"/api/v1/jobs/{job['job_id']}")).json()
+        if j["status"] != "running":
+            break
+        await asyncio.sleep(0.1)
+    assert j["status"] == "done", j.get("error")
+    res = j["result"]
+    assert res["source"].startswith("demowereld") and res["current"]["days"] == 1
+    assert "difference_eur" in res
+    assert (await c.post("/api/v1/backtest", json={"days": 3})).status_code == 422
+
+
+async def test_backup_restore_roundtrip(env):
+    rt, c = env
+    await c.put("/api/v1/settings", json={"site": {"name": "Voor back-up"}})
+    blob = (await c.get("/api/v1/backup")).content
+    names = zipfile.ZipFile(io.BytesIO(blob)).namelist()
+    assert {"manifest.json", "ems.yaml", "ems.db", "secrets.enc", "secret.key"} <= set(names)
+    await c.put("/api/v1/settings", json={"site": {"name": "Na back-up"}})
+    r = await c.post("/api/v1/backup/restore", files={"file": ("b.zip", blob, "application/zip")})
+    assert r.status_code == 200, r.text
+    assert rt.config.site.name == "Voor back-up"
+    assert (await c.get("/api/v1/auth/me")).status_code == 200      # same jwt secret restored
+    bad = await c.post("/api/v1/backup/restore", files={"file": ("x.zip", b"not a zip", "application/zip")})
+    assert bad.status_code == 422
+
+
+def test_websocket_live_updates(tmp_path):
+    rt = EMSRuntime(tmp_path / "ws", mode="demo", env={})
+    app = create_app(rt, loops=False)
+    with TestClient(app) as client:
+        client.portal.call(rt.tick_once)
+        token = client.post("/api/v1/auth/login", json={"username": "demo", "password": "demo"}).json()["token"]
+        with client.websocket_connect(f"/api/v1/ws?token={token}") as ws:
+            assert ws.receive_json()["type"] == "hello"
+            first = ws.receive_json()
+            assert first["type"] == "live" and first["data"]["flows"] is not None
+            client.portal.call(rt.tick_once)
+            msg = ws.receive_json()
+            while msg["type"] != "live":          # decisions may arrive before the live update
+                msg = ws.receive_json()
+            assert msg["data"]["timestamp"] > first["data"]["timestamp"]
+        from starlette.websockets import WebSocketDisconnect
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect("/api/v1/ws?token=wrong") as ws:
+                ws.receive_json()
+
+
+async def test_production_mode_has_no_fake_data(tmp_path):
+    rt = EMSRuntime(tmp_path / "prod", env={})
+    await rt.start(loops=False)
+    await rt.tick_once()
+    live = rt.live()
+    assert live["mode"] == "production" and live["grid_meter"]["status"] == "no_primary_grid_meter"
+    assert live["price"]["import"] is None and live["flows"]["grid_w"] is None
+    assert live["features"]["zero_export_closed_loop"]["available"] is False
+    app = create_app(rt, start_runtime=False)
+    c = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+    assert (await c.get("/api/v1/system/info")).json()["setup_required"] is True
+    r = await c.post("/api/v1/auth/setup", json={"username": "ramon", "password": "kort"})
+    assert r.status_code == 422
+    r = await c.post("/api/v1/auth/setup", json={"username": "ramon", "password": "voldoende-lang"})
+    assert r.status_code == 200
+    c.headers["Authorization"] = f"Bearer {r.json()['token']}"
+    assert (await c.post("/api/v1/auth/setup", json={"username": "x", "password": "voldoende-lang"})).status_code == 409
+    r = await c.post("/api/v1/devices", json={"name": "Nep", "category": "battery", "driver": "mock.battery"})
+    assert r.status_code == 422 and "Demo Mode" in r.json()["detail"]
+    await c.aclose()
+    await rt.stop()

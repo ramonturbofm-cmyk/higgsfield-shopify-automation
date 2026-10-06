@@ -44,18 +44,28 @@ class ManagedDevice:
 
 class DeviceManager:
     def __init__(self, config: EMSConfig, context: DriverContext,
-                 registry: DriverRegistry = default_registry) -> None:
+                 registry: DriverRegistry = default_registry, strict: bool = True) -> None:
         self.config = config
         self.context = context
+        self.registry = registry
         self.clock = context.clock
         self.timeout = config.control.device_timeout_s
         self.stale_after = timedelta(seconds=config.control.grid_stale_after_s)
         self.backoff = timedelta(seconds=config.control.reconnect_backoff_s)
         self.frozen = FrozenValueDetector(config.control.frozen_after_s)
         self.devices: dict[str, ManagedDevice] = {}
+        self.strict = strict
         for dev in config.devices:
-            driver = registry.get(dev.driver)(dev, context) if dev.enabled else None
-            self.devices[dev.id] = ManagedDevice(dev, driver)
+            driver, error = None, None
+            if dev.enabled:
+                try:
+                    driver = registry.get(dev.driver)(dev, context)
+                except KeyError as exc:
+                    if strict:
+                        raise
+                    error = f"driver niet beschikbaar: {exc}"
+                    log.error("unknown driver", extra={"device": dev.id, "driver": dev.driver})
+            self.devices[dev.id] = ManagedDevice(dev, driver, error=error)
 
     # -- lifecycle -------------------------------------------------------
     async def start(self) -> None:
@@ -94,6 +104,8 @@ class DeviceManager:
         cfg = d.config
         now = self.clock.now()
         if d.driver is None:
+            if d.error:
+                return DeviceState(cfg.id, cfg.category, DeviceStatus.OFFLINE, error=d.error)
             return DeviceState(cfg.id, cfg.category, DeviceStatus.DISABLED)
         if not d.connected:
             if d.next_retry is None or now >= d.next_retry:
@@ -132,6 +144,14 @@ class DeviceManager:
         if drv is None:
             raise DeviceUnavailableError(f"{device_id} is uitgeschakeld")
         return drv
+
+    def health(self, device_id: str, now: datetime) -> dict:
+        d = self.devices[device_id]
+        age = None if d.last_ok is None else (now - d.last_ok).total_seconds()
+        return {"connected": d.connected, "failures": d.failures, "error": d.error,
+                "last_update": None if d.last_ok is None else d.last_ok.isoformat(),
+                "age_s": None if age is None else round(age, 2),
+                "next_retry": None if d.next_retry is None else d.next_retry.isoformat()}
 
     def is_simulated(self, device_id: str) -> bool:
         d = self.devices.get(device_id)

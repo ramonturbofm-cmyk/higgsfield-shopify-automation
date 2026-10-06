@@ -33,8 +33,11 @@ class FaultMode(StrEnum):
     REJECT_COMMANDS = "reject_commands"
 
 
-def _manifest(driver_id: str, name: str, category: DeviceCategory, caps: set[Capability]) -> DriverManifest:
+def _manifest(driver_id: str, name: str, category: DeviceCategory, caps: set[Capability],
+              grid_meter_kind: str | None = None) -> DriverManifest:
     return DriverManifest(
+        grid_meter_kind=grid_meter_kind,
+        write_capable=any(c.value.startswith("control_") for c in caps),
         driver_id=driver_id, display_name=name, vendor="Simulator",
         categories=(category,), capabilities=frozenset(caps),
         connection_types=("simulated",), models=("Simulated",),
@@ -72,7 +75,7 @@ class MockDriverBase(DeviceDriver):
         await self._guard()
         sim = self.context.simulator
         if sim is None:
-            raise DeviceUnavailableError("mock-driver vereist de simulator (SIMULATION_MODE)")
+            raise DeviceUnavailableError("gesimuleerd apparaat: alleen beschikbaar in Demo Mode / simulatie")
         comp = sim.component(self.device_id)
         if not isinstance(comp, self.component_type):
             raise DeviceUnavailableError(f"simulatiecomponent {self.device_id} heeft verkeerd type")
@@ -107,7 +110,7 @@ class MockDriverBase(DeviceDriver):
 @register_driver
 class MockSmartMeter(MockDriverBase):
     manifest = _manifest("mock.smart_meter", "Gesimuleerde slimme meter (P1)", DeviceCategory.SMART_METER,
-                         {C.READ_GRID_POWER, C.READ_GRID_PHASES, C.READ_GRID_ENERGY})
+                         {C.READ_GRID_POWER, C.READ_GRID_PHASES, C.READ_GRID_ENERGY}, grid_meter_kind="simulated")
     component_type = MeterState
 
     def _read(self) -> dict[Metric, Any]:

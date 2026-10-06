@@ -62,6 +62,26 @@ class SimulatedSite:
         self.components[component.id] = component
         return component
 
+    STATE_FIELDS = {
+        "SimBattery": ("soc_pct", "temperature_c", "charged_kwh", "discharged_kwh"),
+        "SimHeatPump": ("indoor_temp_c", "compressor_on", "time_in_state_s", "energy_kwh", "heat_kwh"),
+        "SimEVCharger": ("connected", "soc_pct", "energy_kwh", "session_kwh"),
+        "SimPV": ("energy_kwh", "curtailed_kwh"),
+        "SimBaseLoad": ("energy_kwh",),
+    }
+
+    def carry_state_from(self, old: SimulatedSite) -> None:
+        """Keep the physical state (SOC, temperatures, counters) when the site is rebuilt
+        after a configuration change, so the demo world does not reset."""
+        self.now = old.now
+        self.meter.import_kwh, self.meter.export_kwh = old.meter.import_kwh, old.meter.export_kwh
+        for cid, comp in self.components.items():
+            prev = old.components.get(cid)
+            if prev is None or type(prev) is not type(comp):
+                continue
+            for f in self.STATE_FIELDS.get(type(comp).__name__, ()):
+                setattr(comp, f, getattr(prev, f))
+
     def component(self, component_id: str) -> Component:
         if component_id == self.meter_id:
             return self.meter  # type: ignore[return-value]

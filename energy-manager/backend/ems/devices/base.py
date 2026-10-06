@@ -58,6 +58,10 @@ class DriverManifest:
     documentation: str | None = None    # URL / title of the official source
     connection_schema: dict[str, Any] = field(default_factory=dict)  # fields for the wizard
     notes: str = ""
+    # Set when this driver can act as the site's grid meter:
+    # "homewizard_p1" | "dsmr" | "modbus" | "mqtt" | "rest" | "simulated"
+    grid_meter_kind: str | None = None
+    write_capable: bool = False         # driver implements real device writes (commissioning)
 
 
 @dataclass

@@ -40,7 +40,7 @@ class JournalEntry:
 
     def render_nl(self, tz: tzinfo | None = None) -> str:
         """Human readable entry; pass the site timezone for local times."""
-        prefix = "EMS zou" if self.outcome == "dry_run" else "EMS"
+        prefix = "EMS zou" if self.outcome in ("dry_run", "shadow") else "EMS"
         ts = self.timestamp.astimezone(tz) if tz else self.timestamp
         lines = [f"{ts:%Y-%m-%d %H:%M:%S} {prefix}: {self.summary} [{self.outcome}]"]
         if self.reasons:

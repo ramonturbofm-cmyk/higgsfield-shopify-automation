@@ -10,7 +10,8 @@ hammered with identical writes) and refreshes them periodically.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from enum import StrEnum
 
@@ -41,6 +42,8 @@ class Outcome(StrEnum):
     SKIPPED = "skipped"      # identical to what the device already has
     BLOCKED = "blocked"      # simulation mode protecting real hardware
     FAILED = "failed"
+    SHADOW = "shadow"        # commissioning: would do, not executed
+    NOT_COMMISSIONED = "not_commissioned"  # connection_test / read_only: never written
 
 
 @dataclass
@@ -51,10 +54,29 @@ class GateResult:
     error: str | None = None
 
 
+LevelLookup = Callable[[str], tuple[str, float]]
+
+
+def limit_command(cmd: Command, fraction: float, params: dict) -> Command:
+    """LIMITED CONTROL: scale power-like commands down to ``fraction``."""
+    if cmd.action in (CommandAction.BATTERY_CHARGE, CommandAction.BATTERY_DISCHARGE) and cmd.value is not None:
+        return replace(cmd, value=round(float(cmd.value) * fraction, -1))
+    if cmd.action == CommandAction.EV_CURRENT and cmd.value:
+        min_a = float(params.get("min_current_a", 6))
+        return replace(cmd, value=max(min_a, float(int(float(cmd.value) * fraction))))
+    if cmd.action == CommandAction.PV_LIMIT and cmd.value is not None:
+        peak = float((params.get("sim", {}) | params).get("peak_power_kw", 0)) * 1000
+        if peak > 0:  # never curtail more than `fraction` of the array while commissioning
+            return replace(cmd, value=max(float(cmd.value), peak * (1 - fraction)))
+    return cmd
+
+
 class CommandGate:
-    def __init__(self, devices: DeviceManager, mode: GateMode, refresh_s: float) -> None:
+    def __init__(self, devices: DeviceManager, mode: GateMode, refresh_s: float,
+                 levels: LevelLookup | None = None) -> None:
         self.devices = devices
         self.mode = mode
+        self.levels = levels
         self.refresh = timedelta(seconds=refresh_s)
         self._last: dict[tuple[str, str], tuple[Command, datetime]] = {}
 
@@ -81,7 +103,24 @@ class CommandGate:
         return old.value == cmd.value
 
     async def submit(self, decision: Decision, now: datetime) -> GateResult:
+        level, fraction = self.levels(decision.command.device_id) if self.levels else ("full", 1.0)
+        if level in ("connection_test", "read_only"):
+            return GateResult(decision, Outcome.NOT_COMMISSIONED, None,
+                              f"inbedrijfstelling: {level} — er wordt niets naar dit apparaat geschreven")
+        if level == "limited":
+            params = self.devices.config.device(decision.command.device_id).params
+            limited = limit_command(decision.command, fraction, params)
+            if limited != decision.command:
+                decision = Decision(limited, decision.summary, decision.reasons + [
+                    f"Beperkte regeling (inbedrijfstelling): maximaal {fraction:.0%} van het gevraagde"],
+                    decision.source, decision.data, decision.expected_benefit_eur)
         cmd = decision.command
+        if level == "shadow":
+            prev = self._last.get(cmd.group_key)
+            if self._unchanged(cmd, now) or (prev is not None and prev[0] == cmd):
+                return GateResult(decision, Outcome.SKIPPED, None)
+            self._last[cmd.group_key] = (cmd, now)
+            return GateResult(decision, Outcome.SHADOW, None, "schaduwmodus: niet uitgevoerd")
         prev = self._last.get(cmd.group_key)
         old_value = None if prev is None else (prev[0].action.value, prev[0].value)
         if self._unchanged(cmd, now):

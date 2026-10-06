@@ -28,6 +28,7 @@ from ems.core.events import EventBus
 from ems.core.journal import DecisionJournal, JournalEntry
 from ems.core.snapshot import SiteSnapshot, build_snapshot
 from ems.devices.manager import DeviceManager
+from ems.gridmeter.meter import GridMeterStatus, feature_availability, select_primary_grid_meter
 
 log = logging.getLogger(__name__)
 
@@ -59,7 +60,9 @@ class EMSEngine:
         self.clock = clock
         self.journal = journal or DecisionJournal()
         self.bus = bus or EventBus()
-        self.gate = gate or CommandGate(devices, gate_mode(config), config.control.command_refresh_s)
+        self.gate = gate or CommandGate(devices, gate_mode(config), config.control.command_refresh_s,
+                                        levels=self._level)
+        self.last_decisions: dict[str, dict] = {}
         self.tz = ZoneInfo(config.site.timezone)
         self.overrides = overrides or OverrideManager(clock, self.tz)
         self.failsafe_active = False
@@ -68,6 +71,7 @@ class EMSEngine:
         self.commands_sent = 0
         self.heartbeat: datetime | None = None
         self.last_snapshot: SiteSnapshot | None = None
+        self.grid_selection = select_primary_grid_meter(config, devices.registry)
         self._healthy_ticks = 0
         self._last_grid_ok: datetime | None = None
         self._counter = itertools.count(1)
@@ -96,12 +100,22 @@ class EMSEngine:
             elapsed = (self.clock.now() - started).total_seconds()
             await self.clock.sleep(max(0.0, interval - elapsed))
 
+    async def observe(self) -> SiteSnapshot:
+        """Read all devices and update ``last_snapshot`` without deciding or writing anything."""
+        now = self.clock.now()
+        states = await self.devices.poll()
+        snap = build_snapshot(self.config, states, now, self.grid_selection.device_id)
+        snap.features = feature_availability(self.grid_selection, snap.grid_valid, snap.phase_currents_a is not None)
+        self.last_snapshot = snap
+        return snap
+
     # ----------------------------------------------------------------- tick
     async def tick(self) -> TickResult:
         now = self.clock.now()
         run_id = f"{now:%Y%m%dT%H%M%S}-{next(self._counter)}"
         states = await self.devices.poll()
-        snap = build_snapshot(self.config, states, now)
+        snap = build_snapshot(self.config, states, now, self.grid_selection.device_id)
+        snap.features = feature_availability(self.grid_selection, snap.grid_valid, snap.phase_currents_a is not None)
         self.last_snapshot = snap
         result = TickResult(run_id, snap)
         await self.bus.publish("snapshot", snap)
@@ -136,16 +150,28 @@ class EMSEngine:
             result.results.append(gr)
             if gr.outcome == Outcome.SENT:
                 self.commands_sent += 1
-            if gr.outcome not in (Outcome.SKIPPED, Outcome.REFRESHED):
+            if gr.outcome not in (Outcome.SKIPPED, Outcome.REFRESHED, Outcome.NOT_COMMISSIONED):
                 self._journal(gr, run_id, now)
                 await self.bus.publish("decision", gr)
+            if gr.outcome != Outcome.SKIPPED or decision.command.device_id not in self.last_decisions:
+                self.last_decisions[decision.command.device_id] = {
+                    "ts": now.isoformat(), "outcome": gr.outcome.value, "summary": gr.decision.summary,
+                    "action": gr.decision.command.action.value, "value": gr.decision.command.value,
+                    "reasons": gr.decision.reasons, "expected_benefit": gr.decision.expected_benefit_eur}
         self.heartbeat = now
         return result
 
     # --------------------------------------------------------------- health
+    def _level(self, device_id: str) -> tuple[str, float]:
+        try:
+            d = self.config.device(device_id)
+        except KeyError:
+            return "read_only", 0.0
+        return d.control_level, d.limited_fraction
+
     def _health_issues(self, snap: SiteSnapshot, now: datetime) -> list[str]:
         issues = []
-        if snap.grid_device_id is not None:
+        if self.grid_selection.status != GridMeterStatus.NO_PRIMARY_GRID_METER and snap.grid_device_id is not None:
             if snap.grid_valid:
                 self._last_grid_ok = now
             elif self._last_grid_ok is None or now - self._last_grid_ok > timedelta(

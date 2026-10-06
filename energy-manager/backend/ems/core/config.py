@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from ems.core.models import DeviceCategory
 
@@ -37,6 +37,11 @@ class _Base(BaseModel):
 
 
 class RuntimeConfig(_Base):
+    mode: Literal["production", "demo"] = setting(
+        "production", label="Bedrijfsmodus", level="advanced",
+        help="'demo' draait een complete gesimuleerde woning; 'production' werkt alleen met echte apparaten.")
+    demo_speed: float = setting(1.0, label="Demo-snelheid", level="expert", gt=0, le=120,
+                                help="1 = realtime; hoger = versneld afspelen van de demowoning.")
     simulation_mode: bool = setting(
         True, label="Simulatiemodus",
         help="Het EMS rekent volledig mee maar stuurt alleen gesimuleerde apparaten aan.",
@@ -56,6 +61,9 @@ class SiteConfig(_Base):
     latitude: float = setting(52.09, label="Breedtegraad", level="advanced", ge=-90, le=90)
     longitude: float = setting(5.12, label="Lengtegraad", level="advanced", ge=-180, le=180)
     timezone: str = setting("Europe/Amsterdam", label="Tijdzone", level="advanced")
+    annual_consumption_kwh: float = setting(
+        3500.0, label="Jaarverbruik huishouden", unit="kWh", level="advanced", gt=0,
+        help="Startwaarde voor de verbruiksprognose zolang er nog weinig historie is.")
 
 
 class GridConfig(_Base):
@@ -178,6 +186,12 @@ class StrategyConfig(_Base):
     export_mode: ExportMode = setting(ExportMode.UNLIMITED, label="Teruglevering")
     export_target_w: float = setting(0.0, label="Gewenste export bij begrenzing", unit="W", level="advanced")
     export_tolerance_w: float = setting(100.0, label="Regelmarge", unit="W", level="advanced", ge=0)
+    export_price_threshold_eur: float = setting(
+        0.0, label="Teruglevering beperken onder", unit="EUR/kWh", level="advanced",
+        help="Smart Export: PV wordt afgeregeld zodra de terugleverprijs onder deze grens komt.")
+    peak_limit_kw: float | None = setting(
+        None, label="Piekbegrenzing afname", unit="kW", level="advanced",
+        help="Peak shaving: boven deze afname zet het EMS batterij en flexibele lasten in. Leeg = uit.")
     surplus_priority: list[SurplusSink] = setting(
         ["battery", "flexible", "heat_pump", "boiler", "ev"],
         label="Volgorde PV-overschot", level="advanced",
@@ -190,13 +204,95 @@ class StrategyConfig(_Base):
         return self
 
 
+
+class ContractType(StrEnum):
+    DYNAMIC = "dynamic"
+    FIXED = "fixed"
+    VARIABLE = "variable"
+
+
+class TimeOfUsePrice(_Base):
+    start: str = Field(pattern=r"^\d{2}:\d{2}$")      # local time, inclusive
+    end: str = Field(pattern=r"^\d{2}:\d{2}$")        # local time, exclusive ("00:00" = midnight)
+    weekdays: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4, 5, 6])
+    price_eur_kwh: float
+
+
+class TariffConfig(_Base):
+    """The user's own energy contract — nothing supplier specific is hard-coded."""
+
+    contract_name: str = setting("Mijn contract", label="Contractnaam")
+    supplier: str = setting("", label="Leverancier")
+    contract_type: ContractType = setting(ContractType.DYNAMIC, label="Soort contract")
+    # Import (afname)
+    import_markup_eur_kwh: float = setting(0.02, label="Inkoopopslag", unit="EUR/kWh",
+                                           help="Opslag van de leverancier bovenop de marktprijs (excl. btw).")
+    energy_tax_eur_kwh: float = setting(0.0, label="Energiebelasting", unit="EUR/kWh",
+                                        help="Excl. btw. Vul het actuele tarief van uw contract in.")
+    import_other_eur_kwh: float = setting(0.0, label="Overige kosten per kWh", unit="EUR/kWh", level="advanced")
+    transaction_fee_eur_kwh: float = setting(0.0, label="Transactiekosten per kWh", unit="EUR/kWh", level="advanced")
+    vat_pct: float = setting(21.0, label="Btw", unit="%", ge=0, le=100)
+    fixed_import_price_eur_kwh: float | None = setting(
+        None, label="Vaste leveringsprijs (incl. alles)", unit="EUR/kWh",
+        help="Alleen voor vaste contracten; overschrijft de berekening hierboven.")
+    time_of_use: list[TimeOfUsePrice] = setting([], label="Tijdsafhankelijke prijzen", level="expert")
+    # Export (teruglevering)
+    export_markup_eur_kwh: float = setting(-0.02, label="Terugleveropslag/-afslag", unit="EUR/kWh",
+                                           help="Negatief = afslag op de marktprijs.")
+    export_fee_eur_kwh: float = setting(0.0, label="Terugleverkosten", unit="EUR/kWh")
+    export_vat: bool = setting(False, label="Btw over teruglevering", level="advanced")
+    netting: bool = setting(False, label="Salderen",
+                            help="Teruggeleverde kWh worden verrekend tegen de afnameprijs (zolang export < import).")
+    fixed_export_price_eur_kwh: float | None = setting(None, label="Vaste terugleververgoeding", unit="EUR/kWh")
+    # Fixed costs
+    fixed_monthly_eur: float = setting(0.0, label="Vaste kosten per maand", unit="EUR", level="advanced")
+    fixed_daily_eur: float = setting(0.0, label="Vaste kosten per dag", unit="EUR", level="advanced")
+    grid_monthly_eur: float = setting(0.0, label="Netbeheerkosten per maand", unit="EUR", level="advanced")
+    service_monthly_eur: float = setting(0.0, label="Servicekosten per maand", unit="EUR", level="advanced")
+    energy_tax_credit_yearly_eur: float = setting(0.0, label="Vermindering energiebelasting per jaar",
+                                                  unit="EUR", level="advanced")
+
+
+class PriceConfig(_Base):
+    provider: Literal["none", "entsoe", "manual", "demo"] = setting(
+        "none", label="Prijsbron",
+        help="ENTSO-E (gratis API-token nodig), handmatig ingevoerde prijzen, of de demo-prijzen.")
+    entsoe_token: str = setting("", label="ENTSO-E API-token", level="advanced",
+                                help="Gebruik bij voorkeur ${ENTSOE_TOKEN} met de waarde in .env.")
+    bidding_zone: str = setting("10YNL----------L", label="Biedzone (EIC)", level="expert")
+    refresh_minutes: int = setting(60, label="Verversen elke", unit="min", level="expert", ge=5)
+
+
+class ForecastConfig(_Base):
+    weather_provider: Literal["none", "open_meteo", "demo"] = setting(
+        "none", label="Weerbron",
+        help="Open-Meteo (gratis, geen sleutel) voor zon- en temperatuurprognoses.")
+    refresh_minutes: int = setting(60, label="Verversen elke", unit="min", level="expert", ge=10)
+    history_days: int = setting(28, label="Historie voor verbruiksprognose", unit="dagen", level="expert", ge=3)
+
+
+class NotificationConfig(_Base):
+    webhook_url: str = setting("", label="Webhook-URL", level="advanced",
+                               help="Optioneel: meldingen worden als JSON naar deze URL gestuurd.")
+    extreme_price_eur_kwh: float = setting(0.40, label="Melding bij importprijs boven", unit="EUR/kWh",
+                                           level="advanced")
+    phase_load_warn_pct: float = setting(90.0, label="Melding bij fasebelasting boven", unit="%",
+                                         level="advanced")
+
+
 class DeviceConfig(_Base):
+    """One configured device. ``role='primary_grid_meter'`` marks the meter that is the
+    truth at the grid connection (``grid_reference`` is accepted as legacy alias).
+    ``control_level`` is the commissioning stage that limits what the EMS may write."""
+
     id: str = Field(pattern=r"^[a-z0-9_-]{1,64}$")
     name: str
     category: DeviceCategory
     driver: str
     enabled: bool = True
-    role: Literal["grid_reference"] | None = None
+    role: Literal["primary_grid_meter", "grid_reference"] | None = None
+    control_level: Literal["connection_test", "read_only", "shadow", "limited", "full"] = "full"
+    limited_fraction: float = Field(0.3, gt=0, le=1)
     phase: Literal["L1", "L2", "L3", "3P"] = "3P"
     connection: dict[str, Any] = Field(default_factory=dict)
     params: dict[str, Any] = Field(default_factory=dict)
@@ -212,7 +308,13 @@ class EMSConfig(_Base):
     battery: BatteryPolicy = Field(default_factory=BatteryPolicy)
     heatpump: HeatPumpPolicy = Field(default_factory=HeatPumpPolicy)
     strategy: StrategyConfig = Field(default_factory=StrategyConfig)
+    tariff: TariffConfig = Field(default_factory=TariffConfig)
+    prices: PriceConfig = Field(default_factory=PriceConfig)
+    forecast: ForecastConfig = Field(default_factory=ForecastConfig)
+    notifications: NotificationConfig = Field(default_factory=NotificationConfig)
     devices: list[DeviceConfig] = Field(default_factory=list)
+    # JSON paths whose value came from a ${VAR} reference: (path -> original text).
+    _env_refs: dict[tuple, tuple[str, Any]] = PrivateAttr(default_factory=dict)
 
     @model_validator(mode="after")
     def _devices(self) -> EMSConfig:
@@ -220,9 +322,9 @@ class EMSConfig(_Base):
         dupes = {i for i in ids if ids.count(i) > 1}
         if dupes:
             raise ValueError(f"dubbele apparaat-id's: {sorted(dupes)}")
-        refs = [d.id for d in self.devices if d.role == "grid_reference"]
+        refs = [d.id for d in self.devices if d.role in ("grid_reference", "primary_grid_meter")]
         if len(refs) > 1:
-            raise ValueError(f"maximaal één grid_reference toegestaan, gevonden: {refs}")
+            raise ValueError(f"maximaal één primaire netmeter (grid_reference) toegestaan, gevonden: {refs}")
         if self.grid.phases == 1:
             bad = [d.id for d in self.devices if d.phase in ("L2", "L3")]
             if bad:
@@ -242,7 +344,7 @@ class EMSConfig(_Base):
         """The meter whose reading is 'the truth' at the grid connection."""
         enabled = [d for d in self.devices if d.enabled]
         for d in enabled:
-            if d.role == "grid_reference":
+            if d.role in ("grid_reference", "primary_grid_meter"):
                 return d
         for d in enabled:
             if d.category == DeviceCategory.SMART_METER:
@@ -292,8 +394,22 @@ def _env_bool(env: dict[str, str], *names: str) -> bool | None:
     return None
 
 
+def _collect_refs(value: Any, env: dict[str, str], path: tuple = ()) -> dict[tuple, tuple[str, Any]]:
+    refs: dict[tuple, tuple[str, Any]] = {}
+    if isinstance(value, str) and _ENV_PATTERN.search(value):
+        refs[path] = (value, _interpolate(value, env))
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            refs.update(_collect_refs(v, env, path + (k,)))
+    elif isinstance(value, list):
+        for i, v in enumerate(value):
+            refs.update(_collect_refs(v, env, path + (i,)))
+    return refs
+
+
 def config_from_dict(data: dict[str, Any], env: dict[str, str] | None = None) -> EMSConfig:
     env = dict(os.environ) if env is None else env
+    refs = _collect_refs(data or {}, env)
     data = _interpolate(data or {}, env)
     runtime = dict(data.get("runtime") or {})
     sim = _env_bool(env, "EMS_SIMULATION_MODE", "SIMULATION_MODE")
@@ -302,11 +418,22 @@ def config_from_dict(data: dict[str, Any], env: dict[str, str] | None = None) ->
         runtime["simulation_mode"] = sim
     if dry is not None:
         runtime["dry_run"] = dry
+    if env.get("EMS_MODE"):
+        runtime["mode"] = env["EMS_MODE"].strip().lower()
     data = {**data, "runtime": runtime}
     try:
-        return EMSConfig.model_validate(data)
+        cfg = EMSConfig.model_validate(data)
     except ValueError as exc:
         raise ConfigError(str(exc)) from exc
+    cfg._env_refs = refs
+    return cfg
+
+
+def copy_config(config: EMSConfig, data: dict[str, Any] | None = None) -> EMSConfig:
+    """Validated copy (optionally from modified data) that keeps the ${VAR} references."""
+    new = EMSConfig.model_validate(data if data is not None else config.model_dump(mode="json"))
+    new._env_refs = dict(config._env_refs)
+    return new
 
 
 def load_config(path: str | Path, env: dict[str, str] | None = None) -> EMSConfig:
@@ -315,6 +442,29 @@ def load_config(path: str | Path, env: dict[str, str] | None = None) -> EMSConfi
     if not isinstance(raw, dict):
         raise ConfigError(f"{path}: verwacht een YAML-mapping op het hoogste niveau")
     return config_from_dict(raw, env)
+
+
+def dump_config(config: EMSConfig) -> str:
+    """Serialize to YAML (round-trips through load_config)."""
+    data = config.model_dump(mode="json", exclude_none=False)
+    for path, (original, resolved) in config._env_refs.items():
+        node = data
+        try:
+            for key in path[:-1]:
+                node = node[key]
+            if node[path[-1]] == resolved:   # unchanged -> write the reference, never the secret
+                node[path[-1]] = original
+        except (KeyError, IndexError, TypeError):
+            continue
+    return yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+
+
+def save_config(config: EMSConfig, path: str | Path) -> None:
+    """Atomic write: never leaves a half-written config behind."""
+    path = Path(path)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(dump_config(config), encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def settings_schema() -> dict[str, Any]:
