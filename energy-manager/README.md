@@ -1,33 +1,107 @@
 # Energy Manager
 
 Een universeel, uitbreidbaar **Energy Management System (EMS)** voor woningen en kleine bedrijven.
-De EMS-engine draait 24/7 zelfstandig op een Raspberry Pi 4/5 (of andere Linux-computer);
-een Windows-app en een webinterface dienen als bediening.
+De EMS-server draait 24/7 zelfstandig op een **Raspberry Pi 4/5** (of andere Linux-computer) en regelt,
+plant en logt. De **Windows-app** en de **webinterface** (telefoon/tablet) zijn alleen bediening:
+het EMS blijft werken als de app dicht is.
 
-> **Status: fase 1 van 12 — architectuur + simulator.** De kern, het apparaatpluginsysteem,
-> de mockapparaten, het fysieke woningmodel, de fail-safe-mechanismen en een eerste
-> regelstrategie werken en zijn getest. Er is nog geen API, database, app of optimizer.
-> Zie [DEVELOPMENT.md](DEVELOPMENT.md).
+> **Versie 0.2.0.** Volledige server, optimizer, webinterface, Windows-app en Demo Mode werken.
+> Uitlezen van echte apparaten: HomeWizard P1, DSMR P1 en generieke Modbus TCP/HTTP/MQTT
+> (alleen-lezen). Er is nog **niets met echte hardware getest** en er zijn bewust **geen schrijvende
+> drivers** voor echte apparaten (geen verzonnen protocollen). Status: [DEVELOPMENT.md](DEVELOPMENT.md).
 
-## Wat werkt nu
+## Wat het doet
 
-* **Simulator** van een complete woning: zon/bewolking/buitentemperatuur, PV (meerdere velden,
-  oriëntatie), huishoudelijk verbruik met pieken, thuisbatterij met rendementen, warmtepomp met
-  thermisch woningmodel en eigen thermostaat, laadpaal met aankomst/vertrek, slimme meter met
-  fasewaarden, synthetische 15-minuten day-ahead-prijzen.
-* **EMS-kern**: regelcyclus, samengevoegde `SiteSnapshot`, sensorvalidatie, detectie van bevroren
-  data, fail-safe met automatisch herstel, watchdog, handmatige overrides die verlopen,
-  `SIMULATION_MODE` en `DRY_RUN`, uitlegbaar beslissingslogboek (JSONL).
-* **Plugin-/driverarchitectuur** met registry, capabilities en een verbindingstest-rapport
-  (✓/✗ per functie) voor de apparaatwizard.
-* **Mockdrivers**: `MockSmartMeter`, `MockSolarInverter`, `MockBattery`, `MockHeatPump`,
-  `MockEVCharger` — inclusief storingsinjectie (offline, bevroren, onzinwaarden, traag, commando's weigeren).
-* **Strategie "zelfconsumptie"**: batterij in eigen zelfconsumptiemodus, laadpaal op PV-overschot
-  (met smoothing, start/stop-vertraging en hysterese) en **dynamische fasebewaking**.
-* **Configuratie** in YAML met validatie, `${GEHEIM}`-verwijzingen naar `.env` en UI-metadata
-  (labels, uitleg, SIMPLE/ADVANCED/EXPERT) voor de toekomstige instellingenschermen.
+* **Live dashboard** met energiestromen (net, PV, batterij, warmtepomp, laadpaal, huis), fasestromen en prijzen.
+* **Planning 24–36 uur** via een rolling-horizon optimizer (MILP, elke 5 min): wanneer laden/ontladen,
+  PV afregelen, warmtepomp voorverwarmen, auto laden — met verwachte kosten en voordeel t.o.v. "zonder EMS".
+* **Tariefengine** (dynamisch/vast/dal-piek, opslagen, energiebelasting, btw, salderen) en prijsbronnen
+  (ENTSO-E, handmatig) met cache.
+* **Veiligheid eerst**: fail-safe bij wegvallende netmeting, watchdog, fasebewaking, piekbegrenzing,
+  zero-export; apparaten vallen altijd terug op hun eigen regeling.
+* **Inbedrijfstelling per apparaat**: verbindingstest → alleen lezen → schaduwmodus ("EMS zou…") →
+  beperkt → volledig.
+* Automatiseringen, handmatige overrides met verlooptijd, uitlegbare beslissingen, historie en export,
+  financieel overzicht, backtesting en Auto-Tune (nooit automatisch toegepast), meldingen,
+  back-up/restore, gebruikers met rollen.
+* **Demo Mode**: een complete gesimuleerde "Demo Home" (PV 8 kWp, batterij 15 kWh, warmtepomp, EV,
+  3×25 A, dynamische prijs) om alles zonder hardware te proberen. In productie worden nooit nepwaarden
+  getoond.
 
-## Snel starten
+## Installeren op de Raspberry Pi
+
+Benodigd: Raspberry Pi 4/5 met **Raspberry Pi OS 64-bit** (Lite volstaat), bij voorkeur een SSD via USB3,
+netwerkkabel. Geef de Pi de hostnaam `energy-manager` (Raspberry Pi Imager → instellingen); de Windows-app
+vindt hem dan automatisch.
+
+```bash
+git clone <deze repository> && cd <repository>/energy-manager
+cp .env.example .env          # optioneel: tijdzone, poort, ENTSOE_TOKEN
+./install.sh                  # installeert Docker indien nodig, bouwt en start (productie)
+# of: ./install.sh demo       # start in Demo Mode
+```
+
+Open daarna `http://energy-manager.local:8080` (of `http://<ip-van-de-pi>:8080`). Bij de eerste keer
+maakt u een beheerdersaccount aan.
+
+Beheer:
+
+| Opdracht | Doet |
+|---|---|
+| `./install.sh status` | containerstatus + health |
+| `./install.sh logs` | live logboek |
+| `./install.sh update` | back-up → nieuwe versie → healthcheck → **automatische rollback** bij een fout |
+| `./install.sh backup` | back-up naar `./backups/` |
+| `./install.sh watchdog` | hardware-watchdog van de Pi inschakelen (herstart bij vastlopen) |
+| `./install.sh uninstall` | stoppen (gegevens blijven bewaard in het Docker-volume) |
+
+Zonder Docker: `pip install .` en de systemd-unit `deploy/energy-manager.service`
+(`Type=notify`, `WatchdogSec`). Optioneel PostgreSQL: `docker compose --profile postgres up -d`
+en `EMS_DATABASE_URL` in `.env`.
+
+**Beveiliging:** zet poort 8080 nooit open naar internet. Gebruik voor toegang op afstand een VPN
+(WireGuard/Tailscale). Wachtwoorden en tokens staan versleuteld in de datamap, nooit in de configuratie;
+gebruik `${VARIABELE}` met de waarde in `.env` voor eigen geheimen.
+
+## Windows
+
+Installer: **`EnergyManagerSetup-<versie>.exe`** — wordt gebouwd door GitHub Actions
+(workflow *Energy Manager — Windows installer*, artifact *EnergyManager-Windows*).
+
+* **"Alleen de app"** — de normale keuze: de app zoekt de EMS-server op het netwerk
+  (`energy-manager.local`, `raspberrypi.local`, eerder gebruikte servers) of u voert het IP-adres in.
+  Daarna verbindt de app automatisch met de laatst gebruikte server; via "Andere server" kiest u opnieuw.
+* **"App + lokale EMS-server"** — om zonder Pi te testen: startmenu → *Energy Manager Server (Demo Mode)*,
+  daarna in de app verbinden met `127.0.0.1`.
+* Installeert per gebruiker (geen beheerdersrechten); gegevens staan in `%LOCALAPPDATA%\EnergyManager`.
+* Nog niet digitaal ondertekend: SmartScreen → *Meer informatie* → *Toch uitvoeren*.
+
+Zelf bouwen op Windows (Python 3.12, Node 20+, Rust, Inno Setup 6): `.\windows\build.ps1`.
+Ontwikkelen aan de app: `cd windows-app && npm install && npx tauri dev` (met een server op de achtergrond).
+
+## Apparaten koppelen
+
+In de webinterface: **Apparaten → Apparaat toevoegen**. De wizard test de verbinding en toont per functie
+✓/✗. Nieuwe apparaten starten **alleen-lezen**; via *Inbedrijfstelling* gaat u stap voor stap naar
+schaduwmodus en (zodra er een schrijvende driver is) beperkte/volledige regeling.
+
+| Apparaat | Hoe |
+|---|---|
+| **HomeWizard P1-meter** | automatisch gevonden (mDNS); bij API v2 drukt u op de knop van de meter om te koppelen. Wordt automatisch de primaire netmeter. |
+| **Slimme meter via P1-kabel** | driver *DSMR P1*: USB-kabel (`/dev/ttyUSB0`) of een netwerk-P1-bridge (TCP). In Docker: `devices:` in `docker-compose.yml` aanzetten. |
+| **Modbus TCP-apparaat** | *Generiek Modbus TCP*: IP, unit-ID en een waardetoewijzing (adres, type, schaal) **uit de handleiding van het apparaat**. |
+| **Apparaat met JSON-API** | *Generiek HTTP/JSON*: URL en JSON-paden. |
+| **Via MQTT** (bijv. bestaande gateway) | *Generiek MQTT*: broker, topics en (optioneel) JSON-pad. |
+
+Voor het **aansturen** van een specifieke omvormer, batterij, warmtepomp of laadpaal is een driver
+nodig op basis van de officiële documentatie. Lever daarvoor aan: merk, exact model, firmwareversie,
+aansluiting (LAN/RS485/USB) en de protocoldocumentatie — zie
+[DEVICE_INTEGRATION_GUIDE.md](DEVICE_INTEGRATION_GUIDE.md).
+
+Zonder primaire netmeter toont het EMS: *"Geen primaire netmeter ingesteld. Sommige EMS-functies zijn
+beperkt."* (geen zero-export, piekbegrenzing of fasebewaking).
+
+## Ontwikkelen
 
 Vereist Python 3.11+.
 
@@ -35,36 +109,14 @@ Vereist Python 3.11+.
 cd energy-manager
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-
-# 2 zomerdagen simuleren en vergelijken met "zonder EMS"
-ems-sim --config config/ems.example.yaml --start 2026-06-15 --days 2 --compare-native
-
-# Winter, met CSV/JSON-uitvoer
-ems-sim --start 2026-01-20 --days 7 --out out/winter
-
-# Proefdraaien: alles berekenen, niets uitvoeren
-DRY_RUN=true ems-sim --days 1
-
-# Tests
-pytest
+ems serve --demo --data-dir ./data-demo     # http://127.0.0.1:8080 (login demo/demo)
+pytest -q                                   # 144 tests
+ruff check backend tests
+ems-sim --start 2026-06-15 --days 2 --compare-native   # simulator-CLI
 ```
 
-Voorbeelduitvoer (ingekort):
-
-```
-Simulatie (self_consumption) vanaf 2026-06-15T00:00:00+02:00, 48 uur
-  PV-opwek                   83.86 kWh   (afgeregeld 0.00 kWh)
-  Netafname                   0.74 kWh
-  Teruglevering              39.12 kWh
-  Batterij in / uit          13.76 / 7.41 kWh  (1.06 cycli)
-  Zelfvoorzienendheid           98.1 %
-  Max. fasestroom             10.6 A     (overbelast 0 s)
-  Fail-safe gebeurtenissen       0
-
-2026-06-16 14:22:30 EMS: Laadpaal: laadstroom 6 A [sent]
-Reden:
-  - PV-overschot 4.6 kW stabiel — laden gestart met 6 A
-```
+Andere opdrachten: `ems create-user <naam> --role admin`, `ems backup <bestand.zip>`,
+`ems check-config <ems.yaml>`, `ems selftest`. API-documentatie: `http://<server>:8080/api/docs`.
 
 ## Projectstructuur
 
@@ -73,52 +125,27 @@ energy-manager/
 ├── backend/ems/
 │   ├── core/          modellen, config, engine, validatie, journaal, watchdog, events, klok
 │   ├── devices/       driver-interface, plugin-registry, DeviceManager
-│   ├── control/       controllers (strategieën), overrides, CommandGate
-│   ├── integrations/  drivers; mock/ in fase 1 (vendor-drivers alleen met officiële documentatie)
-│   ├── simulator/     fysiek woningmodel, omgeving, runner, CLI (python -m ems.simulator)
-│   ├── api/           (fase 2) FastAPI + WebSocket
-│   ├── database/      (fase 2) TimescaleDB/SQLite
-│   ├── tariffs/       (fase 5) tariefengine
-│   ├── optimizer/     (fase 6) rolling-horizon MILP
-│   ├── forecasting/   (fase 9)
-│   ├── automations/   (fase 10)
-│   └── services/      (fase 2+) historie, export, back-up, notificaties, updates
-├── frontend/          (fase 3) React/TS-webapp, ook gebruikt door de Tauri Windows-app
-├── config/            ems.example.yaml
-├── tests/             unit-, integratie-, simulator-, regel- en storingstests
-├── docker/            (fase 2) Dockerfiles, compose
-└── scripts/           hulpscripts
+│   ├── gridmeter/     GridMeter-abstractie en selectie van de primaire netmeter
+│   ├── integrations/  homewizard/, dsmr/, generic/ (Modbus TCP, HTTP/JSON, MQTT), mock/ (Demo Mode)
+│   ├── control/       controllers, zero-export, overrides, CommandGate (inbedrijfstelling)
+│   ├── tariffs/ prices/ forecasting/ optimizer/ automations/
+│   ├── services/      financieel, backtest/Auto-Tune, back-up
+│   ├── server/        runtime (alles samen), historie, meldingen, Demo Mode
+│   ├── api/           FastAPI REST + WebSocket
+│   ├── database/ security/
+│   ├── web/           webinterface (ook gebruikt door de Windows-app)
+│   └── simulator/     fysiek woningmodel
+├── windows-app/       Tauri 2-app (verbindingsscherm)
+├── windows/           PyInstaller-server + Inno Setup-installer
+├── deploy/            systemd-unit
+├── Dockerfile, docker-compose.yml, install.sh, .env.example
+└── tests/
 ```
-
-De simulator staat binnen het `ems`-pakket (i.p.v. een losse map) omdat mockdrivers, backtesting
-en optimizer-validatie hem als bibliotheek gebruiken.
 
 ## Documentatie
 
 * [ARCHITECTURE.md](ARCHITECTURE.md) — technisch ontwerp en keuzes
-* [DEVELOPMENT.md](DEVELOPMENT.md) — voortgang, besluiten, bekende problemen, volgende stap
-* [DEVICE_INTEGRATION_GUIDE.md](DEVICE_INTEGRATION_GUIDE.md) — een nieuw apparaat toevoegen
-
-## Veiligheid
-
-Het EMS verschuift alleen setpoints; elk apparaat behoudt zijn eigen veilige regeling.
-Bij ontbrekende of onbetrouwbare netmeting, een fout in de strategie of een vastgelopen regelcyclus
-geeft het EMS alle apparaten vrij. Laat de EMS-poorten nooit openstaan naar internet.
-
-## Windows-installer
-
-Voor Windows is er een eenvoudige installer (`EnergyManager-Setup-<versie>.exe`) en een draagbare
-`EnergyManager.exe`. Na het starten opent de browser met de Energy Manager-pagina: kies een periode,
-klik **Simuleren** en bekijk het rapport met grafieken, vergelijking met/zonder EMS en de uitleg van
-elke beslissing. Sluit het zwarte venster om te stoppen.
-
-* Installeren vereist geen beheerdersrechten (installeert in `%LOCALAPPDATA%\Programs`).
-* Instellingen en simulaties staan in `%LOCALAPPDATA%\EnergyManager` (blijven behouden bij updates).
-* De exe is (nog) niet digitaal ondertekend: Windows SmartScreen toont daarom "Onbekende uitgever" →
-  *Meer informatie* → *Toch uitvoeren*.
-
-Bouwen: automatisch via GitHub Actions (`.github/workflows/energy-manager-windows.yml`, artifact
-*EnergyManager-Windows*), of zelf op Windows met `.\windows\build.ps1`.
-
-Dit is in fase 1 een **simulatieversie**. De volwaardige Windows-app (dashboard, wizard, live
-apparaten) volgt in fase 3 en praat dan met de Raspberry Pi.
+* [DEVELOPMENT.md](DEVELOPMENT.md) — status per onderdeel, teststatus, besluiten, beperkingen
+* [DEVICE_INTEGRATION_GUIDE.md](DEVICE_INTEGRATION_GUIDE.md) — apparaten en drivers
+* [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) — controle vóór een release
+* [backend/ems/CHANGELOG.md](backend/ems/CHANGELOG.md)

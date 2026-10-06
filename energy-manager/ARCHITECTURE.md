@@ -1,7 +1,7 @@
 # Architectuur — Energy Manager
 
 Dit document beschrijft het technisch ontwerp, de gemaakte keuzes en waarom.
-Status per fase staat in [DEVELOPMENT.md](DEVELOPMENT.md).
+Status per onderdeel staat in [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## 1. Uitgangspunten
 
@@ -25,14 +25,14 @@ Status per fase staat in [DEVELOPMENT.md](DEVELOPMENT.md).
 |---|---|---|---|
 | Taal / runtime | **Python 3.11+ met asyncio** | Rijk ecosysteem (Modbus, MQTT, optimalisatie, data), goed op ARM64; asyncio = veel gelijktijdige apparaat-I/O zonder threads | Go/Rust (sneller, maar kleiner energie-/optimalisatie-ecosysteem) |
 | Datamodel & config | **Pydantic v2** | Validatie, JSON-schema met UI-metadata (labels, SIMPLE/ADVANCED/EXPERT) → instellingenschermen worden gegenereerd | dataclasses + handmatige validatie |
-| API | **FastAPI + uvicorn** (fase 2) | Async, automatische OpenAPI-documentatie, WebSockets, Pydantic-native | Flask (sync), Django (zwaar) |
-| Database | **PostgreSQL 16 + TimescaleDB** (Docker); **SQLite**-profiel voor kleine/dev-installaties | Hypertables, compressie en *continuous aggregates* voor automatisch downsamplen (5 s → 1 min → 15 min); één database voor config én tijdreeksen; SQL voor rapportages/backtests | InfluxDB (tweede database + eigen querytaal), alleen SQLite (geen compressie/aggregaten) |
+| API | **FastAPI + uvicorn** | Async, automatische OpenAPI-documentatie, WebSockets, Pydantic-native | Flask (sync), Django (zwaar) |
+| Database | **SQLite (WAL)** standaard, **PostgreSQL** optioneel (SQLAlchemy Core, eigen migraties) | Eén bestand, geen extra container op de Pi; ruwe samples 14 dagen + eigen 15-min-aggregaten (onbeperkt) is ruim voldoende voor één locatie; PostgreSQL voor wie al een server heeft | TimescaleDB (oorspronkelijk plan; extra container en geheugen op de Pi zonder merkbaar voordeel bij deze datavolumes), InfluxDB (tweede querytaal) |
 | Opslagmedium | **SSD via USB3** aanbevolen | SD-kaarten slijten door continue schrijfacties | — |
-| Optimizer | **MILP met HiGHS** (via `scipy.optimize.milp` / `highspy`) met een eigen dunne modelleerlaag | Binaire keuzes zijn nodig (niet tegelijk laden/ontladen, min. looptijd warmtepomp, EV-minimumstroom, PV aan/uit); HiGHS is de snelste open-source MILP-solver, MIT-licentie, ARM64-wheels. 36 h × 15 min ≈ 144 stappen × ~15 variabelen → < 1 s op een Pi 4 | Pyomo (zwaar, extra solver nodig), OR-Tools (groot, CP-SAT minder geschikt voor continue vermogens), PuLP+CBC (trager, CBC-binary op ARM lastiger) |
-| Communicatie app ↔ Pi | **REST (OpenAPI) + WebSocket** over HTTPS op het LAN | REST voor configuratie/opdrachten, WebSocket voor live-data (≈1 s) en meldingen | gRPC (slecht in browsers) |
-| Interne/externe bus | **In-process EventBus**; optionele **MQTT-brug (Mosquitto)** | Kern werkt zonder broker; MQTT voor Home Assistant en MQTT-apparaten | Broker verplicht maken (extra faalpunt) |
-| Windows-app | **Tauri 2** (Rust-shell + WebView2) | ~10 MB installer i.p.v. ~150 MB (Electron); zelfde webfrontend als de Pi-webinterface; Windows Credential Manager via plugin; ondertekende auto-updates | Electron (zwaar), WinUI/.NET (tweede UI-codebase) |
-| Webinterface | **React + TypeScript + Vite**, PWA, geserveerd door de Pi | Eén frontend-codebase voor Windows (Tauri), telefoon en tablet; light/dark/auto via CSS-variabelen + `prefers-color-scheme`; grafieken met uPlot/ECharts | Vue/Svelte (prima, minder ecosysteem voor dashboards) |
+| Optimizer | **MILP met HiGHS** (via `scipy.optimize.milp`) met een eigen dunne modelleerlaag | Binaire keuzes waar nodig (niet tegelijk laden/ontladen, netrichting, EV-minimumstroom); HiGHS is de snelste open-source MILP-solver, MIT-licentie, ARM64-wheels. 36 h × 15 min → typisch 0,03–0,3 s | Pyomo (zwaar, extra solver nodig), OR-Tools (groot, CP-SAT minder geschikt voor continue vermogens), PuLP+CBC (trager, CBC-binary op ARM lastiger) |
+| Communicatie app ↔ Pi | **REST (OpenAPI) + WebSocket** op het LAN (HTTP; HTTPS met `--tls-cert/--tls-key`) | REST voor configuratie/opdrachten, WebSocket voor live-data, planning en meldingen | gRPC (slecht in browsers) |
+| Interne/externe bus | **In-process EventBus**; MQTT alleen als bron (generieke MQTT-driver) | Kern werkt zonder broker | Broker verplicht maken (extra faalpunt) |
+| Windows-app | **Tauri 2** (Rust-shell + WebView2) met een eigen verbindingsscherm dat daarna de webinterface van de server laadt | Kleine app (enkele MB); geen tweede UI-codebase; app-instellingen (laatste server) lokaal | Electron (zwaar), WinUI/.NET (tweede UI-codebase) |
+| Webinterface | **Vanilla ES-modules zonder buildstap**, eigen SVG-grafieken, geserveerd door de server | Geen Node-toolchain op de Pi of in de Docker-build; strikte CSP (`script-src 'self'`); light/dark/auto via CSS-variabelen; één UI voor Windows, telefoon en tablet | React/TS + Vite (oorspronkelijk plan; extra buildketen zonder functionele winst voor deze omvang) |
 | Deployment | **Docker Compose** op Raspberry Pi OS Lite 64-bit | Reproduceerbaar, eenvoudige updates/rollback, volumes houden data en config bij updates | Bare-metal pip-installatie (lastiger updaten) |
 
 ## 3. Lagen en verantwoordelijkheden
@@ -40,23 +40,24 @@ Status per fase staat in [DEVELOPMENT.md](DEVELOPMENT.md).
 ```
             Windows-app (Tauri)        Telefoon / tablet (PWA)
                      \                    /
-                      HTTPS: REST + WebSocket          ← fase 2/3
+                      HTTP(S): REST + WebSocket
                                |
    ┌─────────────────────────── Raspberry Pi ────────────────────────────┐
    │ api/            FastAPI, auth, rate limiting, OpenAPI               │
    │ services/       history, export, back-up, notificaties, updates     │
    │ ─────────────────────────────────────────────────────────────────── │
-   │ core/engine     regelcyclus, fail-safe, watchdog, journal, events   │  ← fase 1
-   │ control/        controllers, overrides, CommandGate                 │  ← fase 1
-   │ optimizer/      rolling-horizon MILP → plan → OptimizerController   │  ← fase 6+
-   │ forecasting/    PV, verbruik, temperatuur, warmtevraag              │  ← fase 9
-   │ tariffs/        contract → get_import_price / get_export_price      │  ← fase 5
-   │ automations/    ALS/EN/OF/DAN/ANDERS-regels                         │  ← fase 10
+   │ core/engine     regelcyclus, fail-safe, watchdog, journal, events   │
+   │ control/        controllers, overrides, CommandGate                 │
+   │ optimizer/      rolling-horizon MILP → plan → OptimizingController  │
+   │ forecasting/    PV, verbruik, temperatuur, warmtevraag              │
+   │ tariffs/        contract → get_import_price / get_export_price      │
+   │ automations/    ALS/EN/OF/DAN/ANDERS-regels                         │
    │ ─────────────────────────────────────────────────────────────────── │
-   │ devices/        driver-interface, registry, DeviceManager           │  ← fase 1
-   │ integrations/   mock/ (fase 1), p1_dsmr/, generic_modbus/, ...      │
-   │ simulator/      fysiek model van een woning                         │  ← fase 1
-   │ database/       TimescaleDB/SQLite repositories                     │  ← fase 2
+   │ devices/        driver-interface, registry, DeviceManager           │
+   │ integrations/   homewizard/ dsmr/ generic/ (modbus,http,mqtt) mock/ │
+   │ simulator/      fysiek model van een woning                         │
+   │ gridmeter/      primaire netmeter, functiebeperking                 │
+   │ database/       SQLite (standaard) / PostgreSQL                     │
    └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -64,7 +65,7 @@ Afhankelijkheden lopen alleen naar beneden: `control` kent `core` en `devices`, 
 kent geen controllers. Integraties kennen alleen `core.models` en `devices.base`
 (mockdrivers daarnaast de simulator).
 
-## 4. De regelcyclus (fase 1, gebouwd)
+## 4. De regelcyclus
 
 Elke `control.interval_s` (standaard 10 s):
 
@@ -75,7 +76,7 @@ Elke `control.interval_s` (standaard 10 s):
    identiek is, geldt als bevroren.
 3. **Snapshot** — alle apparaten worden samengevoegd tot één `SiteSnapshot`
    (meerdere PV-velden/batterijen/EV's = één systeem; SOC capaciteitsgewogen).
-   De `grid_reference`-meter is de waarheid aan de aansluiting; huisverbruik wordt afgeleid.
+   De **primaire netmeter** (GridMeter, §7) is de waarheid aan de aansluiting; huisverbruik wordt afgeleid.
 4. **Gezondheid** — ontbreekt een betrouwbare netmeting langer dan `grid_stale_after_s`,
    of crasht de controller → **fail-safe**: alle apparaten `release_control()`, journaalregel,
    event. Herstel pas na `failsafe_recover_ticks` gezonde cycli.
@@ -85,9 +86,11 @@ Elke `control.interval_s` (standaard 10 s):
 7. **CommandGate** — de enige weg naar hardware:
    * `DRY_RUN` → niets uitvoeren, journaal "EMS zou …";
    * `SIMULATION_MODE` → alleen drivers met `manifest.simulated` worden beschreven;
+   * **inbedrijfstellingsniveau per apparaat** (§8): READ ONLY → niets, SHADOW → alleen journaal "EMS zou…",
+     LIMITED → begrensde opdrachten, FULL → alles;
    * dedupliceert (deadband per actie) en ververst periodiek (keep-alive voor Modbus-remote-control).
 8. **Journaal + events** — iedere verstuurde/proef-beslissing met `run_id`, oude/nieuwe waarde,
-   redenen, bron (controller/override/engine) en (vanaf fase 5/6) prijs en verwachte winst.
+   redenen, bron (controller/override/engine), prijs en verwacht voordeel.
 
 ### Fail-safe-lagen
 
@@ -96,10 +99,10 @@ Elke `control.interval_s` (standaard 10 s):
 | Apparaat traag/offline | timeout per apparaat; regelcyclus loopt door |
 | Netmeting weg / onrealistisch / bevroren | fail-safe na `grid_stale_after_s` |
 | Bug in strategie | exception → fail-safe |
-| Regelcyclus hangt | `Watchdog` (heartbeat) → vrijgeven; systemd `WatchdogSec` herstart de service (fase 2) |
+| Regelcyclus hangt | `Watchdog` (heartbeat) → vrijgeven; systemd `WatchdogSec` / Docker-healthcheck herstart de service |
 | Raspberry Pi crasht | hardware-watchdog herstart de Pi; apparaten draaien op eigen regeling; drivers gebruiken waar mogelijk **time-outs in het apparaat zelf** (remote-control vervalt automatisch) |
-| Internet/prijsdata weg | cache + laatst bekende planning; daarna regelgebaseerde zelfconsumptie (fase 5) |
-| Database weg | regelcyclus is onafhankelijk van de database; schrijven wordt gebufferd (fase 2) |
+| Internet/prijsdata weg | prijscache + schatting uit de afgelopen 7 dagen (gemarkeerd); geen plan → regelgebaseerde zelfconsumptie |
+| Database weg | regelcyclus is onafhankelijk van de database; historie-schrijffouten worden gelogd |
 
 ## 5. Tekenconventies en eenheden
 
@@ -124,52 +127,82 @@ weergave in de tijdzone van de locatie.
 
 Zie [DEVICE_INTEGRATION_GUIDE.md](DEVICE_INTEGRATION_GUIDE.md).
 
-## 7. Optimizer-ontwerp (fase 6, gepland)
+## 7. GridMeter — de primaire netmeter
 
-* Rolling horizon: elke `optimizer.interval_minutes` (5) een plan voor `horizon_hours` (36)
-  in stappen van `time_step_minutes` (15, gelijk aan de day-ahead-resolutie).
-* Doelfunctie: Σ (importprijs·import − exportprijs·export) + slijtage·doorvoer
-  + comfortstraf + eindwaarde van opgeslagen energie (voorkomt "leeg eindigen").
-* Beperkingen: energiebalans per stap, SOC-dynamiek met laad-/ontlaadrendement, min/max/reserve-SOC,
-  vermogenslimieten, netlimieten, fase-limieten (lineair benaderd), thermisch RC-model woning,
-  EV-vertrektijd/doel-SOC, max. cycli/dag.
-* Binair: laden XOR ontladen, warmtepomp aan/uit met min. loop-/stilstandtijd, EV ≥ minimumstroom.
-* Uitvoering: `OptimizerController` voert stap 1 uit; een snelle lokale regellus (zero-export,
-  fasebewaking) corrigeert afwijkingen binnen de stap. Solver-time-out/geen oplossing →
-  regelgebaseerde fallback.
-* Uitlegbaarheid: per beslissing de schaduwprijzen en het verschil met de "niets doen"-baseline
-  → "verwacht netto voordeel € 1,42".
-* Dezelfde optimizer + simulator vormen de backtester (fase 11).
+* Elke driver die als netmeter kan dienen, zet `manifest.grid_meter_kind`
+  (`homewizard_p1`, `dsmr`, `modbus`, `rest`, `mqtt`, `simulated`).
+* Selectie (`gridmeter.select_primary_grid_meter`): **expliciet gekozen** (rol `primary_grid_meter`)
+  → **HomeWizard P1** → **DSMR P1** → Modbus/REST/MQTT-meters worden alleen **aangeboden** (bevestiging door
+  de installateur) → **geen primaire netmeter**.
+* Zonder primaire netmeter: melding *"Geen primaire netmeter ingesteld. Sommige EMS-functies zijn beperkt."*;
+  `snap.features` schakelt zero-export, piekbegrenzing, fasebewaking en netgestuurde regeling uit.
+  De fail-safe op "netmeting weg" geldt alleen als er een primaire meter is.
+* Controllers en optimizer lezen alleen `snap.grid` / `snap.grid_power_w` — **nooit merken**.
 
-## 8. Data & historie (fase 2)
+## 8. Inbedrijfstelling (commissioning)
 
-* Live: ruwe meetwaarden elke 5–10 s → hypertable `measurements` (14 dagen bewaren).
-* Continuous aggregates: 1 min (1 jaar), 15 min en uur (onbeperkt).
-* Tabellen voor beslissingen, plannen, prognoses, prijzen, configuratieversies.
+Per apparaat een `control_level`, afgedwongen door de `CommandGate`:
+
+| Niveau | Effect |
+|---|---|
+| CONNECTION TEST | wizard: `self_test()` met ✓/✗ per functie, niets wordt gestuurd |
+| READ ONLY | apparaat wordt gelezen; opdrachten → `NOT_COMMISSIONED` |
+| SHADOW | optimizer/controllers draaien volledig; opdrachten → journaal "EMS zou …" (`SHADOW`) |
+| LIMITED | opdrachten geschaald naar `limited_fraction` (bijv. 30 % van het laadvermogen, PV nooit meer dan die fractie afregelen) |
+| FULL | volledige regeling |
+
+Nieuwe echte apparaten starten altijd op READ ONLY. Drivers zonder `write_capable` kunnen niet hoger dan SHADOW.
+
+## 9. Optimizer
+
+* Rolling horizon: elke 5 min (en bij triggers: nieuwe prijzen, override, grote afwijking) een plan voor
+  36 h in stappen van 15 min (`optimizer/model.py`, HiGHS).
+* Doelfunctie: Σ (importprijs·import − exportprijs·export) + slijtage·doorvoer + comfortstraf (slack)
+  − eindwaarde van opgeslagen energie; plus kleine tie-breakers ("eerder handelen", EV liever vroeg).
+* Beperkingen: energiebalans per stap; SOC-dynamiek met rendementen; min/max/reserve-SOC uit het
+  batterijprofiel (Battery Saver/Balanced/Profit/Aggressive); max. cycli per dag; netlimiet (aansluiting),
+  exportlimiet (zero/smart/onbeperkt), piekgrens; PV-curtailment; lineair RC-model van de woning met
+  comfortgrenzen; EV-vertrektijd/doel met minimumstroom.
+* Binaire variabelen alleen waar nodig; netladen lineair begrensd (zie ADR 8 in DEVELOPMENT.md).
+* Uitvoering: `OptimizingController` vertaalt het plan van het huidige kwartier naar apparaatopdrachten,
+  vergeleken met wat het apparaat in AUTO zelf zou doen (alleen ingrijpen als het plan echt afwijkt);
+  `ZeroExportRegulator` corrigeert in een gesloten lus; geen plan → `SelfConsumptionController`.
+* Uitlegbaarheid: per stap baseline-kosten ("zonder EMS") vs. plan → verwacht voordeel; elke beslissing
+  heeft redenen in het journaal.
+* Dezelfde optimizer + simulator vormen de backtester; Auto-Tune vergelijkt parametervarianten en past
+  alleen toe na expliciete keuze (APPLY).
+
+## 10. Data & historie
+
+* Ruwe samples (site + per apparaat) elke regelcyclus → 14 dagen; 15-minuten-aggregaten onbeperkt.
+* Beslissingen 365 dagen, meldingen 180 dagen, plannen 30 dagen; prijzen en prognoses gecachet.
+* Configuratieversies (wie, wanneer, waarom) in de database; YAML op schijf bevat geen geheimen.
 * Alles gesleuteld op `site_id` → multi-site zonder schemawijziging.
 
-## 9. Beveiliging (fase 2)
+## 11. Beveiliging
 
-* Alleen LAN; geen poorten naar internet. Toegang op afstand via WireGuard/Tailscale.
-* HTTPS met lokaal gegenereerde CA; de Windows-app pint de CA-vingerafdruk bij koppelen
-  (koppelcode/QR op de Pi).
-* Lokale gebruikers, Argon2id-wachtwoordhashes, korte JWT-access-tokens + roterende refresh-tokens.
-* Rollen: `viewer`, `operator` (overrides), `admin` (instellingen), `installer` (apparaten/drivers).
-* API-tokens met scope voor integraties (alleen gehasht opgeslagen).
-* Apparaatwachtwoorden/API-sleutels versleuteld (Fernet) met een sleutel buiten de database
-  (`0600`-bestand of systemd-credentials); in config alleen `${VARIABELE}`-verwijzingen.
-* Bearer-tokens in de `Authorization`-header (geen cookies) → geen CSRF-vector; strikte CSP tegen XSS;
-  rate limiting op login en schrijvende endpoints.
+* Alleen LAN; geen poorten naar internet. Toegang op afstand via VPN (WireGuard/Tailscale).
+* Optioneel HTTPS (`ems serve --tls-cert --tls-key`, of een reverse proxy).
+* Lokale gebruikers met scrypt-wachtwoordhashes; JWT-access-tokens (12 h) in de `Authorization`-header
+  (geen cookies → geen CSRF); API-tokens `ems_…` alleen gehasht opgeslagen; login-rate-limit.
+* Rollen: `viewer` < `operator` (overrides) < `admin` (instellingen, back-up) < `installer` (apparaten).
+* Geheimen (JWT-sleutel, apparaattokens, in de wizard ingevulde wachtwoorden) versleuteld (Fernet) in
+  `secrets.enc` met sleutel `secret.key` (0600); in de configuratie alleen `${VAR}` (`.env`) of
+  `secret:<naam>`.
+* Strikte CSP (`script-src 'self'`), `nosniff`, `no-referrer`; CORS alleen voor de Windows-app-origin.
+* HomeWizard: HTTPS met de officiële HomeWizard-CA en hostnaamcontrole `appliance/p1dongle/<serienummer>`.
 
-## 10. Deployment & updates (fase 2)
+## 12. Deployment & updates
 
-* Docker Compose: `ems-core`, `timescaledb`, optioneel `mosquitto`, reverse proxy met TLS.
-* Volumes voor `/var/lib/ems` (database, config, sleutels, back-ups).
-* Updates: versie-images, vóór de update automatische back-up, database-migraties (Alembic),
-  health-check na start, automatische rollback bij falen. Configuratie en historie blijven behouden.
-* Back-up/restore: één archief (config + database-dump + sleutels, versleuteld) → verhuizen naar een nieuwe Pi.
+* Docker-image (python:3.12-slim, niet-root uid 1000, groep `dialout` voor P1-kabels), amd64 + arm64.
+* `docker-compose.yml`: host-netwerk (nodig voor mDNS-discovery), volume `ems-data`, healthcheck,
+  logrotatie, optioneel profiel `postgres`.
+* `install.sh update`: back-up → image taggen als `previous` → bouwen/starten → healthcheck →
+  automatische rollback. Databasemigraties draaien bij het starten.
+* Zonder Docker: systemd-unit met `Type=notify` en `WatchdogSec`.
+* Windows: PyInstaller-server (optioneel, voor test/Demo Mode) + Tauri-app in één Inno Setup-installer.
 
-## 11. Multi-site
+## 13. Multi-site
 
-Elke configuratie heeft een `site.id`; snapshots, journaal en (straks) database-records dragen die id.
-Een tweede locatie = een tweede `EMSConfig` + engine-instantie (`SiteRuntime`), onder dezelfde API.
+Elke configuratie heeft een `site.id`; snapshots, journaal en database-records dragen die id.
+Een tweede locatie = een tweede `EMSConfig` + runtime-instantie onder dezelfde API (nog niet gebouwd).

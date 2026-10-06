@@ -49,7 +49,7 @@ async function addWizard(root, cats, preset) {
       const n = drivers.filter((d) => d.categories.includes(c.id) && d.available_in_mode).length;
       return h("button", { class: "btn", disabled: n === 0, title: n ? "" : "nog geen driver beschikbaar",
         onclick: () => { wiz.category = c.id; stepDriver(); } }, c.label, n ? "" : " (nog geen driver)");
-    })), h("p", { class: "muted small" }, "Ontbreekt uw merk? Drivers worden alleen gebouwd op basis van officiële documentatie; tot dan kunt u in Demo Mode een gesimuleerd apparaat gebruiken."));
+    })), h("p", { class: "muted small" }, "Ontbreekt uw merk? Met de generieke Modbus TCP-, HTTP/JSON- of MQTT-driver leest u waarden uit volgens de handleiding van het apparaat. Merkspecifieke (sturende) drivers worden alleen gebouwd op basis van officiële documentatie."));
   };
   const stepDriver = () => {
     setSteps(1);

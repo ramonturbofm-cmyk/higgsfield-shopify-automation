@@ -119,3 +119,6 @@ class GenericHTTPJSONDriver(DeviceDriver):
 
     async def release_control(self) -> None:
         return None
+
+    def diagnostics(self) -> dict[str, Any]:
+        return dict(self.diag)

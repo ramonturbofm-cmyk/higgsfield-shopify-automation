@@ -10,9 +10,9 @@ DSMR P1 Companion Standard, OCPP, EEBus, SG Ready).
 
 * Leg de bron vast in `manifest.documentation` (titel, versie, URL/document-id).
 * Zet `verified=True` pas nadat de driver tegen echte hardware is getest (model + firmware noteren).
-* Onbekend of niet gedocumenteerd? Dan **geen** driver gokken. Gebruik `mock.*`, of (vanaf fase 4)
-  een generieke driver (`generic_modbus`, `generic_mqtt`, `generic_rest`) waarin de *gebruiker*
-  zelf de mapping invult vanuit zijn eigen documentatie.
+* Onbekend of niet gedocumenteerd? Dan **geen** driver gokken. Gebruik `mock.*` (alleen Demo Mode), of
+  een generieke driver (`generic.modbus_tcp`, `generic.http_json`, `generic.mqtt`, §8) waarin de
+  *installateur* zelf de mapping invult vanuit de eigen documentatie van het apparaat.
 * Lokale interfaces hebben voorkeur boven cloud-API's.
 
 ## 1. Begrippen
@@ -36,7 +36,7 @@ backend/ems/integrations/<leverancier_of_protocol>/
 ├── driver.py            # DeviceDriver-subklasse(n)
 ├── protocol.py          # register-/endpointdefinities MET bronvermelding
 └── README.md            # ondersteunde modellen, firmware, documentatiebron, beperkingen
-tests/integrations/test_<naam>.py
+tests/test_<naam>.py
 ```
 
 Alles onder `ems.integrations` wordt automatisch gevonden. Drivers van derden kunnen ook als los
@@ -146,14 +146,61 @@ Leescapabilities worden echt uitgelezen; stuurcapabilities worden in de test **n
 
 ## 7. Status van integraties
 
-| Integratie | Status | Nodig om te bouwen |
-|---|---|---|
-| `mock.*` (meter, PV, batterij, warmtepomp, laadpaal) | ✅ fase 1 | — |
-| P1 / DSMR slimme meter | gepland fase 4 | publieke DSMR P1 Companion Standard; type aansluiting (USB-kabel, P1-dongle met lokale API) |
-| `generic_modbus` / `generic_mqtt` / `generic_rest` | gepland fase 4/7 | gebruiker levert mapping uit eigen documentatie |
-| Omvormers/batterijen (bijv. Solis, Growatt, Deye, Sungrow, Victron, SMA, Fronius, GoodWe, Enphase) | niet geïmplementeerd | per apparaat: exact model, firmware, gekozen interface en de officiële protocol­documentatie |
-| Warmtepompen (SG Ready, Modbus, fabrikant-API, Home Assistant) | niet geïmplementeerd | idem; SG Ready vereist geschikte schakelhardware (relais) |
-| Laadpalen (OCPP, Modbus, lokale API) | niet geïmplementeerd | idem |
+Legenda teststatus: UNIT = geautomatiseerde tests met nagebootst apparaat; SIMULATOR = in de woningsimulator;
+HARDWARE = getest met een echt apparaat.
 
-Zodra we een echte driver gaan bouwen, vraag ik per apparaat: merk, exact model, firmwareversie,
-beschikbare lokale interface(s) en de officiële documentatie.
+| Integratie | Driver-id | Lezen | Sturen | Teststatus |
+|---|---|---|---|---|
+| Mockapparaten (meter, PV, batterij, warmtepomp, laadpaal) | `mock.*` | ✓ | ✓ (simulatie) | UNIT, SIMULATOR — alleen in Demo Mode |
+| HomeWizard P1-meter (API v1 en v2) | `homewizard.p1` | ✓ net, fasen, meterstanden | n.v.t. | UNIT (TLS-fake volgens de officiële API-docs) — **niet HARDWARE** |
+| Slimme meter via P1-poort (DSMR 2.2–5) | `dsmr.p1` | ✓ net, fasen, meterstanden | n.v.t. | UNIT (telegrammen uit de standaard) — **niet HARDWARE** |
+| Generiek Modbus TCP | `generic.modbus_tcp` | ✓ volgens mapping | ✗ (bewust) | UNIT (fake server volgens de Modbus-spec) — **niet HARDWARE** |
+| Generiek HTTP/JSON | `generic.http_json` | ✓ volgens mapping | ✗ (bewust) | UNIT — **niet HARDWARE** |
+| Generiek MQTT | `generic.mqtt` | ✓ volgens mapping | ✗ (bewust) | UNIT + echte Mosquitto-broker — **niet HARDWARE** |
+| Omvormers/batterijen (bijv. Solis, Growatt, Deye, Sungrow, Victron, SMA, Fronius, GoodWe, Enphase) | — | via generieke driver | ✗ | niet geïmplementeerd: model, firmware, interface en officiële documentatie nodig |
+| Warmtepompen (SG Ready, Modbus, fabrikant-API) | — | via generieke driver | ✗ | idem; SG Ready vereist geschikte schakelhardware (relais) |
+| Laadpalen (OCPP, Modbus, lokale API) | — | via generieke driver | ✗ | idem |
+
+Bronnen: HomeWizard — officiële API-documentatie (api-documentation.homewizard.com, API v1 en v2;
+geraadpleegde versie in `integrations/homewizard/__init__.py`). Licentie: de HomeWizard-API is bedoeld
+voor persoonlijk, niet-commercieel gebruik. DSMR — Netbeheer Nederland, P1 Companion Standard 5.0.2.
+Modbus — Modbus Organization, Application Protocol V1.1b3 en Messaging on TCP/IP V1.0b.
+
+Zodra we een echte (schrijvende) driver gaan bouwen, is per apparaat nodig: merk, exact model,
+firmwareversie, beschikbare lokale interface(s) en de officiële documentatie.
+
+## 8. Generieke drivers (zonder eigen code)
+
+Voor apparaten met een gedocumenteerde Modbus-, HTTP- of MQTT-interface kunt u waarden uitlezen
+zonder een driver te schrijven. In de wizard vult u een **waardetoewijzing** (JSON-lijst) in. Elke regel:
+
+| Veld | Betekenis |
+|---|---|
+| `metric` | EMS-meetwaarde, bijv. `grid_power_w`, `grid_current_l1_a`, `pv_power_w`, `battery_soc_pct` (zie `Metric` in `core/models.py`) |
+| `scale`, `offset` | omrekening: waarde = ruw × scale + offset (bijv. 0,1 voor "0,1 A per eenheid", 1000 voor kW → W) |
+| `invert` | teken omdraaien als het apparaat een andere tekenconventie gebruikt (EMS: net + = afname, batterij + = laden) |
+
+Als alleen `grid_import_power_w` en `grid_export_power_w` zijn ingesteld, berekent het EMS
+`grid_power_w` = import − export.
+
+**Modbus TCP** (`generic.modbus_tcp`): `host`, `port` (502), `unit_id`; per regel `address`
+(protocoladres, 0-gebaseerd), `function` (`holding` = functie 3, `input` = functie 4), `type`
+(`uint16`, `int16`, `uint32`, `int32`, `float32`, `uint64`, `int64`) en `word_order` (`big`/`little`).
+Let op: handleidingen noemen vaak referenties als 40001/30001; protocoladres = referentie − 40001 (holding)
+of − 30001 (input), tenzij de handleiding al 0-gebaseerde adressen geeft.
+
+```json
+[{"metric": "grid_power_w", "function": "holding", "address": 70, "type": "int32", "scale": 1},
+ {"metric": "grid_voltage_l1_v", "function": "holding", "address": 72, "type": "float32"}]
+```
+*(adressen in dit voorbeeld zijn fictief — neem ze over uit uw eigen handleiding)*
+
+**HTTP/JSON** (`generic.http_json`): `url`, optioneel `auth_header` + `auth_token`, `verify_tls`;
+per regel `path` (punt-notatie, lijstindex als getal: `meters.0.power`).
+
+**MQTT** (`generic.mqtt`): `host`, `port`, optioneel `username`/`password`/`tls`, `stale_after_s`;
+per regel `topic` en optioneel `path` binnen een JSON-payload (zonder `path`: payload is de waarde).
+
+Generieke drivers **schrijven nooit**: ze kunnen tot en met schaduwmodus worden ingezet. Een generieke
+meter kan als primaire netmeter worden gekozen (wordt aangeboden, niet automatisch gekozen).
+Wachtwoorden en tokens die u in de wizard invult, worden versleuteld opgeslagen en nooit in de YAML gezet.
