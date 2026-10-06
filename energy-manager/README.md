@@ -104,3 +104,21 @@ en optimizer-validatie hem als bibliotheek gebruiken.
 Het EMS verschuift alleen setpoints; elk apparaat behoudt zijn eigen veilige regeling.
 Bij ontbrekende of onbetrouwbare netmeting, een fout in de strategie of een vastgelopen regelcyclus
 geeft het EMS alle apparaten vrij. Laat de EMS-poorten nooit openstaan naar internet.
+
+## Windows-installer
+
+Voor Windows is er een eenvoudige installer (`EnergyManager-Setup-<versie>.exe`) en een draagbare
+`EnergyManager.exe`. Na het starten opent de browser met de Energy Manager-pagina: kies een periode,
+klik **Simuleren** en bekijk het rapport met grafieken, vergelijking met/zonder EMS en de uitleg van
+elke beslissing. Sluit het zwarte venster om te stoppen.
+
+* Installeren vereist geen beheerdersrechten (installeert in `%LOCALAPPDATA%\Programs`).
+* Instellingen en simulaties staan in `%LOCALAPPDATA%\EnergyManager` (blijven behouden bij updates).
+* De exe is (nog) niet digitaal ondertekend: Windows SmartScreen toont daarom "Onbekende uitgever" →
+  *Meer informatie* → *Toch uitvoeren*.
+
+Bouwen: automatisch via GitHub Actions (`.github/workflows/energy-manager-windows.yml`, artifact
+*EnergyManager-Windows*), of zelf op Windows met `.\windows\build.ps1`.
+
+Dit is in fase 1 een **simulatieversie**. De volwaardige Windows-app (dashboard, wizard, live
+apparaten) volgt in fase 3 en praat dan met de Raspberry Pi.

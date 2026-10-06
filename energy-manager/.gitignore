@@ -6,3 +6,6 @@ __pycache__/
 data/
 out/
 .env
+dist/
+build/
+.venv-build/

@@ -37,6 +37,16 @@ Laatst bijgewerkt: fase 1 afgerond.
 * 62 tests: config, validatie, natuurkunde (energiebalans, rendementen, comfort, min. looptijd),
   drivers/registry, controller-logica, engine/fail-safe/storingen, end-to-end-simulaties, CLI.
 
+## Tussenstap — Windows-installer (simulatieversie)
+
+* `ems/report.py`: zelfstandig HTML-rapport (grafieken met hover, KPI's, vergelijking, beslissingen;
+  light/dark, gevalideerd kleurenpalet).
+* `ems/desktop/app.py`: lokale webapp op 127.0.0.1 (token + Origin-controle tegen cross-site verzoeken),
+  `--selftest` voor de buildpipeline.
+* `windows/`: PyInstaller-spec, Inno Setup-script (per-gebruiker, Nederlands), `build.ps1`.
+* GitHub Actions bouwt en test op `windows-latest` en levert installer + draagbare exe als artifact.
+* Niet ondertekend (SmartScreen-waarschuwing); code signing later.
+
 ## Architectuurbesluiten (ADR-log)
 
 1. **Python/asyncio-kern, Pydantic-config** — zie ARCHITECTURE §2.
@@ -56,6 +66,8 @@ Laatst bijgewerkt: fase 1 afgerond.
    in Tauri + PWA** — onderbouwing in ARCHITECTURE §2.
 9. **Gebruikersteksten in het Nederlands, code/identifiers in het Engels**; tijden intern UTC,
    weergave in de tijdzone van de locatie.
+10. **Tijdelijke Windows-launcher = lokale webpagina** i.p.v. tkinter: dezelfde richting als de
+   uiteindelijke webfrontend, volledig te testen zonder Windows, en geen extra GUI-toolkit in de bundel.
 
 ## Bekende problemen / beperkingen
 
