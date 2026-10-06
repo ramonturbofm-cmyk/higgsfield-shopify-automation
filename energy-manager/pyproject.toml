@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "energy-manager"
+version = "0.1.0"
+description = "Universeel, vooruitkijkend Energy Management System voor Raspberry Pi / Linux"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.6",
+    "PyYAML>=6.0",
+    "tzdata",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+ems-sim = "ems.simulator.__main__:main"
+
+[project.entry-points."ems.drivers"]
+# Third-party driver packages register here, e.g.:
+# my_vendor = "my_package.driver_module"
+
+[tool.setuptools.packages.find]
+where = ["backend"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["backend"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 130
+src = ["backend", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "I", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ems", "conftest"]

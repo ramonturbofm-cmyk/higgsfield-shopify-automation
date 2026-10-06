@@ -1,0 +1,99 @@
+# Energy Manager — voorbeeldconfiguratie (volledig gesimuleerde woning).
+# Kopieer naar config/ems.yaml en pas aan. Geheimen NOOIT hier invullen:
+# gebruik ${OMGEVINGSVARIABELE} en zet de waarde in .env.
+version: 1
+
+runtime:
+  simulation_mode: true      # overschrijfbaar met SIMULATION_MODE=true/false
+  dry_run: false             # overschrijfbaar met DRY_RUN=true/false
+  data_dir: data
+  log_level: INFO
+
+site:
+  id: home
+  name: Woning
+  latitude: 52.09
+  longitude: 5.12
+  timezone: Europe/Amsterdam
+
+grid:
+  phases: 3
+  ampere_per_phase: 25
+  max_import_kw: 17
+  max_export_kw: 17
+  phase_safety_margin_pct: 5
+
+control:
+  interval_s: 10
+  grid_stale_after_s: 30
+
+optimizer:
+  interval_minutes: 5
+  horizon_hours: 36
+  time_step_minutes: 15
+
+battery:
+  min_soc: 10
+  max_soc: 95
+  reserve_soc: 15
+  degradation_cost_per_kwh: 0.04
+  min_arbitrage_spread_eur: 0.10
+  wear_mode: balanced
+
+heatpump:
+  comfort_temperature: 21.0
+  min_temperature: 20.5
+  max_preheat_temperature: 22.0
+
+strategy:
+  profile: maximum_self_consumption
+  export_mode: unlimited
+  surplus_priority: [battery, flexible, heat_pump, boiler, ev]
+
+devices:
+  - id: p1
+    name: Slimme meter
+    category: smart_meter
+    driver: mock.smart_meter
+    role: grid_reference
+
+  - id: pv_roof
+    name: PV dak woning
+    category: pv_inverter
+    driver: mock.pv_inverter
+    params:
+      sim: {peak_power_kw: 6.0, azimuth_deg: 180}
+
+  - id: pv_shed
+    name: PV schuur
+    category: pv_inverter
+    driver: mock.pv_inverter
+    phase: L2
+    params:
+      sim: {peak_power_kw: 2.4, azimuth_deg: 250}
+
+  - id: battery_1
+    name: Thuisbatterij
+    category: battery
+    driver: mock.battery
+    params:
+      capacity_kwh: 10.0
+      sim: {max_charge_w: 5000, max_discharge_w: 5000, soc_pct: 40}
+
+  - id: heatpump
+    name: Warmtepomp
+    category: heat_pump
+    driver: mock.heat_pump
+    phase: L1
+    params:
+      sim: {thermal_max_w: 6000, heat_loss_w_per_k: 150}
+
+  - id: ev_charger
+    name: Laadpaal oprit
+    category: ev_charger
+    driver: mock.ev_charger
+    params:
+      charge_mode: pv_only      # pv_only | min_pv | max | off
+      min_current_a: 6
+      max_current_a: 16
+      sim: {battery_kwh: 60, arrival_soc_pct: 40, arrive: "12:30", depart: "07:30", max_current_a: 16}
