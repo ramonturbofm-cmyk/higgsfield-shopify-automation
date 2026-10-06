@@ -4,8 +4,9 @@ Per slot t (length dt hours), powers in W, energy in kWh:
   balance   pv_use + g_imp + b_dis = load + b_ch + sum(ev) + hp + g_exp
   battery   soc_t = soc_{t-1} + eta_c*b_ch*dt - b_dis*dt/eta_d,  reserve <= soc <= max
             b_ch <= Pc*y_b,  b_dis <= Pd*(1-y_b)                  (no simultaneous charge/discharge)
-            b_grid >= min(b_ch, g_imp)  via binary w: b_grid >= b_ch - Pc*w, b_grid >= g_imp - Imax*(1-w)
-            (PV serves the house first, so while importing all charging beyond PV surplus is grid energy)
+            b_grid >= b_ch - max(0, pv_t - load_t)   (charging beyond the forecast PV surplus is grid
+            energy; linear on purpose — an exact min(b_ch, g_imp) needs a binary per slot and made the
+            solve 10x slower)
   grid      g_imp <= Imax*y_g, g_exp <= Emax*(1-y_g), g_exp <= export_limit_t
   house     T_t = T_{t-1} + dt/C*(COP_t*hp - H*(T_{t-1}-Tout_t) + gains_t)
             T_t <= Tmax, T_t + s_min >= Tmin, T_t + s_comf >= Tcomfort
@@ -167,7 +168,7 @@ class _Model:
         A = coo_matrix((self.vals, (self.rows, self.cols)), shape=(len(self.clb), n)).tocsr()
         return milp(np.array(self.c), constraints=LinearConstraint(A, self.clb, self.cub),
                     integrality=np.array(self.integer), bounds=Bounds(self.lb, self.ub),
-                    options={"time_limit": time_limit, "mip_rel_gap": 1e-3, "disp": False})
+                    options={"time_limit": time_limit, "mip_rel_gap": 5e-3, "disp": False})
 
 
 def heat_pump_reference_w(hp: HeatPumpModel, t: int) -> float:
@@ -222,17 +223,25 @@ def solve(inp: OptimizerInput) -> Plan:
     ge = m.var(T, 0, [min(inp.max_export_w, max(0.0, e)) for e in exp_lim], [-p * kw for p in inp.export_price])
     pv_lb = [0.0 if inp.curtailable else p for p in inp.pv_w]
     pvu = m.var(T, pv_lb, inp.pv_w, -1e-5)            # tiny preference for using PV
-    yg = m.var(T, 0, 1, 0, integer=True)
+    # Binaries only where they change the answer (keeps the MILP small and fast):
+    #  - import XOR export: only if exporting pays more than importing costs
+    #  - charge XOR discharge: only if energy has a negative value (negative prices)
+    need_yg = [inp.export_price[t] > inp.import_price[t] - 1e-9 for t in range(T)]
+    need_yb = [inp.import_price[t] < 0 or inp.export_price[t] < 0 for t in range(T)]
+    yg = m.var(T, 0, [1 if n else 0 for n in need_yg], 0, integer=True)
 
     wear = 0.0
     if b:
         wear = b.degradation_eur_kwh * WEAR_MULTIPLIER.get(inp.wear_mode, 1.0)
-        bc = m.var(T, 0, b.max_charge_w, wear / 2 * kw)
-        bd = m.var(T, 0, b.max_discharge_w, wear / 2 * kw)
+        # Tie-breaker: when prices are equal, act earlier (charge earlier AND discharge earlier) —
+        # nearer slots are more certain and the plan is re-optimized anyway. At most
+        # 1e-6 EUR/kWh per slot (< 0.00015 EUR/kWh over 144 slots): never beats a real price difference.
+        tie = [1e-6 * t * kw for t in range(T)]
+        bc = m.var(T, 0, b.max_charge_w, [wear / 2 * kw + tie[t] for t in range(T)])
+        bd = m.var(T, 0, b.max_discharge_w, [wear / 2 * kw + tie[t] for t in range(T)])
         soc = m.var(T, b.min_kwh, b.max_kwh)
         bg = m.var(T, 0, b.max_charge_w if b.grid_charging else 0.0, b.min_spread_eur_kwh * kw)
-        yb = m.var(T, 0, 1, 0, integer=True)
-        wg = m.var(T, 0, 1, 0, integer=True)
+        yb = m.var(T, 0, [1 if n else 0 for n in need_yb], 0, integer=True)
     hp_el = tin = s_comf = s_min = None
     if hp:
         hp_el = m.var(T, 0, hp.max_electric_w)
@@ -244,7 +253,7 @@ def solve(inp: OptimizerInput) -> Plan:
         cap = [e.max_w if e.available[t] else 0.0 for t in range(T)]
         if e.pv_only_cap_w is not None:
             cap = [min(c, max(0.0, e.pv_only_cap_w[t])) for t, c in enumerate(cap)]
-        p = m.var(T, 0, cap, 1e-6)
+        p = m.var(T, 0, cap, [1e-8 * (t + 1) for t in range(T)])   # tie-breaker: charge the car earlier
         z = m.var(T, 0, [1 if c >= e.min_w else 0 for c in cap], 0, integer=True)
         short = m.var(1, 0, np.inf, 2.0)[0]           # EUR/kWh not delivered by the deadline
         ev_vars.append((e, p, z, short))
@@ -261,18 +270,19 @@ def solve(inp: OptimizerInput) -> Plan:
         for _, p, _, _ in ev_vars:
             terms.append((p[t], -1))
         m.con(terms, inp.load_w[t], inp.load_w[t])
-        m.con([(gi[t], 1), (yg[t], -inp.max_import_w)], hi=0)
-        m.con([(ge[t], 1), (yg[t], inp.max_export_w)], hi=inp.max_export_w)
+        if need_yg[t]:
+            m.con([(gi[t], 1), (yg[t], -inp.max_import_w)], hi=0)
+            m.con([(ge[t], 1), (yg[t], inp.max_export_w)], hi=inp.max_export_w)
         if peak is not None:
             m.con([(gi[t], 1), (peak[t], -1)], hi=inp.peak_limit_w)
         if b:
             prev = [] if t == 0 else [(soc[t - 1], -1)]
             rhs = b.soc_kwh if t == 0 else 0.0
             m.con([(soc[t], 1), *prev, (bc[t], -b.eta_charge * kw), (bd[t], kw / b.eta_discharge)], rhs, rhs)
-            m.con([(bc[t], 1), (yb[t], -b.max_charge_w)], hi=0)
-            m.con([(bd[t], 1), (yb[t], b.max_discharge_w)], hi=b.max_discharge_w)
-            m.con([(bg[t], 1), (bc[t], -1), (wg[t], b.max_charge_w)], lo=0)
-            m.con([(bg[t], 1), (gi[t], -1), (wg[t], -inp.max_import_w)], lo=-inp.max_import_w)
+            if need_yb[t]:
+                m.con([(bc[t], 1), (yb[t], -b.max_charge_w)], hi=0)
+                m.con([(bd[t], 1), (yb[t], b.max_discharge_w)], hi=b.max_discharge_w)
+            m.con([(bg[t], 1), (bc[t], -1)], lo=-max(0.0, inp.pv_w[t] - inp.load_w[t]))
             if not b.grid_export:
                 m.con([(ge[t], 1), (pvu[t], -1)], hi=0)
         if hp:

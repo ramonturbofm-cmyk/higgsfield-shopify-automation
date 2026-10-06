@@ -64,15 +64,17 @@ class OptimizingController(Controller):
 
     # --------------------------------------------------------------- battery
     def _battery_action(self, slot: dict) -> tuple[CommandAction, float | None, str]:
+        """Map the planned battery power onto a device mode by comparing it with what the
+        battery's own self-consumption mode (AUTO) would do in that slot."""
         planned = slot["battery_w"]
-        grid_charge = slot.get("battery_grid_charge_w", 0.0)
         ev = sum((slot.get("ev_w") or {}).values())
         surplus = slot["pv_w"] - slot["load_w"] - (slot.get("hp_w") or 0.0) - ev
-        if planned > 200 and grid_charge > 200:
-            return CommandAction.BATTERY_CHARGE, round(planned, -1), "grid_charge"
-        if planned < -200 and slot["grid_w"] < -200:
+        auto = surplus                     # AUTO absorbs surplus / covers deficit
+        if planned > 200 and planned > auto + 300:
+            return CommandAction.BATTERY_CHARGE, round(planned, -1), "grid_charge" if auto <= 0 else "charge"
+        if planned < -200 and planned < auto - 300:
             return CommandAction.BATTERY_DISCHARGE, round(-planned, -1), "export"
-        if abs(planned) < 100 and abs(surplus) > 200:
+        if abs(planned) < 100 and abs(auto) > 200:
             return CommandAction.BATTERY_STANDBY, None, "hold"
         return CommandAction.BATTERY_AUTO, None, "self_consumption"
 
@@ -98,6 +100,7 @@ class OptimizingController(Controller):
             reasons.append(f"Verwacht netto voordeel planning t.o.v. zonder EMS: {_eur(benefit)}")
         summary = {
             "grid_charge": f"Batterij laadt met {(value or 0) / 1000:.1f} kW uit het net",
+            "charge": f"Batterij laadt met {(value or 0) / 1000:.1f} kW",
             "export": f"Batterij ontlaadt met {(value or 0) / 1000:.1f} kW (ook naar het net)",
             "hold": "Batterij bewaart haar lading (stand-by)",
             "self_consumption": "Batterij in zelfconsumptie",

@@ -40,6 +40,13 @@ async def test_public_info_and_auth(env):
     assert (await c.get("/api/v1/auth/me")).json()["role"] == "installer"
     assert (await anon.get("/healthz")).json()["ok"] is True
     assert (await anon.get("/api/openapi.json")).status_code == 200
+    # Windows app (tauri.localhost) may probe the LAN server; other origins get no CORS grant.
+    pre = await anon.options("/api/v1/system/info", headers={
+        "Origin": "http://tauri.localhost", "Access-Control-Request-Method": "GET",
+        "Access-Control-Request-Private-Network": "true"})
+    assert pre.status_code == 200 and pre.headers["access-control-allow-private-network"] == "true"
+    other = await anon.get("/api/v1/system/info", headers={"Origin": "http://evil.example"})
+    assert "access-control-allow-origin" not in other.headers
     await anon.aclose()
 
 

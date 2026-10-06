@@ -46,7 +46,9 @@ def create_app(runtime: EMSRuntime, *, start_runtime: bool = True, loops: bool =
     app.state.runtime = runtime
     app.state.login_limiter = LoginRateLimiter()
     app.add_middleware(CORSMiddleware, allow_origins=TAURI_ORIGINS, allow_methods=["GET", "POST", "PUT", "DELETE"],
-                       allow_headers=["Authorization", "Content-Type"])
+                       allow_headers=["Authorization", "Content-Type"],
+                       # The app page (tauri.localhost) loads a LAN server: Private Network Access preflight.
+                       allow_private_network=True)
 
     @app.middleware("http")
     async def security_headers(request, call_next):

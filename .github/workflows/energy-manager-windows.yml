@@ -1,4 +1,4 @@
-name: Energy Manager — Windows build
+name: Energy Manager — Windows installer
 
 on:
   push:
@@ -13,6 +13,7 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
+    timeout-minutes: 60
     defaults:
       run:
         shell: pwsh
@@ -24,21 +25,38 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: energy-manager/windows-app/src-tauri -> target
+
+      - name: Install Python packages
+        run: python -m pip install ".[dev]" pyinstaller
+
+      - name: Tests (Windows)
+        run: python -m pytest -q --timeout 300 -p no:warnings
+
+      - name: Build EMS server (PyInstaller)
+        run: pyinstaller --noconfirm --clean --distpath dist --workpath build windows/EnergyManagerServer.spec
+
+      - name: Server selftest
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install . pyinstaller pytest pytest-asyncio
+          .\dist\EnergyManagerServer\EnergyManagerServer.exe --selftest
+          if ($LASTEXITCODE -ne 0) { throw "server selftest failed" }
 
-      - name: Tests (on Windows)
-        run: python -m pytest -q
-
-      - name: Build EnergyManager.exe
-        run: pyinstaller --noconfirm --clean --distpath dist --workpath build windows/EnergyManager.spec
-
-      - name: Smoke test exe
+      - name: Build Windows app (Tauri)
+        working-directory: energy-manager/windows-app
         run: |
-          .\dist\EnergyManager.exe --selftest --data-dir "$env:RUNNER_TEMP\ems-selftest"
-          if ($LASTEXITCODE -ne 0) { throw "selftest failed" }
+          npm install --no-audit --no-fund
+          npx tauri icon app-icon.png
+          npx tauri build --no-bundle
+          New-Item -ItemType Directory -Force ..\dist\app | Out-Null
+          Copy-Item "src-tauri\target\release\energy-manager.exe" "..\dist\app\Energy Manager.exe" -Force
 
       - name: Build installer (Inno Setup)
         run: |
@@ -52,6 +70,5 @@ jobs:
         with:
           name: EnergyManager-Windows
           path: |
-            energy-manager/dist/EnergyManager-Setup-*.exe
-            energy-manager/dist/EnergyManager.exe
+            energy-manager/dist/EnergyManagerSetup-*.exe
           if-no-files-found: error

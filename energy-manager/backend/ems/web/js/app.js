@@ -46,6 +46,13 @@ function renderSidebar(active) {
         h("span", { "aria-hidden": "true" }, n[2]), n[1]))));
 }
 
+// Inside the Windows app the connect screen passes its own URL so we can link back.
+const APP_HOME = (() => {
+  const q = new URLSearchParams(location.search).get("app");
+  if (q) { try { sessionStorage.setItem("ems.app", q); } catch { /* ignore */ } return q; }
+  try { return sessionStorage.getItem("ems.app"); } catch { return null; }
+})();
+
 function renderTopbar(title) {
   const bar = document.getElementById("topbar");
   if (title !== undefined) bar.dataset.title = title;
@@ -71,6 +78,7 @@ function renderTopbar(title) {
       { auto: "◐ Auto", light: "☀ Licht", dark: "☾ Donker" }[theme]),
     state.user ? h("span", { class: "pill", title: `rol: ${state.role}` }, state.user) : null,
     state.user ? h("button", { class: "btn sm", onclick: () => { disconnectWs(); logout(); } }, "Uitloggen") : null,
+    APP_HOME && /^(tauri:|https?:\/\/tauri\.localhost)/.test(APP_HOME) ? h("a", { class: "btn sm", href: `${APP_HOME}?choose=1` }, "Andere server") : null,
   );
 }
 

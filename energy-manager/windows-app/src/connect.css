@@ -1,0 +1,13 @@
+:root{color-scheme:light dark;--bg:#fcfcfb;--panel:#fff;--border:#e4e3df;--text:#0b0b0b;--muted:#6f6e69;--accent:#2a78d6;--err:#c53030;--ok:#1f8a4c}
+@media (prefers-color-scheme:dark){:root{--bg:#1a1a19;--panel:#222221;--border:#383835;--text:#fff;--muted:#a9a89f;--accent:#3987e5;--err:#ef6b6b;--ok:#4cc27c}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 "Segoe UI",system-ui,sans-serif}
+.wrap{max-width:720px;margin:6vh auto;padding:0 20px}.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px}
+.brand img{width:32px;height:32px}h1{font-size:24px;margin:22px 0 6px}h2{font-size:16px;margin:0}
+.muted{color:var(--muted)}.small{font-size:13px}.err{color:var(--err)}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin:16px 0}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.spread{justify-content:space-between}
+input{flex:1 1 260px;min-height:40px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font:inherit}
+.btn{min-height:40px;padding:8px 16px;border-radius:9px;border:1px solid var(--border);background:var(--panel);color:var(--text);font:inherit;font-weight:600;cursor:pointer}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.list{display:grid;gap:8px;margin-top:12px}.item{display:flex;justify-content:space-between;align-items:center;gap:10px;border:1px solid var(--border);border-radius:10px;padding:10px 12px}
+.ok{color:var(--ok)}.notice{border:1px solid var(--accent);border-radius:10px;padding:12px 14px;margin-top:16px}

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Energy Manager</title>
+<link rel="stylesheet" href="connect.css">
+</head>
+<body>
+<main class="wrap">
+  <div class="brand"><img src="icon.svg" alt=""> Energy Manager</div>
+  <h1>Verbinden met uw EMS</h1>
+  <p class="muted">De Windows-app is het bedieningsscherm; het EMS zelf draait 24/7 op de Raspberry Pi (of op deze pc als test).</p>
+  <div id="auto" class="notice" hidden></div>
+  <section class="card">
+    <div class="row spread"><h2>Gevonden servers</h2><button id="scan" class="btn primary">Zoeken</button></div>
+    <div id="list" class="list"><p class="muted">Klik op Zoeken.</p></div>
+  </section>
+  <section class="card">
+    <h2>Adres handmatig invoeren</h2>
+    <form id="manual" class="row">
+      <input id="addr" placeholder="bijv. 192.168.1.20 of energy-manager.local" autocomplete="off">
+      <button class="btn">Verbinden</button>
+    </form>
+    <p id="msg" class="small err"></p>
+  </section>
+  <p class="muted small">Tip: geef de Raspberry Pi de hostnaam <b>energy-manager</b>; de app vindt hem dan automatisch.</p>
+</main>
+<script src="connect.js"></script>
+</body>
+</html>
