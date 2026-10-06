@@ -129,6 +129,41 @@ De pc moet aan blijven staan zolang het station draait of anderen afspelen.
 Voor 24/7 is een zuinige mini-pc (bijv. Intel N100, 16 GB, SSD van 1 TB,
 ± €200–300, ± 10 watt) de nette oplossing; dezelfde stappen gelden dan.
 
+## Mini-pc als hoofdserver (Synology alleen voor back-up)
+
+De mini-pc doet alles: studio, database, muziek (FLAC op de eigen schijf) en de
+voordeur voor klanten via internet. De Synology bewaart alleen de back-up en je
+oude WAV-archief.
+
+```
+Klant ──https──► router (443/80) ──► mini-pc: Caddy ──► Audio OnAir Turbo + database
+                                         │              muziek (FLAC) op deze pc
+                                         └── elke dag back-up ──► Synology
+```
+
+1. **Installeren** met de installatiehulp. Muziek: kies eenmalig *Op mijn
+   Synology* om je WAV-archief in te lezen (wordt FLAC op deze pc), back-up:
+   *Naar mijn Synology*.
+2. **Eigenaarsaccount** aanmaken in de studio (het eerste account wordt eigenaar).
+3. **Muziek loskoppelen van de Synology** zodra alles is ingelezen: maak in
+   *Server beheren → Instellingen* de NAS-muziekvelden leeg en kies bij *muziek uit
+   een map op deze pc* bijv. `D:\Nieuwe muziek`. Nieuwe nummers zet je daar neer
+   of upload je vanuit de studio (☰ Bibliotheek).
+4. **Gratis internetadres**: maak op [duckdns.org](https://www.duckdns.org) een
+   naam aan, bijv. `turbofm` → `turbofm.duckdns.org`.
+5. **Router**: geef de mini-pc een vast IP-adres en zet poort **80** en **443**
+   door naar de mini-pc. Nooit poort 3000 of 3389 (extern bureaublad).
+6. **Server beheren → Instellingen → Bereikbaar via internet**: vul
+   `turbofm.duckdns.org` en de DuckDNS-token in, *Opslaan*, dan *Herstarten /
+   bijwerken*. Caddy haalt zelf een gratis HTTPS-certificaat (Let's Encrypt) en
+   verlengt het; de status staat bij *Via internet*.
+7. Klanten gebruiken `https://turbofm.duckdns.org` (website of app).
+
+Het internetadres kan pas aan als er een eigenaarsaccount is, zodat niemand van
+buitenaf als eerste het station kan claimen. Er kan per pc maar één database via
+internet bereikbaar zijn (poort 443). Een eigen domein (bijv. `radio.turbofm.nl`)
+werkt ook: zet een A-record naar je internetadres en laat de token leeg.
+
 ## Windows-app (Audio OnAir Turbo.exe)
 
 In `desktop/` zit de Windows-app: de studio in een eigen venster met logo,
@@ -408,7 +443,8 @@ Lukt de omzetting niet (bijv. 32-bit float WAV), dan wordt het origineel bewaard
 
 ## Beveiliging
 
-- Alles via https; wachtwoorden worden gehasht (scrypt) opgeslagen.
+- Alles via https (op de mini-pc via Caddy, zie hierboven); wachtwoorden worden
+  gehasht (scrypt) opgeslagen. Zet nooit poort 3000 open in de router.
 - Mensen komen alleen binnen via een persoonlijke uitnodigingslink (7 dagen
   geldig) en zien alleen de collecties die je aanvinkt.
 - Standaard mag een lid **alleen afspelen in de studio**. Downloaden,

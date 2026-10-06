@@ -1,7 +1,7 @@
 {
   "name": "audio-onair-turbo",
   "productName": "Audio OnAir Turbo Database",
-  "version": "2.13.3",
+  "version": "2.14.0",
   "description": "Audio OnAir Turbo Database \u2014 radio playout studio",
   "author": "Turbo FM",
   "license": "UNLICENSED",
@@ -74,6 +74,10 @@
           "docker-compose.yml",
           "docker-compose.nas.yml",
           "docker-compose.nas-backup.yml",
+          "docker-compose.nas-archive.yml",
+          "docker-compose.https.yml",
+          "docker-compose.duckdns.yml",
+          "caddy/**",
           "docker-entrypoint.sh",
           "docker.env.example"
         ]

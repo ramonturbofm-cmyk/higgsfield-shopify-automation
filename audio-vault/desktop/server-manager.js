@@ -10,11 +10,25 @@ const path = require('path');
 const SERVER_FILES = [
   'src', 'public', 'backup', 'package.json', 'package-lock.json', 'Dockerfile', '.dockerignore',
   'docker-compose.yml', 'docker-compose.nas.yml', 'docker-compose.nas-backup.yml', 'docker-compose.nas-archive.yml',
+  'docker-compose.https.yml', 'docker-compose.duckdns.yml', 'caddy',
   'docker-entrypoint.sh', 'docker.env.example',
 ];
 const DEFAULT_DIR = process.env.AOT_SERVER_DIR || (process.platform === 'win32' ? 'C:\\AudioOnAir' : path.join(os.homedir(), 'AudioOnAir'));
 const DOCKER_WIN = 'C:\\Program Files\\Docker\\Docker';
 const DOCKERIGNORE = ['data', 'import', 'storage', 'backup', 'desktop', 'test', 'node_modules', '.env', '.env.*', '*.bat', '*.cmd', ''].join('\n');
+
+// "Bereikbaar via internet": the address people type, e.g. turbofm.duckdns.org.
+// Accepts a pasted URL too; returns '' for "off" and throws on anything else.
+function parseDomain(input) {
+  const domain = String(input || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  if (!domain) return '';
+  if (!/^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(domain)) {
+    throw new Error(`"${input}" is geen geldig internetadres. Bijvoorbeeld: turbofm.duckdns.org`);
+  }
+  return domain;
+}
+// turbofm.duckdns.org → "turbofm" (what DuckDNS calls the domain); '' for other addresses.
+const duckdnsName = (domain) => (/^([a-z0-9-]+)\.duckdns\.org$/.exec(domain) || [])[1] || '';
 
 // One manager per database. Each database is its own Docker Compose project with its
 // own folder, port and login cookie, so several can run side by side on one PC.
@@ -66,6 +80,8 @@ function createServerManager({ sourceDir, version, onLog, dir, project = 'audioo
     if (env.NAS_PASSWORD && !nasUnavailable) files.push('-f', 'docker-compose.nas.yml');
     if (env.NAS_BACKUP_PASSWORD) files.push('-f', 'docker-compose.nas-backup.yml');
     if (env.NAS_ARCHIVE_PASSWORD) files.push('-f', 'docker-compose.nas-archive.yml');
+    if (env.DOMAIN) files.push('-f', 'docker-compose.https.yml');
+    if (env.DUCKDNS_TOKEN && env.DUCKDNS_DOMAIN) files.push('-f', 'docker-compose.duckdns.yml');
     if (process.env.AOT_COMPOSE_EXTRA) files.push('-f', process.env.AOT_COMPOSE_EXTRA); // tests only
     return files;
   }
@@ -127,12 +143,14 @@ function createServerManager({ sourceDir, version, onLog, dir, project = 'audioo
         nasHost: env.NAS_HOST || '', nasShare: env.NAS_SHARE || '', nasUser: env.NAS_USER || '', hasNasPassword: Boolean(env.NAS_PASSWORD),
         backupShare: env.NAS_BACKUP_SHARE || '', backupUser: env.NAS_BACKUP_USER || '', hasBackupPassword: Boolean(env.NAS_BACKUP_PASSWORD),
         publicUrl: env.PUBLIC_URL || '',
+        domain: env.DOMAIN || '', hasDuckdnsToken: Boolean(env.DUCKDNS_TOKEN),
         autoImportMinutes: env.AUTO_IMPORT_MINUTES ?? '10',
         archiveTarget: env.NAS_ARCHIVE_PASSWORD ? 'nas' : env.ARCHIVE_DIR && env.ARCHIVE_DIR !== './data/archief' ? 'folder' : '',
         archiveShare: env.NAS_ARCHIVE_SHARE || '', archiveUser: env.NAS_ARCHIVE_USER || '', hasArchivePassword: Boolean(env.NAS_ARCHIVE_PASSWORD),
         archiveDir: env.ARCHIVE_DIR && env.ARCHIVE_DIR !== './data/archief' ? env.ARCHIVE_DIR : '',
       },
       archive: null,
+      internet: null,
     };
     if (docker !== 'running' || !result.installed) return result;
     const ps = await capture(['compose', '-p', PROJECT, ...composeFiles(env), 'ps', '-a', '--format', 'json']);
@@ -148,6 +166,7 @@ function createServerManager({ sourceDir, version, onLog, dir, project = 'audioo
       result.web = res.ok;
     } catch { /* not reachable */ }
     result.archive = await archiveStatus(env);
+    if (env.DOMAIN) result.internet = await internetStatus(env, result.containers);
     try { result.autoImport = JSON.parse(fs.readFileSync(path.join(serverDir, 'data', 'audio', 'autoimport.json'), 'utf8')); } catch { result.autoImport = null; }
     if (result.containers.some((c) => c.service === 'backup' && c.state === 'running')) {
       const log = await capture(['compose', '-p', PROJECT, ...composeFiles(env), 'exec', '-T', 'backup', 'sh', '-c', 'grep -E "Backup klaar|MISLUKT" /backup/backup.log | tail -n 1']);
@@ -158,15 +177,27 @@ function createServerManager({ sourceDir, version, onLog, dir, project = 'audioo
 
   // ---------- actions ----------
 
-  function saveSettings(input) {
+  async function saveSettings(input) {
     if (input.dir && !installed()) serverDir = input.dir;
     const env = readEnv();
+    const domain = input.domain === undefined ? (env.DOMAIN || '') : parseDomain(input.domain);
+    const duckdns = duckdnsName(domain);
+    const duckdnsToken = duckdns ? String(input.duckdnsToken || '').trim() || env.DUCKDNS_TOKEN || '' : '';
+    if (duckdns && !/^[0-9a-f-]{36}$/i.test(duckdnsToken)) {
+      throw new Error('Vul de token van duckdns.org in (staat bovenaan op duckdns.org nadat je bent ingelogd)');
+    }
+    // Going online: the very first account becomes the owner, so it must exist before
+    // anyone on the internet can reach the server.
+    if (domain && !env.DOMAIN) await requireOwner(env);
     const next = {
       DB_PASSWORD: env.DB_PASSWORD || crypto.randomBytes(24).toString('hex'),
       SESSION_SECRET: env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
       PORT: env.PORT || String(port),
       SESSION_COOKIE: env.SESSION_COOKIE || cookie,
-      PUBLIC_URL: input.publicUrl ?? env.PUBLIC_URL ?? '',
+      PUBLIC_URL: domain ? `https://${domain}` : env.DOMAIN ? '' : (input.publicUrl ?? env.PUBLIC_URL ?? ''),
+      DOMAIN: domain,
+      DUCKDNS_DOMAIN: duckdns,
+      DUCKDNS_TOKEN: duckdnsToken,
       MAX_UPLOAD_MB: env.MAX_UPLOAD_MB || '1000',
       MUSIC_DIR: input.musicDir ? input.musicDir.replace(/\\/g, '/') : './import',
       BACKUP_DIR: env.BACKUP_DIR || './data/backup',
@@ -194,6 +225,37 @@ function createServerManager({ sourceDir, version, onLog, dir, project = 'audioo
     fs.mkdirSync(path.join(serverDir, 'import'), { recursive: true });
     writeEnv(next);
     return { ok: true, dir: serverDir };
+  }
+
+  async function requireOwner(env) {
+    let setup;
+    try {
+      const res = await fetch(`http://localhost:${env.PORT || port}/api/setup`, { signal: AbortSignal.timeout(3000) });
+      setup = await res.json();
+    } catch {
+      throw new Error('Start eerst de server en maak in de studio je eigenaarsaccount aan; zet daarna pas het internetadres aan');
+    }
+    if (setup.needs_setup) throw new Error('Maak eerst in de studio je eigenaarsaccount aan; zet daarna pas het internetadres aan');
+  }
+
+  // Caddy (certificate) and DuckDNS (address) as one line for the status panel.
+  async function internetStatus(env, containers) {
+    const c = (name) => containers.find((x) => x.service === name);
+    const out = { domain: env.DOMAIN, caddy: c('caddy') ? c('caddy').state : 'none', certificate: '', duckdns: '' };
+    if (out.caddy === 'running') {
+      const logs = await capture(['compose', '-p', PROJECT, ...composeFiles(env), 'logs', '--no-log-prefix', '--tail', '300', 'caddy']);
+      for (const line of logs.stdout.split('\n')) {
+        let msg = line;
+        try { const j = JSON.parse(line); msg = `${j.msg || ''} ${j.error || ''}`; } catch { /* plain text */ }
+        if (/certificate obtained successfully|certificate is valid|loaded .*certificate|skipping automatic certificate management/i.test(msg)) out.certificate = 'ok';
+        else if (/could not get certificate|obtain.*fail|challenge.*fail|unable to.*certificate/i.test(msg)) out.certificate = 'error';
+      }
+    }
+    if (env.DUCKDNS_TOKEN && c('duckdns') && c('duckdns').state === 'running') {
+      const logs = await capture(['compose', '-p', PROJECT, ...composeFiles(env), 'logs', '--no-log-prefix', '--tail', '1', 'duckdns']);
+      out.duckdns = logs.stdout.trim().split('\n').pop() || '';
+    }
+    return out;
   }
 
   const ARCHIVE_KEYS = ['ARCHIVE_DIR', 'ARCHIVE_JOBS', 'NAS_ARCHIVE_SHARE', 'NAS_ARCHIVE_USER', 'NAS_ARCHIVE_PASSWORD'];
@@ -367,4 +429,4 @@ function createServerManager({ sourceDir, version, onLog, dir, project = 'audioo
   };
 }
 
-module.exports = { createServerManager };
+module.exports = { createServerManager, parseDomain, duckdnsName };

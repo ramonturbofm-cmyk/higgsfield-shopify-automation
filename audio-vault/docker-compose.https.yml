@@ -1,0 +1,21 @@
+# Makes the server reachable over the internet with HTTPS, straight from this PC:
+# Caddy takes ports 80/443 and gets a free certificate for DOMAIN automatically.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.https.yml up -d --build
+#
+# Needs DOMAIN in .env (e.g. turbofm.duckdns.org) and ports 80 and 443 in the router
+# forwarded to this PC. Never forward port 3000 itself.
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      DOMAIN: ${DOMAIN:?zet DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./data/caddy:/data

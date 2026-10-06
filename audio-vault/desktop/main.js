@@ -472,7 +472,7 @@ ipcMain.handle('server', async (e, method, ...args) => {
     switch (method) {
       case 'status': return { ...(await current().status()), database: activeDb() };
       case 'saveSettings': {
-        const res = current().saveSettings(args[0] || {});
+        const res = await current().saveSettings(args[0] || {});
         updateDatabase(activeDb().id, { dir: res.dir });
         if (activeDb().id === 'main') writeConfig({ serverDir: res.dir });
         return res;

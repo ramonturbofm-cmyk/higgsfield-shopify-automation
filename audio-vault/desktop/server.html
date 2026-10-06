@@ -106,6 +106,7 @@
     <div class="row"><span class="dot" id="dot-docker"></span><span class="label">Docker Desktop</span><span id="txt-docker">…</span></div>
     <div class="row"><span class="dot" id="dot-db"></span><span class="label">Database</span><span id="txt-db">…</span></div>
     <div class="row"><span class="dot" id="dot-app"></span><span class="label">Server / website</span><span id="txt-app">…</span></div>
+    <div class="row"><span class="dot" id="dot-net"></span><span class="label">Via internet</span><span id="txt-net">…</span></div>
     <div class="row"><span class="dot" id="dot-backup"></span><span class="label">Back-up</span><span id="txt-backup">…</span></div>
     <div class="row"><span class="dot" id="dot-auto"></span><span class="label">Nieuwe muziek</span><span id="txt-auto">…</span></div>
     <div class="row"><span class="dot"></span><span class="label">Map op deze pc</span><span id="txt-dir">…</span></div>
@@ -143,6 +144,14 @@
         <div><label>Wachtwoord</label><input id="backupPassword" type="password" autocomplete="new-password"></div>
         <div><label>Openbaar adres (optioneel)</label><input id="publicUrl" placeholder="https://radio.ramonturbofm.synology.me"></div>
       </div>
+      <h3>Bereikbaar via internet (HTTPS)</h3>
+      <div class="grid2">
+        <div><label>Internetadres</label><input id="domain" placeholder="turbofm.duckdns.org" autocomplete="off"></div>
+        <div><label>DuckDNS-token (alleen bij .duckdns.org)</label><input id="duckdnsToken" type="password" autocomplete="new-password"></div>
+      </div>
+      <p class="hint">Deze pc wordt dan zelf de voordeur, met een gratis HTTPS-certificaat. Zet in je router poort <b>80</b> en <b>443</b>
+        door naar deze pc (nooit poort 3000). Gratis adres: maak op <b>duckdns.org</b> een naam aan en plak hier de token.
+        Maak eerst in de studio je eigenaarsaccount aan. Leeg = alleen bereikbaar in je eigen netwerk.</p>
       <h3>Nieuwe muziek automatisch toevoegen</h3>
       <select id="autoImportMinutes">
         <option value="5">Elke 5 minuten</option>

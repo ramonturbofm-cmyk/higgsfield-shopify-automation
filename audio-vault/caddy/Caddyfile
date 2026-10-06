@@ -1,0 +1,9 @@
+# HTTPS front door for Audio OnAir Turbo (docker-compose.https.yml).
+# Caddy fetches and renews a free Let's Encrypt certificate for DOMAIN by itself;
+# the router must forward ports 80 and 443 to this PC.
+{$DOMAIN} {
+	reverse_proxy app:3000 {
+		# Pass audio through right away instead of buffering it.
+		flush_interval -1
+	}
+}

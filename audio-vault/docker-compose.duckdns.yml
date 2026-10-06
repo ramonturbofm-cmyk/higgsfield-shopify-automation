@@ -1,0 +1,13 @@
+# Free address <name>.duckdns.org: updates DuckDNS every 5 minutes with the public
+# IP address of this connection, so the address keeps working when it changes.
+# Needs DUCKDNS_DOMAIN (the <name> part) and DUCKDNS_TOKEN (from duckdns.org) in .env.
+services:
+  duckdns:
+    image: curlimages/curl:latest
+    restart: unless-stopped
+    entrypoint: ["sh", "/duckdns.sh"]
+    environment:
+      DUCKDNS_DOMAIN: ${DUCKDNS_DOMAIN:?zet DUCKDNS_DOMAIN in .env}
+      DUCKDNS_TOKEN: ${DUCKDNS_TOKEN:?zet DUCKDNS_TOKEN in .env}
+    volumes:
+      - ./caddy/duckdns.sh:/duckdns.sh:ro

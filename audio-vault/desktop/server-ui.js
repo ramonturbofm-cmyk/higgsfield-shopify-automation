@@ -42,6 +42,7 @@ async function refresh() {
   setDot('dot-backup', s.lastBackup && /MISLUKT/.test(s.lastBackup) ? 'bad' : s.lastBackup ? 'ok' : b && b.state === 'running' ? 'warn' : '');
   $('txt-backup').textContent = s.lastBackup ? s.lastBackup.replace(/^(\S+ \S+) /, '$1 · ') : b && b.state === 'running' ? 'Nog geen back-up' : 'Niet actief';
   renderAutoImport(s);
+  renderInternet(s);
   $('txt-dir').textContent = s.freeBytes != null ? `${s.dir} (nog ${gb(s.freeBytes)} vrij)` : s.dir;
 
   if (s.docker === 'missing') banner('Docker Desktop is nodig om de server te draaien.', 'Docker Desktop installeren', () => api.installDocker().then(refresh));
@@ -62,7 +63,9 @@ async function refresh() {
     refresh.filled = true;
     const st = s.settings;
     $('dir').value = s.dir;
-    for (const k of ['nasHost', 'nasShare', 'nasUser', 'musicDir', 'backupShare', 'backupUser', 'publicUrl']) $(k).value = st[k] || '';
+    for (const k of ['nasHost', 'nasShare', 'nasUser', 'musicDir', 'backupShare', 'backupUser', 'publicUrl', 'domain']) $(k).value = st[k] || '';
+    $('publicUrl').disabled = Boolean(st.domain);
+    $('duckdnsToken').placeholder = st.hasDuckdnsToken ? '•••••••• (ongewijzigd)' : '';
     $('autoImportMinutes').value = String(st.autoImportMinutes ?? '10');
     $('nasPassword').placeholder = st.hasNasPassword ? '•••••••• (ongewijzigd)' : '';
     $('backupPassword').placeholder = st.hasBackupPassword ? '•••••••• (ongewijzigd)' : '';
@@ -78,11 +81,11 @@ document.querySelectorAll('[data-run]').forEach((btn) => btn.addEventListener('c
 $('settings').addEventListener('submit', async (e) => {
   e.preventDefault();
   $('error').textContent = '';
-  const values = Object.fromEntries(['dir', 'nasHost', 'nasShare', 'nasUser', 'nasPassword', 'musicDir', 'backupShare', 'backupUser', 'backupPassword', 'publicUrl', 'autoImportMinutes']
+  const values = Object.fromEntries(['dir', 'nasHost', 'nasShare', 'nasUser', 'nasPassword', 'musicDir', 'backupShare', 'backupUser', 'backupPassword', 'publicUrl', 'domain', 'duckdnsToken', 'autoImportMinutes']
     .map((k) => [k, $(k).value.trim()]));
   const res = await api.saveSettings(values);
   if (!res.ok) { $('error').textContent = res.error; return; }
-  $('nasPassword').value = ''; $('backupPassword').value = '';
+  $('nasPassword').value = ''; $('backupPassword').value = ''; $('duckdnsToken').value = '';
   $('saved').textContent = last && last.web ? 'Opgeslagen — klik "Server starten" om de wijziging toe te passen' : 'Opgeslagen';
   refresh.filled = false;
   refresh();
@@ -210,7 +213,8 @@ function renderWizard(s) {
         ? el('div', {},
           el('p', { class: 'lead' }, 'Open de studio. De eerste keer maak je daar je eigenaarsaccount aan (naam, e-mail, wachtwoord).'),
           el('button', { class: 'primary big', onclick: () => api.openStudio() }, '▶ Open de studio'), ' ',
-          el('button', { class: 'big', onclick: () => { wizard.finished = false; refresh(); } }, 'Naar Server beheren'))
+          el('button', { class: 'big', onclick: () => { wizard.finished = false; refresh(); } }, 'Naar Server beheren'),
+          el('p', { class: 'hint' }, 'Klanten via internet laten inloggen? Maak eerst je eigenaarsaccount aan en vul daarna in Server beheren → Instellingen bij "Bereikbaar via internet" je adres in (gratis via duckdns.org).'))
         : el('div', {},
           el('div', { class: 'row' }, el('span', { class: 'label' }, 'Map op deze pc'),
             el('span', { style: 'flex:1' }, wizard.values.dir || s.dir, el('br'),
@@ -392,6 +396,25 @@ $('db-remove').addEventListener('click', async () => {
 loadDatabases().then(() => { if (location.hash === '#nieuw') openDbForm('create'); });
 
 // ---------- automatic import status ----------
+
+function renderInternet(s) {
+  const n = s.internet;
+  let text = 'Uit — alleen in je eigen netwerk';
+  let dot = '';
+  if (s.settings.domain && !s.web) text = `https://${s.settings.domain} · start de server`;
+  else if (n) {
+    const parts = [`https://${n.domain}`];
+    if (n.caddy !== 'running') { parts.push('HTTPS (Caddy) draait niet — klik "Herstarten / bijwerken"'); dot = 'bad'; }
+    else if (n.certificate === 'error') { parts.push('certificaat lukt niet: staan poort 80 en 443 in de router door naar deze pc?'); dot = 'bad'; }
+    else if (n.certificate === 'ok') { parts.push('certificaat in orde'); dot = 'ok'; }
+    else { parts.push('HTTPS draait'); dot = 'ok'; }
+    if (n.duckdns && /DuckDNS: KO/.test(n.duckdns)) { parts.push('DuckDNS weigert: klopt de token?'); dot = 'bad'; }
+    else if (n.duckdns && !/DuckDNS: OK/.test(n.duckdns)) { parts.push('DuckDNS niet bereikt'); dot = dot === 'bad' ? dot : 'warn'; }
+    text = parts.join(' · ');
+  }
+  setDot('dot-net', dot);
+  $('txt-net').textContent = text;
+}
 
 function renderAutoImport(s) {
   const a = s.autoImport;
