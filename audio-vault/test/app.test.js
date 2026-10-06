@@ -43,7 +43,7 @@ function client() {
 before(async () => {
   if (!DB) return;
   pool = createPool(DB);
-  await pool.query('DROP TABLE IF EXISTS track_reports, nonstop_blocks, clock_schedule, clocks, station_now_playing, now_playing, user_settings, access_log, collection_access, audio_files, collections, users CASCADE');
+  await pool.query('DROP TABLE IF EXISTS music_wishes, track_reports, nonstop_blocks, clock_schedule, clocks, station_now_playing, now_playing, user_settings, access_log, collection_access, audio_files, collections, users CASCADE');
   await migrate(pool);
   storageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-'));
   const app = createApp({ pool, storageDir, sessionSecret: 'test-secret' });
@@ -477,6 +477,29 @@ test('track feedback: a member reports a track, the admin replaces the audio and
   assert.equal((await owner('POST', `/api/reports/${rep.id}/resolve`, {})).status, 200);
   assert.equal((await owner('GET', '/api/reports/count')).data.open, 0);
   assert.equal((await owner('GET', '/api/reports?status=done')).data.reports[0].id, rep.id);
+});
+
+test('music wishes: anyone asks for a missing track, the admin handles it, the asker sees the outcome', { skip: !DB && 'TEST_DATABASE_URL not set' }, async () => {
+  const owner = client();
+  assert.equal((await owner('POST', '/api/login', { email: 'owner@example.com', password: 'supergeheim1' })).status, 200);
+  const inv = (await owner('POST', '/api/users', { name: 'Wenser', email: 'wenser@example.com' })).data;
+  const fan = client();
+  await fan('POST', `/api/invite/${inv.invite_url.split('#invite=')[1]}`, { password: 'wenser-wachtwoord-1' });
+  assert.equal((await fan('POST', '/api/wishes', { artist: ' ', title: '' })).status, 400);
+  const w = (await fan('POST', '/api/wishes', { artist: 'De Muiters', title: 'Bella Marie', note: 'de originele versie' })).data.wish;
+  assert.equal(w.status, 'open');
+  assert.equal((await fan('POST', '/api/wishes', { artist: 'de muiters', title: 'bella marie' })).data.wish.id, w.id, 'no duplicates');
+  assert.equal((await fan('GET', '/api/wishes')).status, 403);
+  const counts = (await owner('GET', '/api/reports/count')).data;
+  assert.equal(counts.wishes, 1);
+  const [listed] = (await owner('GET', '/api/wishes')).data.wishes;
+  assert.equal(listed.user_name, 'Wenser');
+  assert.equal((await owner('POST', `/api/wishes/${w.id}`, { status: 'added', reply: 'staat erin!' })).status, 200);
+  const [mine] = (await fan('GET', '/api/wishes/mine')).data.wishes;
+  assert.equal(mine.status, 'added');
+  assert.equal(mine.reply, 'staat erin!');
+  assert.equal((await owner('GET', '/api/reports/count')).data.wishes, 0);
+  assert.equal((await owner('GET', '/api/wishes?status=handled')).data.wishes[0].id, w.id);
 });
 
 test('new music is added automatically; files still copying wait; one import at a time', { skip: !DB && 'TEST_DATABASE_URL not set' }, async () => {

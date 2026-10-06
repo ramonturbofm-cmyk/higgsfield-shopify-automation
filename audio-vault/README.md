@@ -340,6 +340,17 @@ door een goede versie. Het blijft hetzelfde nummer, dus playlists, jingle-knoppe
 uurklokken blijven werken; cue-punten, volume en genre worden opnieuw gemeten. Zet de
 melding daarna op *Opgelost*.
 
+## Muziek wensen
+
+Mis je een nummer in de database? In de studio rechtsboven op **♪** (of in het menu:
+*Muziek wensen…*): vul artiest, titel en eventueel een toelichting in en klik op
+*Wens doorgeven*. Onder *Mijn wensen* zie je wat ermee gebeurd is: *aangevraagd*,
+*✓ toegevoegd* of *niet mogelijk*, met het bericht van de beheerder. Een open wens kun
+je intrekken met ✕.
+
+De beheerder ziet de wensen bij *⚑ Meldingen & wensen* in de bibliotheek (en telt ze
+mee in de oranje ⚑ in de studio) en zet ze op *Toegevoegd* of *Niet mogelijk*.
+
 ## Nonstop-filter (wat je nooit in de uurklok wilt)
 
 Per persoon stel je in wat de automatische planning (uurklok / 24/7) nooit kiest.

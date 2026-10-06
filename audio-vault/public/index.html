@@ -173,7 +173,7 @@ async function renderInvite(token) {
 function renderMain() {
   const tabs = [['library', 'Bibliotheek']];
   if (state.me.can_download) tabs.push(['connect', 'Koppelen (mAirList)']);
-  if (isAdmin()) tabs.push(['reports', '⚑ Meldingen'], ['users', 'Gebruikers'], ['activity', 'Activiteit']);
+  if (isAdmin()) tabs.push(['reports', '⚑ Meldingen & wensen'], ['users', 'Gebruikers'], ['activity', 'Activiteit']);
   if (!tabs.some(([id]) => id === state.tab)) state.tab = 'library';
   const content = h('main');
   $app.replaceChildren(
@@ -438,6 +438,30 @@ async function renderReports(root) {
           ? h('button', { class: 'btn small', onclick: async () => { await api('POST', `/api/reports/${r.id}/resolve`, { reopen: true }); renderMain(); } }, 'Heropenen')
           : h('button', { class: 'btn small primary', onclick: async () => { await api('POST', `/api/reports/${r.id}/resolve`, {}); renderMain(); } }, '✓ Opgelost'))))
       : h('p', { class: 'muted' }, done ? 'Nog niets opgelost.' : 'Geen open meldingen. 👍')));
+
+  // Music wishes: tracks people miss in the database.
+  const { wishes } = await api('GET', `/api/wishes${done ? '?status=handled' : ''}`);
+  const statusLabel = { open: 'aangevraagd', added: '✓ toegevoegd', rejected: 'niet mogelijk' };
+  const handle = async (w, status) => {
+    const reply = status === 'open' ? '' : prompt(status === 'added' ? 'Bericht voor de aanvrager (optioneel)' : 'Waarom niet? (optioneel, de aanvrager ziet dit)', status === 'added' ? 'Staat erin!' : '');
+    if (reply === null) return;
+    await api('POST', `/api/wishes/${w.id}`, { status, reply });
+    renderMain();
+  };
+  root.append(h('div', { class: 'card', style: 'margin-top:16px' },
+    h('h2', { style: 'margin:0 0 6px' }, done ? '♪ Afgehandelde muziekwensen' : `♪ Muziek wensen (${wishes.length})`),
+    h('p', { class: 'muted' }, done ? 'Wat je al hebt toegevoegd of afgewezen.' : 'Nummers die klanten en dj\'s missen (♪ in de studio). Voeg ze toe aan de bibliotheek of je muziekmap op de Synology en zet de wens op "Toegevoegd": de aanvrager ziet dat in de studio.'),
+    wishes.length ? wishes.map((w) => h('div', { class: 'report-row' },
+      h('div', { class: 'report-main' },
+        h('strong', {}, [w.artist, w.title].filter(Boolean).join(' – ')),
+        w.note ? h('div', {}, w.note) : null,
+        h('div', { class: 'muted' }, `door ${w.user_name} · ${new Date(w.created_at).toLocaleString('nl-NL')}${done ? ` · ${statusLabel[w.status]}${w.reply ? ` — "${w.reply}"` : ''}` : ''}`)),
+      h('div', { class: 'report-actions' },
+        done
+          ? h('button', { class: 'btn small', onclick: () => handle(w, 'open') }, 'Heropenen')
+          : [h('button', { class: 'btn small primary', onclick: () => handle(w, 'added') }, '✓ Toegevoegd'),
+            h('button', { class: 'btn small', onclick: () => handle(w, 'rejected') }, 'Niet mogelijk')])))
+      : h('p', { class: 'muted' }, done ? 'Nog niets afgehandeld.' : 'Geen openstaande wensen.')));
 }
 
 async function renderActivity(root) {

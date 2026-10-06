@@ -159,3 +159,18 @@ CREATE TABLE IF NOT EXISTS track_reports (
   resolved_by INTEGER REFERENCES users(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS track_reports_open_idx ON track_reports (created_at DESC) WHERE status = 'open';
+
+-- Music wishes: tracks people miss in the database. The owner/admins add them (or not)
+-- and the person sees what became of the wish.
+CREATE TABLE IF NOT EXISTS music_wishes (
+  id         SERIAL PRIMARY KEY,
+  user_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  artist     TEXT NOT NULL DEFAULT '',
+  title      TEXT NOT NULL DEFAULT '',
+  note       TEXT NOT NULL DEFAULT '',
+  status     TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'added', 'rejected')),
+  reply      TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  handled_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS music_wishes_open_idx ON music_wishes (created_at DESC) WHERE status = 'open';

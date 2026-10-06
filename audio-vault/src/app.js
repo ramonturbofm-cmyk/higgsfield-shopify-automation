@@ -497,9 +497,57 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
     });
   }));
   app.get('/api/reports/count', requireUser, wrap(async (req, res) => {
-    if (!lib.isAdmin(req.user)) return res.json({ open: 0 });
-    const { rows: [{ n }] } = await pool.query("SELECT count(*)::int AS n FROM track_reports WHERE status = 'open'");
-    res.json({ open: n });
+    if (!lib.isAdmin(req.user)) return res.json({ open: 0, reports: 0, wishes: 0 });
+    const { rows: [c] } = await pool.query(
+      `SELECT (SELECT count(*)::int FROM track_reports WHERE status = 'open') AS reports,
+              (SELECT count(*)::int FROM music_wishes WHERE status = 'open') AS wishes`);
+    res.json({ open: c.reports + c.wishes, reports: c.reports, wishes: c.wishes });
+  }));
+
+  // ---------- music wishes ----------
+  const publicWish = (w) => ({
+    id: w.id, artist: w.artist, title: w.title, note: w.note, status: w.status, reply: w.reply,
+    created_at: w.created_at, handled_at: w.handled_at, ...(w.user_name !== undefined ? { user_name: w.user_name || '(verwijderd)' } : {}),
+  });
+  app.post('/api/wishes', requireUser, wrap(async (req, res) => {
+    const clean = (v, n) => String(v ?? '').trim().slice(0, n);
+    const artist = clean(req.body && req.body.artist, 200); const title = clean(req.body && req.body.title, 200);
+    const note = clean(req.body && req.body.note, 1000);
+    if (!artist && !title) throw new HttpError(400, 'Vul minstens de artiest of de titel in');
+    const { rows: open } = await pool.query(
+      "SELECT count(*)::int AS n FROM music_wishes WHERE user_id = $1 AND status = 'open'", [req.user.id]);
+    if (open[0].n >= 200) throw new HttpError(429, 'Je hebt al veel openstaande wensen; wacht tot de beheerder ze heeft bekeken');
+    const { rows: [dup] } = await pool.query(
+      "SELECT * FROM music_wishes WHERE user_id = $1 AND status = 'open' AND lower(artist) = lower($2) AND lower(title) = lower($3)", [req.user.id, artist, title]);
+    if (dup) return res.json({ wish: publicWish(dup) });
+    const { rows: [w] } = await pool.query(
+      'INSERT INTO music_wishes (user_id, artist, title, note) VALUES ($1, $2, $3, $4) RETURNING *', [req.user.id, artist, title, note]);
+    res.status(201).json({ wish: publicWish(w) });
+  }));
+  app.get('/api/wishes/mine', requireUser, wrap(async (req, res) => {
+    const { rows } = await pool.query('SELECT * FROM music_wishes WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100', [req.user.id]);
+    res.json({ wishes: rows.map(publicWish) });
+  }));
+  app.delete('/api/wishes/:id', requireUser, wrap(async (req, res) => {
+    await pool.query("DELETE FROM music_wishes WHERE id = $1 AND user_id = $2 AND status = 'open'", [Number(req.params.id), req.user.id]);
+    res.json({ ok: true });
+  }));
+  app.get('/api/wishes', requireUser, requireAdmin, wrap(async (req, res) => {
+    const open = req.query.status !== 'handled';
+    const { rows } = await pool.query(
+      `SELECT w.*, u.name AS user_name FROM music_wishes w LEFT JOIN users u ON u.id = w.user_id
+        WHERE ${open ? "w.status = 'open'" : "w.status <> 'open'"} ORDER BY ${open ? 'w.created_at' : 'w.handled_at'} DESC LIMIT 500`);
+    res.json({ wishes: rows.map(publicWish) });
+  }));
+  app.post('/api/wishes/:id', requireUser, requireAdmin, wrap(async (req, res) => {
+    const status = String((req.body && req.body.status) || '');
+    if (!['open', 'added', 'rejected'].includes(status)) throw new HttpError(400, 'Ongeldige status');
+    const reply = String(req.body.reply ?? '').trim().slice(0, 500);
+    const { rows: [w] } = await pool.query(
+      `UPDATE music_wishes SET status = $1, reply = $2, handled_at = ${status === 'open' ? 'NULL' : 'now()'} WHERE id = $3 RETURNING *`,
+      [status, reply, Number(req.params.id)]);
+    if (!w) throw new HttpError(404, 'Wens niet gevonden');
+    res.json({ wish: publicWish(w) });
   }));
   app.post('/api/reports/:id/resolve', requireUser, requireAdmin, wrap(async (req, res) => {
     const reopen = Boolean(req.body && req.body.reopen);

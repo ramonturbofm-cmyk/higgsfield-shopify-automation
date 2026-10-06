@@ -1490,7 +1490,40 @@ async function sendReport() {
     status(`⚑ Doorgegeven aan de beheerder: ${label(reportFile)}`);
   } catch (e) { status(`Melden mislukt: ${e.message}`); }
 }
+// ---------- music wishes ----------
+const WISH_STATUS = { open: ['Aangevraagd', 'open'], added: ['✓ Toegevoegd', 'added'], rejected: ['Niet mogelijk', 'rejected'] };
+async function renderWishes() {
+  try {
+    const { wishes } = await api('GET', '/api/wishes/mine');
+    $('wish-list').replaceChildren(...(wishes.length ? wishes.map((w) => h('div', { class: 'wish-row' },
+      h('div', {}, h('strong', {}, [w.artist, w.title].filter(Boolean).join(' – ')),
+        w.note ? h('div', { class: 'muted' }, w.note) : null,
+        w.reply ? h('div', { class: 'wish-reply' }, `Beheerder: ${w.reply}`) : null),
+      h('span', { class: `wish-status ${WISH_STATUS[w.status][1]}` }, WISH_STATUS[w.status][0]),
+      w.status === 'open' ? h('button', { type: 'button', class: 'mini', title: 'Wens intrekken', onclick: async () => { await api('DELETE', `/api/wishes/${w.id}`); renderWishes(); } }, '✕') : h('span')))
+      : [h('p', { class: 'muted', style: { margin: '4px 0' } }, 'Nog geen wensen doorgegeven.')]));
+  } catch (e) { $('wish-list').textContent = e.message; }
+}
+function openWishes() {
+  $('wish-msg').textContent = '';
+  $('wishes').showModal();
+  renderWishes();
+  $('wish-artist').focus();
+}
+async function sendWish() {
+  try {
+    await api('POST', '/api/wishes', { artist: $('wish-artist').value, title: $('wish-title').value, note: $('wish-note').value });
+    $('wish-msg').textContent = '✓ Doorgegeven aan de beheerder';
+    $('wish-artist').value = ''; $('wish-title').value = ''; $('wish-note').value = '';
+    $('wish-artist').focus();
+    renderWishes();
+  } catch (e) { $('wish-msg').textContent = e.message; }
+}
+
 function setupReports() {
+  $('btn-wishes').addEventListener('click', openWishes);
+  $('wish-send').addEventListener('click', sendWish);
+  for (const id of ['wish-artist', 'wish-title', 'wish-note']) $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); sendWish(); } });
   const drop = $('report-drop');
   drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
   drop.addEventListener('dragleave', () => drop.classList.remove('over'));
@@ -1508,13 +1541,13 @@ function setupReports() {
   let last = null;
   const check = async () => {
     try {
-      const { open } = await api('GET', '/api/reports/count');
+      const { open, reports, wishes } = await api('GET', '/api/reports/count');
       $('btn-reports').classList.toggle('hidden', !open);
       $('reports-count').textContent = open ? String(open) : '';
-      $('btn-reports').title = `${open} ${open === 1 ? 'melding' : 'meldingen'} over nummers — klik om ze te bekijken`;
+      $('btn-reports').title = `${reports} ${reports === 1 ? 'melding' : 'meldingen'} en ${wishes} muziek${wishes === 1 ? 'wens' : 'wensen'} — klik om ze te bekijken`;
       if (last !== null && open > last) {
-        status(`⚑ Nieuwe melding over een nummer (${open} open)`);
-        try { if (Notification.permission === 'granted') new Notification('Audio OnAir Turbo Database', { body: 'Er is een nummer gemeld dat niet goed is.' }); } catch { /* no notifications */ }
+        status(`⚑ Nieuw: ${reports} melding(en), ${wishes} muziekwens(en) open`);
+        try { if (Notification.permission === 'granted') new Notification('Audio OnAir Turbo Database', { body: 'Er is een nieuwe melding of muziekwens.' }); } catch { /* no notifications */ }
       }
       last = open;
     } catch { /* try again later */ }
