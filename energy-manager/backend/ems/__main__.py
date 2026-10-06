@@ -39,7 +39,11 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--data-dir")
     c = sub.add_parser("check-config", help="configuratiebestand valideren")
     c.add_argument("file")
+    sub.add_parser("selftest", help="volledige rooktest in Demo Mode (engine, optimizer, database, API, webinterface)")
     args = p.parse_args(argv)
+
+    if args.cmd == "selftest":
+        return _selftest()
 
     if args.cmd == "serve":
         import uvicorn
@@ -72,6 +76,7 @@ def main(argv: list[str] | None = None) -> int:
         from ems.services.backup import create_backup
 
         d = _data_dir(args.data_dir)
+        Path(args.output).parent.mkdir(parents=True, exist_ok=True)
         Path(args.output).write_bytes(create_backup(d, os.environ.get("EMS_DATABASE_URL")
                                                     or f"sqlite:///{d / 'ems.db'}"))
         print(f"back-up geschreven naar {args.output}")
@@ -87,6 +92,54 @@ def main(argv: list[str] | None = None) -> int:
         print(f"OK: {cfg.site.name}, {len(cfg.devices)} apparaten, modus {cfg.runtime.mode}")
         return 0
     return 1
+
+
+def _selftest() -> int:
+    import asyncio
+    import tempfile
+
+    import httpx
+
+    from ems.api.app import WEB_DIR, create_app
+    from ems.server.runtime import EMSRuntime
+
+    async def run() -> list[str]:
+        problems = []
+        with tempfile.TemporaryDirectory() as tmp:
+            rt = EMSRuntime(Path(tmp), mode="demo", env={})
+            await rt.start(loops=False)
+            try:
+                for _ in range(3):
+                    await rt.tick_once()
+                plan = await rt.optimizer.run(rt.engine.last_snapshot, rt.now(), "selftest")
+                if not plan.ok:
+                    problems.append(f"optimizer: {plan.status} {plan.message}")
+                app = create_app(rt, start_runtime=False)
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+                    tok = (await c.post("/api/v1/auth/login", json={"username": "demo", "password": "demo"})).json()["token"]
+                    c.headers["Authorization"] = f"Bearer {tok}"
+                    for path in ("/api/v1/energy/live", "/api/v1/devices", "/api/v1/prices", "/api/v1/optimizer/plan",
+                                 "/api/v1/system/status", "/"):
+                        r = await c.get(path)
+                        if r.status_code != 200:
+                            problems.append(f"{path}: HTTP {r.status_code}")
+                if not (WEB_DIR / "js" / "app.js").exists():
+                    problems.append("webinterface ontbreekt")
+                from ems.devices.registry import registry
+                ids = {d.manifest.driver_id for d in registry.list()}
+                for needed in ("homewizard.p1", "dsmr.p1", "mock.battery"):
+                    if needed not in ids:
+                        problems.append(f"driver {needed} niet geladen")
+            finally:
+                await rt.stop()
+        return problems
+
+    problems = asyncio.run(run())
+    if problems:
+        print("SELFTEST FAILED\n" + "\n".join(problems))
+        return 1
+    print("SELFTEST OK")
+    return 0
 
 
 if __name__ == "__main__":

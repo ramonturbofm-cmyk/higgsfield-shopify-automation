@@ -1,0 +1,31 @@
+# Native installation without Docker (alternative):
+#   sudo useradd --system --home /var/lib/energy-manager energy-manager
+#   sudo python3 -m venv /opt/energy-manager && sudo /opt/energy-manager/bin/pip install /path/to/energy-manager
+#   sudo cp deploy/energy-manager.service /etc/systemd/system/ && sudo systemctl enable --now energy-manager
+[Unit]
+Description=Energy Manager (EMS)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=energy-manager
+Group=energy-manager
+SupplementaryGroups=dialout
+Environment=EMS_DATA_DIR=/var/lib/energy-manager
+EnvironmentFile=-/etc/energy-manager.env
+ExecStart=/opt/energy-manager/bin/ems serve --data-dir /var/lib/energy-manager --port 8080
+StateDirectory=energy-manager
+Restart=always
+RestartSec=5
+# The EMS pets the systemd watchdog every 5 s; a hung process is restarted.
+WatchdogSec=60
+TimeoutStopSec=30
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/energy-manager
+
+[Install]
+WantedBy=multi-user.target

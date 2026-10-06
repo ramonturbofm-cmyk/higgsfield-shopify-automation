@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Energy Manager</title>
+<link rel="stylesheet" href="/static/css/app.css">
+<link rel="manifest" href="/static/manifest.webmanifest">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+</head>
+<body>
+<div id="app" class="app">
+  <aside class="sidebar" id="sidebar" aria-label="Navigatie"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <div id="banner"></div>
+    <main id="view" class="view" tabindex="-1"></main>
+  </div>
+</div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

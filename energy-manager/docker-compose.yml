@@ -1,0 +1,51 @@
+# Energy Manager on a Raspberry Pi 4/5 (Raspberry Pi OS 64-bit) or any Linux host.
+#   cp .env.example .env      # adjust if needed
+#   docker compose up -d
+# Web interface: http://<pi-address>:8080   (only on your local network — do not port-forward)
+services:
+  ems:
+    build: .
+    image: energy-manager:latest
+    container_name: energy-manager
+    restart: unless-stopped
+    # Host networking is required for mDNS discovery (HomeWizard P1) and LAN device protocols.
+    network_mode: host
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      EMS_MODE: ${EMS_MODE:-production}
+      EMS_PORT: ${EMS_PORT:-8080}
+      TZ: ${TZ:-Europe/Amsterdam}
+    volumes:
+      - ems-data:/data          # configuration, database, encrypted secrets, backups
+    group_add:
+      - dialout                 # serial P1 cable access
+    # Direct DSMR P1 cable: uncomment and adjust the device path.
+    # devices:
+    #   - /dev/ttyUSB0:/dev/ttyUSB0
+    stop_grace_period: 30s      # devices are released to their own control on shutdown
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "5"}
+
+  # Optional: PostgreSQL instead of the built-in SQLite database.
+  #   docker compose --profile postgres up -d   and set EMS_DATABASE_URL in .env:
+  #   EMS_DATABASE_URL=postgresql+psycopg://ems:${POSTGRES_PASSWORD}@127.0.0.1:5432/ems
+  postgres:
+    profiles: ["postgres"]
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ems
+      POSTGRES_USER: ems
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}   # required when using this profile (set it in .env)
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: [pg-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ems"]
+      interval: 10s
+
+volumes:
+  ems-data:
+  pg-data:

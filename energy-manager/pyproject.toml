@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "energy-manager"
-version = "0.1.0"
+version = "0.2.0"
 description = "Universeel, vooruitkijkend Energy Management System voor Raspberry Pi / Linux"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -12,12 +12,26 @@ dependencies = [
     "pydantic>=2.6",
     "PyYAML>=6.0",
     "tzdata",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "SQLAlchemy>=2.0",
+    "httpx>=0.27",
+    "PyJWT>=2.8",
+    "cryptography>=42",
+    "zeroconf>=0.130",
+    "websockets>=13",
+    "python-multipart>=0.0.9",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "pyserial>=3.5",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "pytest-timeout", "ruff"]
+postgres = ["psycopg[binary]>=3.1"]
 
 [project.scripts]
+ems = "ems.__main__:main"
 ems-sim = "ems.simulator.__main__:main"
 
 [project.entry-points."ems.drivers"]
@@ -26,6 +40,10 @@ ems-sim = "ems.simulator.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["backend"]
+
+[tool.setuptools.package-data]
+ems = ["CHANGELOG.md", "web/*", "web/css/*", "web/js/*.js", "web/js/views/*.js"]
+"ems.integrations.homewizard" = ["*.pem"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

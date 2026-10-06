@@ -1,0 +1,3 @@
+{"name": "Energy Manager", "short_name": "Energy", "start_url": "/", "display": "standalone",
+ "background_color": "#fcfcfb", "theme_color": "#2a78d6",
+ "icons": [{"src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml"}]}

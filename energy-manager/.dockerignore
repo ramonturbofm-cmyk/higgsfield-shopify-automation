@@ -1,0 +1,13 @@
+.git
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.venv*
+data
+out
+dist
+build
+windows-app/node_modules
+windows-app/src-tauri/target
+*.egg-info
+.env
