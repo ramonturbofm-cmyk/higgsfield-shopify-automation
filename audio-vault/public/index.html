@@ -21,6 +21,10 @@
   header h1 { font-size: 17px; margin: 0; }
   nav { display: flex; gap: 4px; flex: 1; flex-wrap: wrap; }
   nav button { background: none; border: 0; padding: 6px 12px; border-radius: 6px; color: var(--muted); cursor: pointer; font: inherit; }
+  .report-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line, #333); align-items: start; }
+  .report-actions { display: flex; flex-direction: column; gap: 6px; }
+  .report-reason { color: #ff9f0a; font-weight: 600; }
+  @media (max-width: 700px) { .report-row { grid-template-columns: 1fr; } .report-actions { flex-direction: row; flex-wrap: wrap; } }
   nav button.active { background: var(--chip); color: var(--text); font-weight: 600; }
   main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 120px; }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; margin-bottom: 16px; }
@@ -129,6 +133,7 @@ function form(fields, submitLabel, onSubmit) {
 async function boot() {
   const invite = new URLSearchParams(location.hash.slice(1)).get('invite');
   if (invite) return renderInvite(invite);
+  if (location.hash === '#meldingen') state.tab = 'reports';
   try { state.me = (await api('GET', '/api/me')).user; return renderMain(); } catch {}
   const { needs_setup } = await api('GET', '/api/setup');
   needs_setup ? renderSetup() : renderLogin();
@@ -168,7 +173,7 @@ async function renderInvite(token) {
 function renderMain() {
   const tabs = [['library', 'Bibliotheek']];
   if (state.me.can_download) tabs.push(['connect', 'Koppelen (mAirList)']);
-  if (isAdmin()) tabs.push(['users', 'Gebruikers'], ['activity', 'Activiteit']);
+  if (isAdmin()) tabs.push(['reports', '⚑ Meldingen'], ['users', 'Gebruikers'], ['activity', 'Activiteit']);
   if (!tabs.some(([id]) => id === state.tab)) state.tab = 'library';
   const content = h('main');
   $app.replaceChildren(
@@ -178,7 +183,7 @@ function renderMain() {
       h('span', { class: 'muted' }, `${state.me.name} · ${roleLabel[state.me.role]}`),
       h('button', { class: 'btn small', onclick: async () => { await api('POST', '/api/logout'); sessionStorage.clear(); location.reload(); } }, 'Uitloggen')),
     content);
-  ({ library: renderLibrary, connect: renderConnect, users: renderUsers, activity: renderActivity })[state.tab](content);
+  ({ library: renderLibrary, connect: renderConnect, users: renderUsers, activity: renderActivity, reports: renderReports })[state.tab](content);
 }
 
 // ---------- library ----------
@@ -394,6 +399,46 @@ function accessEditor(user, collections) {
 }
 
 // ---------- activity ----------
+
+// ---------- problem reports (admins) ----------
+// Tracks someone reported from the studio: listen, fix title/artist, replace the audio
+// with a good version (same track, so playlists and jingle buttons keep working), close.
+async function renderReports(root) {
+  const done = Boolean(state.reportsDone);
+  const { reports } = await api('GET', `/api/reports${done ? '?status=done' : ''}`);
+  const replaceAudio = (r) => {
+    const input = h('input', { type: 'file', accept: 'audio/*,.mp3,.wav,.flac,.m4a,.aac,.ogg,.opus,.aif,.aiff,.wma,.mp2,.mpeg,.mpg,.mpga', class: 'hidden' });
+    input.addEventListener('change', async () => {
+      if (!input.files[0]) return;
+      const fd = new FormData(); fd.append('file', input.files[0]);
+      try {
+        await api('PUT', `/api/files/${r.file.id}/audio`, fd);
+        if (confirm('Het nieuwe bestand staat erin. Deze melding meteen op "opgelost" zetten?')) await api('POST', `/api/reports/${r.id}/resolve`, {});
+      } catch (e) { alert(`Vervangen mislukt: ${e.message}`); }
+      renderMain();
+    });
+    document.body.append(input);
+    input.click();
+  };
+  root.append(h('div', { class: 'card' },
+    h('div', { style: 'display:flex;align-items:center;gap:10px;flex-wrap:wrap' },
+      h('h2', { style: 'margin:0;flex:1' }, done ? 'Opgeloste meldingen' : `⚑ Meldingen over nummers (${reports.length})`),
+      h('button', { class: 'btn small', onclick: () => { state.reportsDone = !done; renderMain(); } }, done ? 'Open meldingen tonen' : 'Opgeloste tonen')),
+    h('p', { class: 'muted' }, done ? 'Wat al is afgehandeld.' : 'Wat klanten en dj\'s in de studio hebben doorgegeven (slepen naar "⚑ Probleem melden" of rechtsklik). Beluister het nummer, pas het aan of vervang het bestand, en zet de melding op opgelost.'),
+    reports.length ? reports.map((r) => h('div', { class: 'report-row' },
+      h('div', { class: 'report-main' },
+        h('strong', {}, r.file.artist ? `${r.file.artist} – ${r.file.title}` : r.file.title),
+        h('div', {}, h('span', { class: 'report-reason' }, r.reason_label), r.note ? ` — ${r.note}` : ''),
+        h('div', { class: 'muted' }, `door ${r.user_name} · ${new Date(r.created_at).toLocaleString('nl-NL')}${r.resolved_at ? ` · opgelost ${new Date(r.resolved_at).toLocaleString('nl-NL')}` : ''}`),
+        h('audio', { controls: true, preload: 'none', src: `/api/files/${r.file.id}/stream`, style: 'width:100%;max-width:420px;margin-top:6px' })),
+      h('div', { class: 'report-actions' },
+        h('button', { class: 'btn small', onclick: () => editFile(r.file) }, 'Titel/artiest aanpassen'),
+        h('button', { class: 'btn small', onclick: () => replaceAudio(r) }, 'Bestand vervangen…'),
+        done
+          ? h('button', { class: 'btn small', onclick: async () => { await api('POST', `/api/reports/${r.id}/resolve`, { reopen: true }); renderMain(); } }, 'Heropenen')
+          : h('button', { class: 'btn small primary', onclick: async () => { await api('POST', `/api/reports/${r.id}/resolve`, {}); renderMain(); } }, '✓ Opgelost'))))
+      : h('p', { class: 'muted' }, done ? 'Nog niets opgelost.' : 'Geen open meldingen. 👍')));
+}
 
 async function renderActivity(root) {
   const { activity } = await api('GET', '/api/activity');

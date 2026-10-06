@@ -61,13 +61,14 @@ const convertEnabled = () => process.env.CONVERT_TO_FLAC !== 'false';
  * @param {boolean} o.move         true: source may be moved/deleted (upload temp file); false: leave it alone (import)
  * @param {string} o.originalName  name shown to people / used for the extension
  */
-async function ingestFile({ pool, filesDir, source, move, originalName, collectionId, userId, overrides = {}, sourcePath = null }) {
+// Puts an audio file in place under filesDir (converted to FLAC/MP3 where that loses
+// nothing) and returns where it went, its stored extension and its tags.
+async function storeAudio({ filesDir, source, move, originalName }) {
   const ext = path.extname(originalName).toLowerCase();
   if (!AUDIO_TYPES[ext]) throw Object.assign(new Error(`Geen ondersteund audioformaat: ${originalName}`), { status: 400 });
 
   let meta = {};
   try { meta = await mm.parseFile(source, { duration: true, skipCovers: true }); } catch { /* unreadable tags are fine */ }
-  const common = meta.common || {};
 
   let storedExt = ext;
   const id = crypto.randomUUID();
@@ -102,6 +103,13 @@ async function ingestFile({ pool, filesDir, source, move, originalName, collecti
     if (move) fs.renameSync(source, target); else fs.copyFileSync(source, target);
   }
 
+  return { target, storedExt, meta };
+}
+
+async function ingestFile({ pool, filesDir, source, move, originalName, collectionId, userId, overrides = {}, sourcePath = null }) {
+  const { target, storedExt, meta } = await storeAudio({ filesDir, source, move, originalName });
+  const ext = path.extname(originalName).toLowerCase();
+  const common = meta.common || {};
   const title = String(overrides.title || common.title || path.basename(originalName, ext)).trim().slice(0, 300);
   const artist = String(overrides.artist || common.artist || '').trim().slice(0, 300);
   const tags = String(overrides.tags || '').split(',').map((t) => t.trim()).filter(Boolean);
@@ -120,4 +128,24 @@ async function ingestFile({ pool, filesDir, source, move, originalName, collecti
   }
 }
 
-module.exports = { AUDIO_TYPES, ingestFile, hasFfmpeg };
+// Swap the audio of an existing track for a better version (wrong file, bad quality):
+// same id, so playlists, jingle buttons and clocks keep pointing at it. Title and
+// artist stay; cue points, loudness and genre are measured again.
+async function replaceAudio({ pool, filesDir, file, source, move, originalName }) {
+  const { target, storedExt, meta } = await storeAudio({ filesDir, source, move, originalName });
+  try {
+    const { rows } = await pool.query(
+      `UPDATE audio_files SET storage_key = $1, mime_type = $2, size_bytes = $3, duration_seconds = $4, original_name = $5,
+              cue_in = NULL, mix_out = NULL, cue_out = NULL, loudness_lufs = NULL, true_peak_db = NULL,
+              loudness_checked = FALSE, genre = NULL WHERE id = $6 RETURNING *`,
+      [path.basename(target), AUDIO_TYPES[storedExt], fs.statSync(target).size,
+        meta.format && meta.format.duration ? meta.format.duration : null, originalName, file.id]);
+    fs.rmSync(path.join(filesDir, file.storage_key), { force: true });
+    return rows[0];
+  } catch (err) {
+    fs.rmSync(target, { force: true });
+    throw err;
+  }
+}
+
+module.exports = { AUDIO_TYPES, ingestFile, replaceAudio, hasFfmpeg };

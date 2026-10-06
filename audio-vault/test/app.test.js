@@ -43,7 +43,7 @@ function client() {
 before(async () => {
   if (!DB) return;
   pool = createPool(DB);
-  await pool.query('DROP TABLE IF EXISTS nonstop_blocks, clock_schedule, clocks, station_now_playing, now_playing, user_settings, access_log, collection_access, audio_files, collections, users CASCADE');
+  await pool.query('DROP TABLE IF EXISTS track_reports, nonstop_blocks, clock_schedule, clocks, station_now_playing, now_playing, user_settings, access_log, collection_access, audio_files, collections, users CASCADE');
   await migrate(pool);
   storageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-'));
   const app = createApp({ pool, storageDir, sessionSecret: 'test-secret' });
@@ -433,6 +433,50 @@ test('.mpeg files are accepted: MP3 inside becomes .mp3, anything else FLAC', { 
   const stream = await fetch(`${base}/api/files/${out['mp3 erin.mpeg'].id}/stream`, { headers: { cookie: owner.cookie() } });
   assert.equal(stream.status, 200);
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('track feedback: a member reports a track, the admin replaces the audio and closes it', { skip: !DB && 'TEST_DATABASE_URL not set' }, async () => {
+  const owner = client();
+  assert.equal((await owner('POST', '/api/login', { email: 'owner@example.com', password: 'supergeheim1' })).status, 200);
+  const col = (await owner('POST', '/api/collections', { name: 'Feedback' })).data.collection;
+  const fd = new FormData();
+  fd.append('collection_id', String(col.id)); fd.append('artist', 'Band'); fd.append('title', 'Slecht nummer');
+  fd.append('file', new Blob([wav()]), 'slecht.wav');
+  const track = (await owner('POST', '/api/files', fd)).data.file;
+
+  const inv = (await owner('POST', '/api/users', { name: 'Klant', email: 'klant-feedback@example.com' })).data;
+  const klant = client();
+  await klant('POST', `/api/invite/${inv.invite_url.split('#invite=')[1]}`, { password: 'klant-wachtwoord-1' });
+  assert.equal((await klant('POST', `/api/files/${track.id}/report`, { reason: 'quality' })).status, 404, 'no access, no report');
+  await owner('PUT', `/api/users/${inv.user.id}/access`, { access: [{ collection_id: col.id, can_upload: false }] });
+  assert.equal((await klant('POST', `/api/files/${track.id}/report`, { reason: 'onzin' })).status, 400);
+  assert.equal((await klant('POST', `/api/files/${track.id}/report`, { reason: 'quality', note: 'kraakt na 1 minuut' })).status, 201);
+  assert.equal((await klant('POST', `/api/files/${track.id}/report`, { reason: 'cue', note: 'begint te laat' })).status, 201, 'reporting again updates');
+  assert.equal((await klant('GET', '/api/reports')).status, 403, 'only admins see reports');
+  assert.equal((await klant('GET', '/api/reports/count')).data.open, 0);
+  assert.equal((await owner('GET', '/api/reports/count')).data.open, 1);
+  const [rep] = (await owner('GET', '/api/reports')).data.reports;
+  assert.equal(rep.user_name, 'Klant');
+  assert.equal(rep.reason_label, 'Begint of stopt verkeerd');
+  assert.equal(rep.note, 'begint te laat');
+  assert.equal(rep.file.id, track.id);
+  assert.equal(rep.file.title, 'Slecht nummer');
+
+  // The customer may not replace the audio; the owner may, and the id stays the same.
+  const better = new FormData(); better.append('file', new Blob([wav()]), 'goed.wav');
+  assert.equal((await klant('PUT', `/api/files/${track.id}/audio`, better)).status, 403);
+  const better2 = new FormData(); better2.append('file', new Blob([wav()]), 'goed.wav');
+  const replaced = await owner('PUT', `/api/files/${track.id}/audio`, better2);
+  assert.equal(replaced.status, 200);
+  assert.equal(replaced.data.file.id, track.id);
+  assert.equal(replaced.data.file.title, 'Slecht nummer', 'title and artist stay');
+  assert.equal((await fetch(`${base}/api/files/${track.id}/stream`, { headers: { cookie: owner.cookie() } })).status, 200);
+  const { rows: [{ n }] } = await pool.query('SELECT count(*)::int AS n FROM audio_files WHERE id = $1', [track.id]);
+  assert.equal(n, 1);
+
+  assert.equal((await owner('POST', `/api/reports/${rep.id}/resolve`, {})).status, 200);
+  assert.equal((await owner('GET', '/api/reports/count')).data.open, 0);
+  assert.equal((await owner('GET', '/api/reports?status=done')).data.reports[0].id, rep.id);
 });
 
 test('new music is added automatically; files still copying wait; one import at a time', { skip: !DB && 'TEST_DATABASE_URL not set' }, async () => {

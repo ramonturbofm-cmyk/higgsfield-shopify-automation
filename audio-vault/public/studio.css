@@ -277,3 +277,15 @@ dialog::backdrop { background: rgba(0, 0, 0, .7); }
 .vu-scale span:last-child { transform: translateX(-100%); }
 .vu.clip .vu-row span { color: var(--accent); }
 .now-times > span:first-child { white-space: nowrap; }
+
+/* Problem reports */
+.report-drop { margin-top: 6px; padding: 8px 10px; border: 1px dashed var(--muted); border-radius: 8px; display: grid; gap: 1px; text-align: center; color: var(--muted); }
+.report-drop strong { color: var(--warn); font-size: 13px; letter-spacing: .04em; }
+.report-drop span { font-size: 11px; }
+.report-drop.over { border: 2px solid var(--warn); background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--text); }
+.report-badge { position: relative; color: var(--warn); border-color: var(--warn); text-decoration: none; }
+.report-badge span { position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px;
+  background: var(--warn); color: #000; font-size: 11px; font-weight: 800; display: grid; place-items: center; }
+.report-track { font-weight: 700; font-size: 15px; margin: 0 0 8px; }
+.report-reasons { display: grid; gap: 4px; margin-bottom: 8px; }
+.report-form textarea { width: 100%; box-sizing: border-box; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px; font: inherit; }

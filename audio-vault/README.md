@@ -325,6 +325,21 @@ je een heel album tegelijk selecteren.
 - Aanzetten mag de beheerder, of iemand met uploadrechten op die collectie. Het
   geldt voor iedereen die het nummer draait.
 
+## Probleem melden (feedback op nummers)
+
+Klanten en dj's kunnen in de studio een nummer dat niet goed is **doorgeven aan de
+beheerder**: sleep het (uit de database of de playlist) naar het vak **⚑ Probleem
+melden**, of rechtsklik → *Probleem melden…*. Ze kiezen wat er mis is (slechte
+kwaliteit, verkeerde titel/artiest, begint of stopt verkeerd, te zacht/hard, verkeerd
+nummer, anders) en kunnen een toelichting typen.
+
+De eigenaar en beheerders zien rechtsboven in de studio een oranje **⚑** met het aantal
+open meldingen (en een Windows-melding bij een nieuwe). Klik erop → *Meldingen* in de
+bibliotheek: beluister het nummer, pas titel/artiest aan, of **vervang het bestand**
+door een goede versie. Het blijft hetzelfde nummer, dus playlists, jingle-knoppen en
+uurklokken blijven werken; cue-punten, volume en genre worden opnieuw gemeten. Zet de
+melding daarna op *Opgelost*.
+
 ## Nonstop-filter (wat je nooit in de uurklok wilt)
 
 Per persoon stel je in wat de automatische planning (uurklok / 24/7) nooit kiest.

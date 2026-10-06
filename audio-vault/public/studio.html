@@ -30,6 +30,7 @@
   <div class="countdown" id="now-remaining">-0:00</div>
   <div class="clock"><div id="clock-time">00:00:00</div><div id="clock-date" class="clock-date"></div></div>
   <div class="top-actions">
+    <a class="icon-btn report-badge hidden" id="btn-reports" href="/#meldingen" target="aot-beheer" title="Meldingen over nummers">⚑<span id="reports-count"></span></a>
     <button class="icon-btn update-btn hidden" id="btn-update" title="Updates">⬆</button>
     <button class="icon-btn" id="btn-settings" title="Instellingen">⚙</button>
     <a class="icon-btn" href="/klok.html" target="aot-beheer" title="Uurklokken (eigen venster; de muziek speelt door)">◔</a>
@@ -75,6 +76,9 @@
     </div>
     <div class="lib-selbar hidden" id="lib-selbar"></div>
     <div class="library" id="library"></div>
+    <div class="report-drop" id="report-drop" title="Sleep een nummer uit de database of de playlist hierheen">
+      <strong>⚑ Probleem melden</strong><span>sleep een nummer hierheen — de beheerder verbetert het</span>
+    </div>
     <div class="hint">Ctrl/Shift+klik = meerdere kiezen · ⤴ = als volgende · + = achteraan · dubbelklik = achteraan · rechtsklik = meer · sleep naar playlist of jingle-knop · 🎧 = voorbeluisteren</div>
   </section>
 
@@ -97,6 +101,21 @@
 </footer>
 
 <div class="menu hidden" id="slot-menu"></div>
+
+<dialog id="report">
+  <form method="dialog" class="settings report-form">
+    <h2>⚑ Probleem melden</h2>
+    <p class="report-track" id="report-track"></p>
+    <label>Wat is er niet goed?</label>
+    <div class="report-reasons" id="report-reasons"></div>
+    <label>Toelichting (optioneel)</label>
+    <textarea id="report-note" rows="3" maxlength="1000" placeholder="bijv. kraakt na 1 minuut, het is de live-versie, …"></textarea>
+    <div class="dialog-actions">
+      <button type="button" class="tbtn" id="report-cancel">Annuleren</button>
+      <button type="button" class="tbtn start" id="report-send">Doorgeven aan de beheerder</button>
+    </div>
+  </form>
+</dialog>
 
 <dialog id="settings">
   <form method="dialog" class="settings">

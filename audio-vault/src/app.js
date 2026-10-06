@@ -5,7 +5,7 @@ const multer = require('multer');
 const auth = require('./auth');
 const lib = require('./library');
 const { createDavRouter } = require('./dav');
-const { AUDIO_TYPES, ingestFile } = require('./ingest');
+const { AUDIO_TYPES, ingestFile, replaceAudio } = require('./ingest');
 const { createClockRouter } = require('./clocks');
 const nonstop = require('./nonstop');
 const { createTranscoder } = require('./transcode');
@@ -444,6 +444,70 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
       [title ?? null, artist ?? null, Array.isArray(tags) ? tags.map(String) : null,
         collectionId === undefined ? null : Number(collectionId), file.id]);
     res.json({ file: publicFile(rows[0]) });
+  }));
+
+  // A better version of the same track: new audio, same id (playlists keep working).
+  app.put('/api/files/:id/audio', requireUser, upload.single('file'), wrap(async (req, res) => {
+    const tmp = req.file && req.file.path;
+    try {
+      const file = await editableFile(req);
+      if (!req.file) throw new HttpError(400, `Geen (ondersteund) audiobestand. Toegestaan: ${Object.keys(AUDIO_TYPES).join(', ')}`);
+      const originalName = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
+      transcoder.forget(file);
+      const row = await replaceAudio({ pool, filesDir, file, source: tmp, move: true, originalName });
+      lib.logAccess(pool, req.user.id, file.id, 'upload', 'web');
+      res.json({ file: publicFile(row) });
+    } finally {
+      if (tmp && fs.existsSync(tmp)) fs.unlinkSync(tmp);
+    }
+  }));
+
+  // ---------- track feedback ----------
+  const REPORT_REASONS = {
+    quality: 'Slechte geluidskwaliteit', tags: 'Verkeerde titel of artiest', cue: 'Begint of stopt verkeerd',
+    volume: 'Te zacht of te hard', wrong: 'Verkeerd nummer / kapot bestand', other: 'Anders',
+  };
+  app.post('/api/files/:id/report', requireUser, wrap(async (req, res) => {
+    const file = await lib.readableFile(pool, req.user, Number(req.params.id));
+    if (!file) throw new HttpError(404, 'Bestand niet gevonden');
+    const reason = String((req.body && req.body.reason) || '');
+    if (!REPORT_REASONS[reason]) throw new HttpError(400, 'Kies wat er niet goed is');
+    const note = String(req.body.note || '').trim().slice(0, 1000);
+    // One open report per person per track: reporting again updates it.
+    const { rows: [open] } = await pool.query("SELECT id FROM track_reports WHERE file_id = $1 AND user_id = $2 AND status = 'open'", [file.id, req.user.id]);
+    const { rows: [r] } = open
+      ? await pool.query('UPDATE track_reports SET reason = $1, note = $2, created_at = now() WHERE id = $3 RETURNING id', [reason, note, open.id])
+      : await pool.query('INSERT INTO track_reports (file_id, user_id, reason, note) VALUES ($1, $2, $3, $4) RETURNING id', [file.id, req.user.id, reason, note]);
+    res.status(201).json({ report: { id: r.id } });
+  }));
+  app.get('/api/reports', requireUser, requireAdmin, wrap(async (req, res) => {
+    const status = req.query.status === 'done' ? 'done' : 'open';
+    const { rows } = await pool.query(
+      `SELECT f.*, r.id AS report_id, r.reason, r.note, r.status AS report_status, r.created_at AS reported_at,
+              r.resolved_at, u.name AS user_name
+         FROM track_reports r JOIN audio_files f ON f.id = r.file_id LEFT JOIN users u ON u.id = r.user_id
+        WHERE r.status = $1 ORDER BY ${status === 'open' ? 'r.created_at' : 'r.resolved_at'} DESC LIMIT 500`, [status]);
+    res.json({
+      reasons: REPORT_REASONS,
+      reports: rows.map((r) => ({
+        id: r.report_id, reason: r.reason, reason_label: REPORT_REASONS[r.reason] || r.reason, note: r.note, status: r.report_status,
+        created_at: r.reported_at, resolved_at: r.resolved_at, user_name: r.user_name || '(verwijderd)',
+        file: publicFile(r),
+      })),
+    });
+  }));
+  app.get('/api/reports/count', requireUser, wrap(async (req, res) => {
+    if (!lib.isAdmin(req.user)) return res.json({ open: 0 });
+    const { rows: [{ n }] } = await pool.query("SELECT count(*)::int AS n FROM track_reports WHERE status = 'open'");
+    res.json({ open: n });
+  }));
+  app.post('/api/reports/:id/resolve', requireUser, requireAdmin, wrap(async (req, res) => {
+    const reopen = Boolean(req.body && req.body.reopen);
+    const { rowCount } = await pool.query(
+      `UPDATE track_reports SET status = $1, resolved_at = ${reopen ? 'NULL' : 'now()'}, resolved_by = $2 WHERE id = $3`,
+      [reopen ? 'open' : 'done', reopen ? null : req.user.id, Number(req.params.id)]);
+    if (!rowCount) throw new HttpError(404, 'Melding niet gevonden');
+    res.json({ ok: true });
   }));
 
   app.delete('/api/files/:id', requireUser, wrap(async (req, res) => {

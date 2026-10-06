@@ -144,3 +144,18 @@ CREATE TABLE IF NOT EXISTS nonstop_blocks (
 -- medley). It plays from the very start to the very end and the next item starts
 -- exactly where it ends: no silence skipped, no overlap, no fade.
 ALTER TABLE audio_files ADD COLUMN IF NOT EXISTS segue BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Track feedback: a listener/DJ/customer reports a track that is not right (bad
+-- quality, wrong title, starts or ends wrong, …); the owner/admins fix it and close it.
+CREATE TABLE IF NOT EXISTS track_reports (
+  id          SERIAL PRIMARY KEY,
+  file_id     INTEGER NOT NULL REFERENCES audio_files(id) ON DELETE CASCADE,
+  user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  reason      TEXT NOT NULL,
+  note        TEXT NOT NULL DEFAULT '',
+  status      TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'done')),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  resolved_at TIMESTAMPTZ,
+  resolved_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS track_reports_open_idx ON track_reports (created_at DESC) WHERE status = 'open';
