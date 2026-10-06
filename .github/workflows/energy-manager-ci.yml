@@ -21,6 +21,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - run: sudo apt-get install -y -q mosquitto mosquitto-clients   # real broker for the MQTT driver test
       - run: python -m pip install ".[dev]"
       - run: ruff check backend tests
       - run: python -m pytest -q --timeout 300 -p no:warnings

@@ -565,8 +565,13 @@ class EMSRuntime:
             log.info("configuration reloaded", extra={"user": username, "comment": comment})
             return self.config
 
-    async def restart(self) -> None:
-        """Re-read config, database and secrets from disk (after a restore)."""
+    async def restart(self, while_stopped=None):
+        """Re-read config, database and secrets from disk (after a restore).
+
+        ``while_stopped`` (a blocking callable) runs after the engine is stopped and the
+        database is closed — required to replace the database file (Windows locks open
+        files). Its result is returned; on an exception the old state is reopened and the
+        exception re-raised."""
         async with self._reload_lock:
             loops = bool(self.tasks)
             await self._stop_loops()
@@ -575,6 +580,12 @@ class EMSRuntime:
             except Exception:
                 log.exception("engine stop failed")
             self.db.close()
+            result, error = None, None
+            if while_stopped is not None:
+                try:
+                    result = await asyncio.to_thread(while_stopped)
+                except Exception as exc:
+                    error = exc
             self.config = self._load_config()
             self.db = Database(self.db_url)
             await asyncio.to_thread(self.db.migrate)
@@ -585,6 +596,9 @@ class EMSRuntime:
             await self._build()
             if loops:
                 self._start_loops()
+            if error is not None:
+                raise error
+            return result
 
     def system_status(self) -> dict:
         snap = self.engine.last_snapshot

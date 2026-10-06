@@ -284,3 +284,21 @@ async def test_production_mode_has_no_fake_data(tmp_path):
     assert r.status_code == 422 and "Demo Mode" in r.json()["detail"]
     await c.aclose()
     await rt.stop()
+
+
+async def test_generic_device_password_goes_to_secret_store(env):
+    rt, c = env
+    body = {"name": "MQTT meter", "category": "smart_meter", "driver": "generic.mqtt",
+            "connection": {"host": "127.0.0.1", "port": 1, "username": "ems", "password": "s3cret-pw",
+                           "values": [{"metric": "grid_power_w", "topic": "p1/power"}]}}
+    r = await c.post("/api/v1/devices", json=body)
+    assert r.status_code == 200, r.text
+    dev = r.json()
+    assert dev["connection"]["password"] == "********" and dev["control_level"] == "read_only"
+    assert "s3cret-pw" not in rt.config_path.read_text()
+    assert rt.secrets.get(f"device.{dev['id']}.password") == "s3cret-pw"
+    # Saving the masked value keeps the stored secret.
+    r = await c.put(f"/api/v1/devices/{dev['id']}", json={"connection": {"password": "********", "port": 2}})
+    assert r.status_code == 200 and rt.secrets.get(f"device.{dev['id']}.password") == "s3cret-pw"
+    assert (await c.delete(f"/api/v1/devices/{dev['id']}")).status_code == 200
+    assert rt.secrets.get(f"device.{dev['id']}.password") is None

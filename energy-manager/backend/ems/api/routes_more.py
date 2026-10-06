@@ -206,10 +206,9 @@ async def restore(file: UploadFile = File(...), _: Principal = Depends(admin), r
     blob = await file.read()
     try:
         inspect_backup(blob)
-        result = await asyncio.to_thread(restore_backup, blob, rt.data_dir, rt.db_url)
+        result = await rt.restart(lambda: restore_backup(blob, rt.data_dir, rt.db_url))
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    await rt.restart()
     return {"ok": True, "restored": result["files"], "safety_copy": result["safety_copy"]}
 
 

@@ -71,16 +71,23 @@ async function addWizard(root, cats, preset) {
       let input;
       if (s.enum) input = h("select", {}, s.enum.map((v) => h("option", { value: v }, v)));
       else if (s.type === "boolean") input = h("input", { type: "checkbox", checked: s.default ? true : null });
+      else if (s.type === "array") input = h("textarea", { rows: 7, class: "mono", spellcheck: "false",
+        placeholder: s.example ? JSON.stringify(s.example, null, 1) : "[]" });
       else input = h("input", { type: s.type === "integer" ? "number" : "text", value: s.default ?? "" });
       if (s.default !== undefined && s.enum) input.value = s.default;
       inputs[k] = [input, s];
-      return h("label", { class: s.type === "boolean" ? "f check" : "f" }, s.label_nl || k, input);
+      return h("label", { class: s.type === "boolean" ? "f check" : "f" }, s.label_nl || k, input,
+        s.help_nl ? h("span", { class: "muted small" }, s.help_nl) : null);
     });
     const result = h("div", {});
     const collect = () => {
       const conn = {};
       for (const [k, [input, s]] of Object.entries(inputs)) {
         if (s.type === "boolean") conn[k] = input.checked;
+        else if (s.type === "array") {
+          if (!input.value.trim()) continue;
+          try { conn[k] = JSON.parse(input.value); } catch (e) { throw new Error(`${s.label_nl || k}: ongeldige JSON (${e.message})`); }
+        }
         else if (input.value !== "") conn[k] = s.type === "integer" ? Number(input.value) : input.value;
       }
       return { name: name.value, category: wiz.category, driver: d.driver_id, phase: phase.value, connection: conn };

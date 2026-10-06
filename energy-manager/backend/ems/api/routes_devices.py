@@ -73,7 +73,7 @@ def _device_view(rt: EMSRuntime, cfg: DeviceConfig) -> dict:
     drv = None if md is None else md.driver
     sel = rt.engine.grid_selection
     data = cfg.model_dump(mode="json")
-    data["connection"] = {k: ("********" if "token" in k or "password" in k else v)
+    data["connection"] = {k: ("********" if _is_secret_key(k) and v else v)
                           for k, v in data["connection"].items()}
     data.update({
         "status": "disabled" if not cfg.enabled else (st.status.value if st else "unknown"),
@@ -129,6 +129,23 @@ def _check_driver(rt: EMSRuntime, driver: str, category: DeviceCategory):
     return cls
 
 
+def _is_secret_key(key: str) -> bool:
+    return key != "token_ref" and ("password" in key or "token" in key)
+
+
+def _store_connection_secrets(rt: EMSRuntime, dev_id: str, conn: dict[str, Any]) -> dict[str, Any]:
+    """Typed passwords/tokens go to the encrypted SecretStore; the YAML only keeps a reference.
+    ``${VAR}`` references (.env) and existing ``secret:`` references are kept as they are."""
+    out = dict(conn)
+    for k, v in conn.items():
+        if _is_secret_key(k) and isinstance(v, str) and v and v != "********" \
+                and not v.startswith(("${", "secret:")):
+            ref = f"device.{dev_id}.{k}"
+            rt.secrets.set(ref, v)
+            out[k] = f"secret:{ref}"
+    return out
+
+
 @router.post("/devices", tags=["devices"])
 async def add_device(body: DeviceIn, p: Principal = Depends(installer), rt: EMSRuntime = Depends(get_runtime)) -> dict:
     cls = _check_driver(rt, body.driver, body.category)
@@ -138,7 +155,8 @@ async def add_device(body: DeviceIn, p: Principal = Depends(installer), rt: EMSR
     if dev_id in existing:
         raise HTTPException(409, f"apparaat-id {dev_id!r} bestaat al")
     dev = {"id": dev_id, "name": body.name, "category": body.category.value, "driver": body.driver,
-           "phase": body.phase, "connection": body.connection, "params": body.params,
+           "phase": body.phase, "connection": _store_connection_secrets(rt, dev_id, body.connection),
+           "params": body.params,
            "control_level": "full" if cls.manifest.simulated else "read_only"}
     if body.primary_grid_meter:
         for d in data["devices"]:
@@ -176,6 +194,7 @@ async def update_device(device_id: str, body: DevicePatch, p: Principal = Depend
                         for kk, vv in v.items():
                             if vv == "********":
                                 d[k][kk] = rt.config.device(device_id).connection.get(kk)
+                        d[k] = _store_connection_secrets(rt, device_id, d[k])
                 else:
                     d[k] = v
     try:
@@ -191,6 +210,9 @@ async def delete_device(device_id: str, p: Principal = Depends(installer), rt: E
     data = rt.config.model_dump(mode="json")
     data["devices"] = [d for d in data["devices"] if d["id"] != device_id]
     await rt.reload(data, p.username, f"apparaat {device_id} verwijderd")
+    for v in cfg.connection.values():
+        if isinstance(v, str) and v.startswith("secret:device."):
+            rt.secrets.delete(v.removeprefix("secret:"))
     ref = cfg.connection.get("token_ref")
     if ref and not any(d.connection.get("token_ref") == ref for d in rt.config.devices):
         rt.secrets.delete(ref)
