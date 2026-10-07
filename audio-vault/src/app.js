@@ -23,6 +23,7 @@ function publicUser(u) {
     id: u.id, email: u.email, name: u.name, role: u.role, disabled: u.disabled,
     has_password: Boolean(u.password_hash), has_api_token: Boolean(u.api_token_hash),
     can_download: lib.canDownload(u),
+    plan: u.plan || null, access_until: u.access_until || null, expired: lib.isExpired(u),
     invite_pending: Boolean(u.invite_token_hash), created_at: u.created_at,
   };
 }
@@ -75,7 +76,7 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
     if (!session) return null;
     const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [session.userId]);
     const user = rows[0];
-    if (!user || user.disabled || user.session_version !== session.sessionVersion) return null;
+    if (!user || !lib.isActive(user) || user.session_version !== session.sessionVersion) return null;
     return user;
   }
 
@@ -147,6 +148,7 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
     if (!user || user.disabled || !auth.verifyPassword(String(password || ''), user.password_hash)) {
       throw new HttpError(401, 'Onjuiste e-mail of wachtwoord');
     }
+    if (lib.isExpired(user)) throw new HttpError(403, 'Je proefperiode of abonnement is afgelopen. Neem contact op om verder te gaan.');
     setSession(req, res, user);
     res.json({ user: publicUser(user) });
   }));
@@ -228,13 +230,16 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
   app.post('/api/users', requireUser, requireAdmin, wrap(async (req, res) => {
     const { email, name, role = 'member' } = req.body || {};
     if (!email || !name) throw new HttpError(400, 'Naam en e-mail zijn verplicht');
+    const plan = parsePlan(req.body.plan);
+    const trialDays = req.body.trial_days ? parseDays(req.body.trial_days) : null;
     if (!['member', 'admin'].includes(role)) throw new HttpError(400, 'Ongeldige rol');
     if (role === 'admin' && req.user.role !== 'owner') throw new HttpError(403, 'Alleen de eigenaar maakt beheerders aan');
     let user;
     try {
       ({ rows: [user] } = await pool.query(
-        'INSERT INTO users (email, name, role) VALUES ($1, $2, $3) RETURNING *',
-        [String(email).trim().toLowerCase(), String(name).trim(), role]));
+        `INSERT INTO users (email, name, role, plan, access_until)
+         VALUES ($1, $2, $3, $4, CASE WHEN $5::int IS NULL THEN NULL ELSE now() + make_interval(days => $5::int) END) RETURNING *`,
+        [String(email).trim().toLowerCase(), String(name).trim(), role, role === 'member' ? plan : null, role === 'member' ? trialDays : null]));
     } catch (err) {
       if (err.code === '23505') throw new HttpError(409, 'Dit e-mailadres bestaat al');
       throw err;
@@ -242,6 +247,18 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
     const token = await createInvite(user.id);
     res.status(201).json({ user: publicUser(user), invite_url: `${baseUrl(req)}/#invite=${token}` });
   }));
+
+  // '' or null = no package; otherwise one of lib.PLANS.
+  function parsePlan(value) {
+    if (value === undefined || value === null || value === '') return null;
+    if (!lib.PLANS.includes(value)) throw new HttpError(400, 'Ongeldig pakket');
+    return value;
+  }
+  function parseDays(value) {
+    const days = Number(value);
+    if (!Number.isInteger(days) || days < 1 || days > 800) throw new HttpError(400, 'Ongeldig aantal dagen');
+    return days;
+  }
 
   async function loadTarget(id) {
     const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [Number(id)]);
@@ -254,13 +271,24 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
     const { name, role, disabled, can_download: canDl } = req.body || {};
     if (role !== undefined && !['member', 'admin'].includes(role)) throw new HttpError(400, 'Ongeldige rol');
     assertCanManage(req.user, target, role);
+    const body = req.body || {};
+    const setPlan = 'plan' in body;
+    const plan = setPlan ? parsePlan(body.plan) : null;
+    // extend_days: add days to the current end date (or to today when it has passed);
+    // access_until: null = no end date (paid / unlimited).
+    const extendDays = body.extend_days !== undefined ? parseDays(body.extend_days) : null;
+    const clearUntil = 'access_until' in body && body.access_until === null;
     const { rows } = await pool.query(
       `UPDATE users SET name = COALESCE($1, name), role = COALESCE($2, role),
               disabled = COALESCE($3, disabled), can_download = COALESCE($5, can_download),
+              plan = CASE WHEN $6 THEN $7 ELSE plan END,
+              access_until = CASE WHEN $9 THEN NULL
+                WHEN $8::int IS NOT NULL THEN greatest(coalesce(access_until, now()), now()) + make_interval(days => $8::int)
+                ELSE access_until END,
               session_version = session_version + CASE WHEN $3::boolean THEN 1 ELSE 0 END
         WHERE id = $4 RETURNING *`,
       [name ?? null, role ?? null, typeof disabled === 'boolean' ? disabled : null, target.id,
-        typeof canDl === 'boolean' ? canDl : null]);
+        typeof canDl === 'boolean' ? canDl : null, setPlan, plan, extendDays, clearUntil]);
     res.json({ user: publicUser(rows[0]) });
   }));
 
@@ -319,8 +347,8 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
 
   app.post('/api/collections', requireUser, requireAdmin, wrap(async (req, res) => {
     try {
-      const { rows } = await pool.query('INSERT INTO collections (name, description) VALUES ($1, $2) RETURNING *',
-        [collectionName(req.body && req.body.name), String((req.body && req.body.description) || '')]);
+      const { rows } = await pool.query('INSERT INTO collections (name, description, min_plan) VALUES ($1, $2, $3) RETURNING *',
+        [collectionName(req.body && req.body.name), String((req.body && req.body.description) || ''), parsePlan(req.body && req.body.min_plan)]);
       res.status(201).json({ collection: rows[0] });
     } catch (err) {
       if (err.code === '23505') throw new HttpError(409, 'Er bestaat al een collectie met deze naam');
@@ -330,10 +358,13 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
 
   app.patch('/api/collections/:id', requireUser, requireAdmin, wrap(async (req, res) => {
     const { name, description } = req.body || {};
+    const setMinPlan = Boolean(req.body) && 'min_plan' in req.body;
+    const minPlan = setMinPlan ? parsePlan(req.body.min_plan) : null;
     try {
       const { rows } = await pool.query(
-        'UPDATE collections SET name = COALESCE($1, name), description = COALESCE($2, description) WHERE id = $3 RETURNING *',
-        [name === undefined ? null : collectionName(name), description ?? null, Number(req.params.id)]);
+        `UPDATE collections SET name = COALESCE($1, name), description = COALESCE($2, description),
+                min_plan = CASE WHEN $4 THEN $5 ELSE min_plan END WHERE id = $3 RETURNING *`,
+        [name === undefined ? null : collectionName(name), description ?? null, Number(req.params.id), setMinPlan, minPlan]);
       if (!rows.length) throw new HttpError(404, 'Collectie niet gevonden');
       res.json({ collection: rows[0] });
     } catch (err) {
@@ -626,7 +657,7 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
 
   const tokenUser = wrap(async (req, res, next) => {
     const { rows } = await pool.query('SELECT * FROM users WHERE api_token_hash = $1 AND NOT disabled', [auth.sha256(req.params.token)]);
-    if (!rows.length || !lib.canDownload(rows[0])) throw new HttpError(401, 'Ongeldige of ingetrokken token');
+    if (!rows.length || !lib.isActive(rows[0]) || !lib.canDownload(rows[0])) throw new HttpError(401, 'Ongeldige of ingetrokken token');
     req.user = rows[0];
     next();
   });

@@ -144,3 +144,10 @@ CREATE TABLE IF NOT EXISTS nonstop_blocks (
 -- medley). It plays from the very start to the very end and the next item starts
 -- exactly where it ends: no silence skipped, no overlap, no fade.
 ALTER TABLE audio_files ADD COLUMN IF NOT EXISTS segue BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Packages (Basis / Standaard / Pro). A member with a plan also sees every collection
+-- whose min_plan is at or below that plan, on top of the collections ticked by hand.
+-- access_until ends a trial week or a paid period: after it the account stops working.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS plan TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS access_until TIMESTAMPTZ;
+ALTER TABLE collections ADD COLUMN IF NOT EXISTS min_plan TEXT;

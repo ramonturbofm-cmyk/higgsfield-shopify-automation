@@ -212,6 +212,13 @@ async function renderLibrary(root) {
     } }, 'Verwijderen') : null);
 
   const card = h('div', { class: 'card' }, head);
+  if (isAdmin()) {
+    const minPlan = h('select', { style: 'width:auto' }, [['', 'Alleen wie je aanvinkt'], ['basis', 'Basis, Standaard en Pro'], ['standaard', 'Standaard en Pro'], ['pro', 'Alleen Pro']]
+      .map(([v, l]) => h('option', { value: v }, l)));
+    minPlan.value = selected.min_plan || '';
+    minPlan.addEventListener('change', async () => { await api('PATCH', `/api/collections/${selected.id}`, { min_plan: minPlan.value || null }); renderMain(); });
+    card.append(h('div', { class: 'row', style: 'gap:8px;margin:6px 0 10px' }, h('span', { class: 'muted' }, 'Zichtbaar voor pakket:'), minPlan));
+  }
   if (selected.can_upload) card.append(uploadBox(selected));
 
   const search = h('input', { placeholder: 'Zoek op titel, artiest of tag…', value: state.q });
@@ -336,13 +343,36 @@ async function renderConnect(root) {
 
 // ---------- users ----------
 
+const PLAN_LABELS = { basis: 'Basis', standaard: 'Standaard', pro: 'Pro' };
+const planOptions = (none) => [['', none], ...Object.entries(PLAN_LABELS)];
+const dateNl = (iso) => new Date(iso).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long', year: 'numeric' });
+
+// Package and end date of a member: a trial week, a paid month or year, or no end date.
+function planEditor(u) {
+  const sel = h('select', { style: 'width:auto' }, planOptions('Geen pakket').map(([v, l]) => h('option', { value: v }, l)));
+  sel.value = u.plan || '';
+  sel.addEventListener('change', async () => { await api('PATCH', `/api/users/${u.id}`, { plan: sel.value || null }); renderMain(); });
+  const until = !u.access_until ? 'Geen einddatum'
+    : u.expired ? `Verlopen op ${dateNl(u.access_until)} — kan niet meer inloggen`
+      : `Toegang tot en met ${dateNl(u.access_until)}`;
+  const extend = (days, label) => h('button', { class: 'btn small', onclick: async () => { await api('PATCH', `/api/users/${u.id}`, { extend_days: days }); renderMain(); } }, label);
+  return h('div', { style: 'margin-top:10px' },
+    h('div', { class: 'row', style: 'gap:8px;flex-wrap:wrap' }, h('span', { class: 'muted' }, 'Pakket'), sel,
+      h('span', { class: u.expired ? 'error' : 'muted', style: 'margin:0 0 0 10px' }, until)),
+    h('div', { class: 'row', style: 'gap:6px;flex-wrap:wrap;margin-top:6px' }, h('span', { class: 'muted' }, 'Verlengen:'),
+      extend(7, '+1 week'), extend(31, '+1 maand'), extend(365, '+1 jaar'),
+      u.access_until ? h('button', { class: 'btn small', onclick: async () => { await api('PATCH', `/api/users/${u.id}`, { access_until: null }); renderMain(); } }, 'Geen einddatum') : null));
+}
+
 async function renderUsers(root) {
   const [{ users }, { collections }] = await Promise.all([api('GET', '/api/users'), api('GET', '/api/collections')]);
   const result = h('div');
   const roleOptions = [['member', 'Lid — alleen collecties die je aanvinkt']];
   if (state.me.role === 'owner') roleOptions.push(['admin', 'Beheerder — alles, behalve de eigenaar']);
   root.append(h('div', { class: 'card' }, h('h2', {}, 'Iemand uitnodigen'),
-    form([['name', 'Naam'], ['email', 'E-mail', 'email'], ['role', 'Rol', 'select', roleOptions]], 'Uitnodiging maken', async (v) => {
+    form([['name', 'Naam'], ['email', 'E-mail', 'email'], ['role', 'Rol', 'select', roleOptions],
+      ['plan', 'Pakket (voor leden)', 'select', planOptions('Geen pakket — alleen collecties die je aanvinkt')],
+      ['trial_days', 'Proefperiode', 'select', [['7', '1 week gratis proberen'], ['', 'Geen einddatum']]]], 'Uitnodiging maken', async (v) => {
       const { invite_url } = await api('POST', '/api/users', v);
       state.lastInvite = { name: v.name, url: invite_url };
       renderMain();
@@ -351,10 +381,11 @@ async function renderUsers(root) {
 
   for (const u of users) {
     const card = h('div', { class: 'card' });
-    const status = u.disabled ? 'geblokkeerd' : u.invite_pending && !u.has_password ? 'uitnodiging open' : 'actief';
+    const status = u.disabled ? 'geblokkeerd' : u.expired ? 'verlopen' : u.invite_pending && !u.has_password ? 'uitnodiging open' : 'actief';
     card.append(h('div', { class: 'row' },
       h('div', { class: 'grow' }, h('strong', {}, u.name), ' ', h('span', { class: 'muted' }, u.email), ' ',
         h('span', { class: 'chip' }, roleLabel[u.role]), ' ', h('span', { class: 'chip' }, status),
+        u.role === 'member' && u.plan ? [' ', h('span', { class: 'chip' }, PLAN_LABELS[u.plan])] : null,
         u.has_api_token && u.can_download ? [' ', h('span', { class: 'chip' }, 'gekoppeld')] : null),
       u.role === 'owner' || (u.role === 'admin' && state.me.role !== 'owner') ? null : [
         h('button', { class: 'btn small', onclick: async () => { const { invite_url } = await api('POST', `/api/users/${u.id}/invite`); showInvite(u.name, invite_url); } }, 'Nieuwe inloglink'),
@@ -366,6 +397,7 @@ async function renderUsers(root) {
       card.append(h('label', { style: 'display:flex;gap:8px;align-items:center;color:var(--text);font-size:14px;margin-top:10px' }, dl,
         'Mag downloaden en koppelen aan eigen software (mAirList, M3U, netwerkschijf)'),
       h('p', { class: 'muted', style: 'margin:2px 0 0' }, u.can_download ? '' : 'Uit = alleen afspelen in de studio via deze website.'));
+      card.append(planEditor(u));
       card.append(accessEditor(u, collections));
     }
     else card.append(h('p', { class: 'muted', style: 'margin:6px 0 0' }, 'Heeft toegang tot alle collecties.'));
@@ -389,7 +421,9 @@ function accessEditor(user, collections) {
     saved.textContent = 'Opgeslagen'; setTimeout(() => (saved.textContent = ''), 1500);
   }
   for (const b of boxes) { b.read.addEventListener('change', () => { if (!b.read.checked) b.up.checked = false; save(); }); b.up.addEventListener('change', save); }
-  return h('div', {}, h('div', { class: 'access-grid' }, h('span', { class: 'muted' }, 'Collectie'), h('span', { class: 'muted' }, 'Gebruiken'), h('span', { class: 'muted' }, 'Uploaden'),
+  return h('div', {}, h('p', { class: 'muted', style: 'margin:12px 0 4px' }, user.plan
+    ? `Extra collecties bovenop het pakket ${PLAN_LABELS[user.plan]} (bijv. een eigen jinglemap met uploaden):`
+    : 'Collecties die deze persoon mag gebruiken:'), h('div', { class: 'access-grid' }, h('span', { class: 'muted' }, 'Collectie'), h('span', { class: 'muted' }, 'Gebruiken'), h('span', { class: 'muted' }, 'Uploaden'),
     boxes.map((b) => [h('span', {}, b.c.name), b.read, b.up])), saved);
 }
 

@@ -478,3 +478,57 @@ test('new music is added automatically; files still copying wait; one import at 
   await gone.round(); gone.stop();
   assert.match(JSON.parse(fs.readFileSync(statusFile, 'utf8')).lastError, /niet bereikbaar/);
 });
+
+test('packages and trial week: plan opens collections, an ended period locks the account', { skip: !DB && 'TEST_DATABASE_URL not set' }, async () => {
+  const owner = client();
+  assert.equal((await owner('POST', '/api/login', { email: 'owner@example.com', password: 'supergeheim1' })).status, 200);
+  const piraat = (await owner('POST', '/api/collections', { name: 'Piraten', min_plan: 'basis' })).data.collection;
+  const polka = (await owner('POST', '/api/collections', { name: 'Polka', min_plan: 'standaard' })).data.collection;
+  const eigen = (await owner('POST', '/api/collections', { name: 'Jingles Klant' })).data.collection;
+  assert.equal(piraat.min_plan, 'basis');
+  assert.equal((await owner('POST', '/api/collections', { name: 'X', min_plan: 'goud' })).status, 400);
+
+  // Invite with Basis and a free week.
+  const inv = await owner('POST', '/api/users', { name: 'Zender Noord', email: 'noord@example.com', plan: 'basis', trial_days: 7 });
+  assert.equal(inv.status, 201, JSON.stringify(inv.data));
+  assert.equal(inv.data.user.plan, 'basis');
+  const until = new Date(inv.data.user.access_until);
+  assert.ok(Math.abs(until - Date.now() - 7 * 864e5) < 60e3, 'trial ends in 7 days');
+  const id = inv.data.user.id;
+  const noord = client();
+  assert.equal((await noord('POST', `/api/invite/${inv.data.invite_url.split('#invite=')[1]}`, { password: 'noord-wachtwoord' })).status, 200);
+  const names = async () => (await noord('GET', '/api/collections')).data.collections.map((c) => c.name).filter((n) => ['Piraten', 'Polka', 'Jingles Klant'].includes(n));
+  assert.deepEqual(await names(), ['Piraten']);
+
+  // Upgrade to Standaard: Polka opens; hand-ticked collections still add on top, with upload.
+  assert.equal((await owner('PATCH', `/api/users/${id}`, { plan: 'standaard' })).status, 200);
+  assert.deepEqual(await names(), ['Piraten', 'Polka']);
+  assert.equal((await owner('PUT', `/api/users/${id}/access`, { access: [{ collection_id: eigen.id, can_upload: true }] })).status, 200);
+  assert.deepEqual(await names(), ['Jingles Klant', 'Piraten', 'Polka']);
+  const cols = (await noord('GET', '/api/collections')).data.collections;
+  assert.equal(cols.find((c) => c.name === 'Polka').can_upload, false);
+  assert.equal(cols.find((c) => c.name === 'Jingles Klant').can_upload, true);
+  assert.equal((await owner('PATCH', `/api/users/${id}`, { plan: 'goud' })).status, 400);
+
+  // The collection can be moved to another package, or back to "by hand only".
+  assert.equal((await owner('PATCH', `/api/collections/${polka.id}`, { min_plan: 'pro' })).status, 200);
+  assert.deepEqual(await names(), ['Jingles Klant', 'Piraten']);
+  assert.equal((await owner('PATCH', `/api/collections/${polka.id}`, { min_plan: null })).data.collection.min_plan, null);
+
+  // The period ends: session, login and links stop working.
+  await pool.query("UPDATE users SET access_until = now() - interval '1 minute' WHERE id = $1", [id]);
+  assert.equal((await noord('GET', '/api/me')).status, 401);
+  const relog = await client()('POST', '/api/login', { email: 'noord@example.com', password: 'noord-wachtwoord' });
+  assert.equal(relog.status, 403);
+  assert.match(relog.data.error, /afgelopen/);
+  const list = (await owner('GET', '/api/users')).data.users.find((u) => u.id === id);
+  assert.equal(list.expired, true);
+
+  // Paid for a month: counts from today, so the account works again.
+  const ext = await owner('PATCH', `/api/users/${id}`, { extend_days: 31 });
+  assert.ok(new Date(ext.data.user.access_until) > new Date(Date.now() + 30 * 864e5));
+  assert.equal((await noord('POST', '/api/login', { email: 'noord@example.com', password: 'noord-wachtwoord' })).status, 200);
+  assert.equal((await noord('GET', '/api/me')).data.user.expired, false);
+  // No end date at all.
+  assert.equal((await owner('PATCH', `/api/users/${id}`, { access_until: null })).data.user.access_until, null);
+});

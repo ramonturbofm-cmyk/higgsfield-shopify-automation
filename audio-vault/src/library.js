@@ -2,6 +2,16 @@
 const path = require('path');
 
 const isAdmin = (user) => user.role === 'owner' || user.role === 'admin';
+
+// Packages, from small to large. A collection marked "from Standaard" is visible to
+// Standaard and Pro members.
+const PLANS = ['basis', 'standaard', 'pro'];
+const planRank = (sql) => `(CASE ${sql} WHEN 'basis' THEN 1 WHEN 'standaard' THEN 2 WHEN 'pro' THEN 3 ELSE 0 END)`;
+const PLAN_VISIBLE = `(c.min_plan IS NOT NULL AND ${planRank('c.min_plan')} <= ${planRank('$2::text')})`;
+
+// A member whose trial or paid period has ended is treated like a blocked account.
+const isExpired = (user) => user.role === 'member' && Boolean(user.access_until) && new Date(user.access_until) <= new Date();
+const isActive = (user) => !user.disabled && !isExpired(user);
 // Download, M3U links, WebDAV and API tokens hand out the files themselves.
 const canDownload = (user) => isAdmin(user) || user.can_download === true;
 
@@ -18,9 +28,10 @@ async function listCollections(pool, user) {
     return rows;
   }
   const { rows } = await pool.query(
-    `SELECT c.*, a.can_upload, ${STATS}
-       FROM collections c JOIN collection_access a ON a.collection_id = c.id AND a.user_id = $1 ${STATS_JOIN}
-      ORDER BY c.name`, [user.id]);
+    `SELECT c.*, coalesce(a.can_upload, FALSE) AS can_upload, ${STATS}
+       FROM collections c LEFT JOIN collection_access a ON a.collection_id = c.id AND a.user_id = $1 ${STATS_JOIN}
+      WHERE a.user_id IS NOT NULL OR ${PLAN_VISIBLE}
+      ORDER BY c.name`, [user.id, user.plan || null]);
   return rows;
 }
 
@@ -30,7 +41,9 @@ async function collectionAccess(pool, user, collectionId) {
     return rowCount ? { read: true, upload: true } : { read: false, upload: false };
   }
   const { rows } = await pool.query(
-    'SELECT can_upload FROM collection_access WHERE user_id = $1 AND collection_id = $2', [user.id, collectionId]);
+    `SELECT coalesce(a.can_upload, FALSE) AS can_upload
+       FROM collections c LEFT JOIN collection_access a ON a.collection_id = c.id AND a.user_id = $1
+      WHERE c.id = $3 AND (a.user_id IS NOT NULL OR ${PLAN_VISIBLE})`, [user.id, user.plan || null, collectionId]);
   return rows.length ? { read: true, upload: rows[0].can_upload } : { read: false, upload: false };
 }
 
@@ -64,4 +77,4 @@ async function logAccess(pool, userId, fileId, action, client) {
     [userId, fileId, action, (client || '').slice(0, 200)]).catch(() => {});
 }
 
-module.exports = { isAdmin, canDownload, listCollections, collectionAccess, readableFile, safeName, fileName, fileIdFromName, logAccess };
+module.exports = { isAdmin, PLANS, isExpired, isActive, canDownload, listCollections, collectionAccess, readableFile, safeName, fileName, fileIdFromName, logAccess };

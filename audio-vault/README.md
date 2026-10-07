@@ -441,6 +441,30 @@ Alle moderne browsers en mAirList spelen FLAC af. Uploads en de import zetten
 WAV/AIFF daarom automatisch om (uit te zetten met `CONVERT_TO_FLAC=false`).
 Lukt de omzetting niet (bijv. 32-bit float WAV), dan wordt het origineel bewaard.
 
+## Pakketten en proefweek (klanten)
+
+Geef elke klant een **pakket** (Basis, Standaard of Pro) en bepaal per collectie
+vanaf welk pakket hij zichtbaar is. Dan hoef je per klant niets meer aan te vinken.
+
+1. **Collectie** (Bibliotheek → collectie openen) → *Zichtbaar voor pakket*:
+   - *Basis, Standaard en Pro* — bijv. Piratenmuziek, Nederlandstalig
+   - *Standaard en Pro* — bijv. Polka, Instrumentaal, Nieuw deze maand
+   - *Alleen Pro*
+   - *Alleen wie je aanvinkt* (standaard) — bijv. de eigen jinglemap van één klant
+2. **Uitnodigen** (Gebruikers): kies het pakket en *1 week gratis proberen*. De
+   proefweek telt vanaf het moment van uitnodigen.
+3. Na de einddatum kan de klant niet meer inloggen (melding: proefperiode of
+   abonnement afgelopen) en stoppen ook koppelingen. Bij de klant staat in rood
+   *Verlopen op …*.
+4. **Betaald?** Klik *+1 maand* of *+1 jaar*: telt vanaf vandaag (of vanaf de
+   huidige einddatum als die nog niet voorbij is). *Geen einddatum* = onbeperkt.
+5. Extra collecties bovenop het pakket vink je nog steeds per klant aan, bijv.
+   de eigen jinglemap met *Uploaden*.
+
+Elke maand nieuwe muziek alleen voor Standaard en Pro: zet nieuwe nummers eerst in
+een collectie *Nieuw* (*Standaard en Pro*) en verplaats ze na een maand naar de
+vaste collecties.
+
 ## Beveiliging
 
 - Alles via https (op de mini-pc via Caddy, zie hierboven); wachtwoorden worden
