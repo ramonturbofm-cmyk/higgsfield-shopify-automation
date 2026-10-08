@@ -8,7 +8,6 @@ export function render(root) {
     values: (v) => [["Binnen", temp(v.indoor_temp_c), `setpoint ${temp(v.hp_setpoint_c)}`], ["Buiten", temp(v.outdoor_temp_c)],
       ["Elektrisch", power(v.hp_power_w), v.hp_compressor_on ? "compressor aan" : "compressor uit"],
       ["COP", v.hp_cop ? num(v.hp_cop, 2) : "—", `aanvoer ${temp(v.flow_temp_c)} · modus ${v.hp_mode || "—"}`]],
-    actions: [["Boost", "hp_mode", "boost"], ["Eco", "hp_mode", "eco"], ["Normaal", "hp_mode", "normal"]],
     history: { title: "Binnentemperatuur laatste 24 uur", unit: "°C", series: [{ name: "Binnen", cls: "c2", get: (v) => v.indoor_temp_c ?? null }] },
     extra: async () => {
       const s = await api("/settings");

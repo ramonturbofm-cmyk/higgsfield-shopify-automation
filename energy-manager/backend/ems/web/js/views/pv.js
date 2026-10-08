@@ -7,7 +7,6 @@ export function render(root) {
     title: "Zonnepanelen", categories: ["pv_inverter", "hybrid_inverter"], empty: "Geen PV-omvormer geconfigureerd.",
     values: (v) => [["Opwek", power(v.pv_power_w)], ["Begrenzing", v.pv_limit_w === null || v.pv_limit_w === undefined ? "geen" : power(v.pv_limit_w)],
       ["Totaal", kwh(v.pv_energy_kwh)]],
-    actions: [["Begrenzen tot", "pv_limit", 0, "W"]],
     history: { title: "Opwek laatste 24 uur", unit: "W", decimals: 0, series: [{ name: "PV", cls: "c4", get: (v) => v.pv_power_w ?? null }] },
     extra: async () => {
       const [fc, s] = await Promise.all([api("/forecast?hours=36"), api("/settings")]);

@@ -6,7 +6,6 @@ export function render(root) {
     title: "Laadpaal / EV", categories: ["ev_charger"], empty: "Geen laadpaal geconfigureerd.",
     values: (v) => [["Laadvermogen", power(v.ev_power_w)], ["Auto", v.ev_connected ? "aangesloten" : "niet aangesloten"],
       ["Auto-SOC", pct(v.ev_soc_pct)], ["Laadstroom", v.ev_current_limit_a !== undefined ? `${num(v.ev_current_limit_a, 0)} A` : "—", `sessie ${kwh(v.ev_session_energy_kwh)}`]],
-    actions: [["Laadstroom", "ev_current", 16, "A"], ["Pauzeren", "ev_current", 0]],
     history: { title: "Laadvermogen laatste 24 uur", unit: "W", decimals: 0, series: [{ name: "EV", cls: "c5", get: (v) => v.ev_power_w ?? null }] },
     extra: async () => {
       const devs = (await api("/devices")).filter((d) => d.category === "ev_charger");

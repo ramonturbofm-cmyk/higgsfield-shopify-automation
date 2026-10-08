@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from ems import __version__
-from ems.api.deps import admin, clear_session_cookies, get_runtime, operator, set_session_cookies, viewer
+from ems.api.deps import admin, clear_session_cookies, current_principal, get_runtime, operator, set_session_cookies, viewer
 from ems.core.config import ConfigError, StrategyProfile, dump_config, settings_schema
 from ems.core.models import Command, CommandAction
 from ems.prices.providers import parse_manual_prices
@@ -119,6 +119,16 @@ async def logout(response: Response, p: Principal = Depends(viewer), rt: EMSRunt
 async def ws_ticket(p: Principal = Depends(viewer), rt: EMSRuntime = Depends(get_runtime)) -> dict:
     """Single-use ticket (30 s) to open the WebSocket; keeps session tokens out of URLs."""
     return {"ticket": rt.sessions.ticket(p)}
+
+
+@router.get("/auth/session", tags=["auth"])
+async def session(request: Request) -> dict:
+    """Is there a valid browser session? Never 401, so the web UI can probe it at start-up."""
+    try:
+        p = await current_principal(request)
+    except HTTPException:
+        return {"authenticated": False}
+    return {"authenticated": True, "username": p.username, "role": p.role, "kind": p.kind}
 
 
 @router.get("/auth/me", tags=["auth"])

@@ -138,3 +138,9 @@ td{overflow-wrap:break-word}
 .tbl-wrap td,.tbl-wrap th{white-space:nowrap}.tbl-wrap td.small{white-space:normal;min-width:220px}
 .tbl-wrap td[colspan]{white-space:normal}
 @media (max-width:760px){table.stack td{display:inline-block;border:0;padding:4px 8px 4px 0}table.stack tr{display:block;border-bottom:1px solid var(--border);padding:6px 0}}
+
+/* commissioning procedure */
+ol.procedure { padding-left: 1.2em; margin: 6px 0 10px; }
+ol.procedure li { margin: 3px 0; }
+ol.procedure li.ok { color: var(--good, #2e7d32); }
+.nok { color: var(--bad, #c62828); }

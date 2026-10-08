@@ -159,7 +159,9 @@ async function boot() {
     return;
   }
   try {
-    setSession(await api("/auth/me"));         // valid session cookie?
+    const sess = await api("/auth/session");   // valid session cookie? (never 401)
+    if (!sess.authenticated) throw new Error("niet ingelogd");
+    setSession(sess);
     state.settings = await api("/settings");
     state.tz = state.settings.site.timezone;
     state.live = await api("/energy/live");

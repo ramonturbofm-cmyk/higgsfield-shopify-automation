@@ -8,7 +8,6 @@ export function render(root) {
     values: (v) => [["Laadtoestand", pct(v.battery_soc_pct)], ["Vermogen", power(v.battery_power_w, true),
       v.battery_power_w > 20 ? "laden" : v.battery_power_w < -20 ? "ontladen" : "rust"],
       ["Temperatuur", temp(v.battery_temperature_c)], ["Modus", v.battery_mode || "—"]],
-    actions: [["Laden", "battery_charge", 3000, "W"], ["Ontladen", "battery_discharge", 3000, "W"], ["Stand-by", "battery_standby", null]],
     history: { title: "Laatste 24 uur", unit: "%", decimals: 0, series: [{ name: "SOC", cls: "c3", get: (v) => v.battery_soc_pct ?? null }] },
     extra: async () => {
       const f = await api("/finance/summary?period=30d");

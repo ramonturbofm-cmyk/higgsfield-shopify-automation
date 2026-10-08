@@ -3,7 +3,7 @@ import { lineChart } from "../charts.js";
 import { activeOverrides, overridePanel, overridesBox } from "./common.js";
 
 /** Generic page for one device category: status, values, manual override, history chart. */
-export async function devicePage(root, { title, categories, values, actions, history, extra, empty }) {
+export async function devicePage(root, { title, categories, values, history, extra, empty }) {
   const devices = (await api("/devices")).filter((d) => categories.includes(d.category) && d.enabled);
   root.append(h("h1", {}, title));
   if (!devices.length) {
@@ -16,10 +16,8 @@ export async function devicePage(root, { title, categories, values, actions, his
     const ovBox = h("div", {});
     const histBox = h("div", {});
     const refresh = async () => {
-      const ovs = await activeOverrides();
-      ovBox.replaceChildren(overridesBox(ovs, d.id), h("div", { style: { height: "10px" } }),
-        actions && d.driver_info?.capabilities.some((c) => c.id.startsWith("control_")) ? overridePanel(d.id, actions, refresh)
-          : h("div", { class: "muted small" }, "Dit apparaat is niet bestuurbaar (alleen meten)."));
+      const [ovs, panel] = await Promise.all([activeOverrides(), overridePanel(d.id, refresh)]);
+      ovBox.replaceChildren(overridesBox(ovs, d.id), h("div", { style: { height: "10px" } }), panel);
     };
     const paint = (live) => {
       const dev = live?.devices?.[d.id];
@@ -30,7 +28,6 @@ export async function devicePage(root, { title, categories, values, actions, his
     boxes.push(paint);
     root.append(h("div", { class: "card" },
       h("div", { class: "row spread" }, h("h3", {}, d.name), h("div", { class: "row" }, statusPill(d.status),
-        d.control_level !== "full" ? h("span", { class: "pill warn" }, `inbedrijfstelling: ${d.control_level}`) : null,
         h("a", { href: `#/devices/${d.id}`, class: "btn sm" }, "Details"))),
       d.error ? h("div", { class: "notice warn inline" }, d.error) : null,
       valBox, h("h3", { style: { marginTop: "16px" } }, "Bediening"), ovBox, histBox));

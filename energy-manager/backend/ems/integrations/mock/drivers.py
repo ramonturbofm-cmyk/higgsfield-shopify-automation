@@ -41,7 +41,8 @@ def _manifest(driver_id: str, name: str, category: DeviceCategory, caps: set[Cap
         driver_id=driver_id, display_name=name, vendor="Simulator",
         categories=(category,), capabilities=frozenset(caps),
         connection_types=("simulated",), models=("Simulated",),
-        simulated=True, verified=True, documentation="ems.simulator (intern model)",
+        simulated=True, verified=False,  # simulator, never claimed as hardware-tested
+        documentation="ems.simulator (intern model)",
     )
 
 

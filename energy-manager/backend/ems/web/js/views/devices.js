@@ -1,4 +1,5 @@
 import { api, ago, can, guard, h, num, on, power, state, statusPill, toast } from "../lib.js";
+import { controlStatePill, wouldVsDoes } from "./common.js";
 
 const CAT_LABEL = {};
 
@@ -18,12 +19,13 @@ async function list(root) {
   h("div", { class: `notice ${gm.device_id ? "info" : "warn"} inline` },
     h("div", {}, h("b", {}, "Primaire netmeter: "), gm.device_id ? `${devices.find((d) => d.id === gm.device_id)?.name} — ${gm.reason}` : gm.message)),
   !devices.length ? h("div", { class: "card empty" }, "Nog geen apparaten. Begin met de slimme meter (bijvoorbeeld een HomeWizard P1 Meter).") :
-    h("div", { class: "tbl-wrap" }, h("table", {}, h("thead", {}, h("tr", {}, ["Naam", "Soort", "Driver", "Status", "Rol / inbedrijfstelling", ""].map((t) => h("th", {}, t)))),
+    h("div", { class: "tbl-wrap" }, h("table", {}, h("thead", {}, h("tr", {}, ["Naam", "Soort", "Driver", "Status", "Rol / regeling", ""].map((t) => h("th", {}, t)))),
       h("tbody", {}, devices.map((d) => h("tr", {},
         h("td", {}, h("a", { href: `#/devices/${d.id}` }, d.name)), h("td", {}, CAT_LABEL[d.category] || d.category),
         h("td", { class: "small" }, d.driver_info?.name || d.driver, d.driver_info?.simulated ? h("span", { class: "pill warn" }, "simulatie") : null),
         h("td", {}, statusPill(d.status)),
-        h("td", { class: "small" }, d.is_primary_grid_meter ? h("span", { class: "pill good" }, "PRIMARY GRID METER") : null, " ", d.control_level),
+        h("td", { class: "small" }, d.is_primary_grid_meter ? h("span", { class: "pill good" }, "Primaire netmeter") : null, " ",
+          controlStatePill(d.control_state, d.control_state_label)),
         h("td", {}, h("a", { class: "btn sm", href: `#/devices/${d.id}` }, "Open"))))))));
 }
 
@@ -56,7 +58,7 @@ async function addWizard(root, cats, preset) {
     const options = drivers.filter((d) => d.categories.includes(wiz.category) && d.available_in_mode);
     body.replaceChildren(h("h3", {}, `${CAT_LABEL[wiz.category]}: fabrikant / koppeling`), h("div", { class: "grid" }, options.map((d) =>
       h("div", { class: "card flat row spread" }, h("div", {}, h("b", {}, d.name), h("div", { class: "muted small" },
-        `${d.vendor} · ${d.connection_types.join(", ")}`, d.verified ? " · getest op hardware" : " · nog niet op hardware getest"),
+        `${d.vendor} · ${d.connection_types.join(", ")}`, d.simulated ? " · simulatie (Demo)" : d.verified ? " · getest op hardware" : " · nog niet op hardware getest"),
         h("div", { class: "small" }, d.capabilities.map((c) => c.label).join(", "))),
       h("button", { class: "btn primary", onclick: () => { wiz.driver = d; d.driver_id === "homewizard.p1" ? homewizardFlow(body, setSteps) : stepConnection(); } }, "Kiezen")))),
     h("button", { class: "btn", onclick: stepCategory }, "← Terug"));
@@ -100,7 +102,7 @@ async function addWizard(root, cats, preset) {
           h("div", { class: "row" }, h("button", { class: "btn primary", onclick: () => guard(async () => {
             const dev = await api("/devices", { method: "POST", body: collect() });
             location.hash = `#/devices/${dev.id}`;
-          }, "Apparaat toegevoegd (alleen-lezen; regeling via inbedrijfstelling)") }, r.reachable ? "Toevoegen" : "Toch toevoegen")));
+          }, "Apparaat toegevoegd (alleen-lezen; regeling via inbedrijfstelling)") }, r.reachable ? "Toevoegen" : "Opslaan als niet-verbonden")));
       } catch (e) { result.replaceChildren(h("div", { class: "notice bad inline" }, e.message)); }
       test.disabled = false;
     } }, "Verbinding testen");
@@ -181,6 +183,8 @@ async function detail(root, id) {
   const box = h("div", {});
   root.append(box);
   let dev, com;
+  // Created once: live updates repaint the page and must not wipe what the installer typed.
+  const typed = h("input", { "aria-label": "typ de apparaatnaam", autocomplete: "off" });
   const load = async () => {
     [dev, com] = await Promise.all([api(`/devices/${id}`), api(`/devices/${id}/commissioning`)]);
     paint(state.live);
@@ -194,14 +198,16 @@ async function detail(root, id) {
     const phases = [1, 2, 3].map((n) => [n, v[`grid_power_l${n}_w`], v[`grid_current_l${n}_a`], v[`grid_voltage_l${n}_v`]]).filter((p) => p[1] !== undefined || p[2] !== undefined);
     box.replaceChildren(
       h("div", { class: "row spread" }, h("h1", {}, dev.name), h("a", { class: "btn", href: "#/devices" }, "← Apparaten")),
-      h("div", { class: "grid cols-3" },
+      h("div", { class: "grid cols-4" },
+        h("div", { class: "card kpi" }, h("div", { class: "l" }, "Regeling"), h("div", { class: "v" }, controlStatePill(dev.control_state, dev.control_state_label)),
+          h("div", { class: "s" }, dev.control_state_label)),
         h("div", { class: "card kpi" }, h("div", { class: "l" }, "Status"), h("div", { class: "v" }, statusPill(status)),
           h("div", { class: "s" }, dev.error || (dev.health?.last_update ? `Laatste update ${ago(dev.health.last_update)}` : ""))),
         h("div", { class: "card kpi" }, h("div", { class: "l" }, "Rol"), h("div", { class: "v small" },
-          dev.is_primary_grid_meter ? "PRIMARY GRID METER" : isMeter ? "meter" : CAT_LABEL[dev.category]),
+          dev.is_primary_grid_meter ? "Primaire netmeter" : isMeter ? "meter" : CAT_LABEL[dev.category]),
           h("div", { class: "s" }, dev.is_primary_grid_meter && gm?.needs_confirmation ? "automatisch gekozen" : "")),
         h("div", { class: "card kpi" }, h("div", { class: "l" }, "Driver"), h("div", { class: "v small" }, dev.driver_info?.name || dev.driver),
-          h("div", { class: "s" }, dev.driver_info?.verified ? "getest op hardware" : dev.driver_info?.simulated ? "simulatie" : "nog niet op hardware getest"))),
+          h("div", { class: "s" }, dev.driver_info?.simulated ? "simulatie (Demo)" : dev.driver_info?.verified ? "getest op hardware" : "nog niet op hardware getest"))),
       isMeter && v.grid_power_w !== undefined ? h("div", { class: "card" }, h("h3", {}, "Netmeting"),
         h("div", { class: "kpi" }, h("div", { class: "v" }, `${power(Math.abs(v.grid_power_w))} ${v.grid_power_w > 0 ? "import" : v.grid_power_w < 0 ? "export" : ""}`)),
         phases.length ? h("table", {}, h("thead", {}, h("tr", {}, ["Fase", "Vermogen", "Stroom", "Spanning"].map((t) => h("th", {}, t)))),
@@ -230,26 +236,33 @@ async function detail(root, id) {
   };
   const commissioningCard = () => {
     if (!com) return null;
-    const wd = com.ems_would_do;
     const actual = com.actual || {};
+    typed.placeholder = com.name;
+    const levelButtons = Object.entries(com.levels).filter(([k]) => k !== com.level).map(([k, l]) => {
+      const go = () => guard(() => api(`/devices/${id}/commissioning`, { method: "PUT",
+        body: { level: k, confirm_text: k === "full" ? typed.value : null } }), `Naar ${l.label}`).then(load);
+      return h("button", { class: `btn sm ${k === "full" ? "danger" : ""}`, disabled: !l.allowed, title: l.reason, onclick: go }, `→ ${l.label}`);
+    });
     return h("div", { class: "card" }, h("h3", {}, "Inbedrijfstelling"),
       h("div", { class: "steps" }, Object.entries(com.levels).map(([k, l]) => h("span", { class: k === com.level ? "on" : "", title: l.reason || LEVEL_HELP[k] }, l.label))),
       h("p", { class: "small muted" }, LEVEL_HELP[com.level]),
-      com.control_capabilities.length ? h("div", { class: "grid cols-2" },
-        h("div", { class: "card flat" }, h("b", {}, "WERKELIJK"), h("div", { class: "small" },
-          ["battery_power_w", "battery_soc_pct", "pv_power_w", "pv_limit_w", "ev_power_w", "hp_mode", "hp_power_w"].filter((k) => actual[k] !== undefined)
-            .map((k) => h("div", {}, `${k}: ${typeof actual[k] === "number" ? num(actual[k], 1) : actual[k]}`)))),
-        h("div", { class: "card flat" }, h("b", {}, com.level === "shadow" ? "EMS WOULD DO" : "LAATSTE EMS-BESLISSING"),
-          wd ? h("div", { class: "small" }, h("div", {}, wd.summary), wd.expected_benefit !== null && wd.expected_benefit !== undefined ? h("div", {}, `Verwacht voordeel: € ${num(wd.expected_benefit, 2)}`) : null,
-            h("div", { class: "muted" }, "Reden: ", (wd.reasons || []).join("; ")), h("div", { class: "muted" }, `status: ${wd.outcome} · ${ago(wd.ts)}`))
-            : h("div", { class: "muted small" }, "Nog geen beslissing"))) : h("div", { class: "muted small" }, "Alleen-meten apparaat."),
+      h("h4", {}, "Procedure voor dit apparaat"),
+      h("ol", { class: "small procedure" }, com.procedure.map((st) => h("li", { class: st.done ? "ok" : "" },
+        h("span", { "aria-hidden": "true" }, st.done ? "✓ " : "○ "), st.label, st.detail ? h("span", { class: "muted" }, ` — ${st.detail}`) : null))),
+      dev ? wouldVsDoes(dev) : null,
+      com.control_capabilities.length ? h("details", {}, h("summary", { class: "small" }, "Actuele meetwaarden"), h("div", { class: "small" },
+        Object.entries(actual).map(([k, v]) => h("div", {}, `${k}: ${typeof v === "number" ? num(v, 1) : v}`)))) : null,
       com.last_test ? h("details", {}, h("summary", { class: "small" }, `Laatste verbindingstest: ${com.last_test.reachable ? "geslaagd" : "mislukt"}`), checksList(com.last_test)) : null,
-      can("installer") ? h("div", { class: "row", style: { marginTop: "10px" } }, Object.entries(com.levels).filter(([k]) => k !== com.level).map(([k, l]) =>
-        h("button", { class: "btn sm", disabled: !l.allowed, title: l.reason, onclick: () => {
-          const confirmFull = k === "full" ? confirm("Volledige regeling inschakelen? Het EMS mag dit apparaat dan volledig aansturen.") : false;
-          if (k === "full" && !confirmFull) return;
-          guard(() => api(`/devices/${id}/commissioning`, { method: "PUT", body: { level: k, confirm: confirmFull } }), `Naar ${l.label}`).then(load);
-        } }, `→ ${l.label}`))) : null);
+      can("installer") ? h("div", { class: "grid", style: { marginTop: "10px" } },
+        ["shadow", "limited", "full"].includes(com.level) && com.control_capabilities.length
+          ? h("div", { class: "row" }, h("button", { class: "btn sm", onclick: () => guard(async () => {
+            const r = await api(`/devices/${id}/commissioning/write-test`, { method: "POST" });
+            if (!r.ok) throw new Error(`Schrijftest mislukt: ${r.detail}`);
+          }, "Schrijftest geslaagd").then(load) }, "Schrijftest uitvoeren"),
+          h("span", { class: "small muted" }, "Zet het apparaat terug op zijn eigen regeling en leest het daarna opnieuw uit.")) : null,
+        com.levels.full && com.level !== "full" ? h("label", { class: "f" },
+          `Voor volledige regeling: typ de apparaatnaam „${com.name}” ter bevestiging`, typed) : null,
+        h("div", { class: "row" }, levelButtons)) : null);
   };
   await load();
   const off = on((m) => { if (m.type === "live") paint(m.data); });
