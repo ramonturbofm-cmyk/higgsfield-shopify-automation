@@ -536,7 +536,7 @@ class EMSRuntime:
         if t == "override":
             cmd = Command(action["device"], CommandAction(action["action"]), action.get("value"))
             self.config.device(cmd.device_id)  # raises KeyError for unknown devices
-            self.engine.overrides.set(cmd, float(action.get("duration_min", 60)), user=who)
+            self.engine.overrides.set(cmd, float(action.get("duration_min", 60)), user=who, source="automation")
             self.optimizer.request("handmatige bediening (automatisering)")
             return f"override {cmd.describe_nl()}"
         if t == "clear_override":

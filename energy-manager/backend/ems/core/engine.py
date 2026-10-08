@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 from ems.control.base import ControlContext, Controller
 from ems.control.gate import CommandGate, GateMode, GateResult, Outcome
 from ems.control.overrides import OverrideManager
+from ems.control.priority import GridGuard, schedule
 from ems.control.safety import SafetyValidator
 from ems.core.clock import Clock
 from ems.core.config import EMSConfig
@@ -77,6 +78,7 @@ class EMSEngine:
         self._last_grid_ok: datetime | None = None
         self._counter = itertools.count(1)
         self._rejected: dict[tuple[str, str], tuple] = {}
+        self.grid_guard = GridGuard(config)
 
     # ------------------------------------------------------------ lifecycle
     async def start(self) -> None:
@@ -147,7 +149,8 @@ class EMSEngine:
             self.heartbeat = now
             return result
 
-        for decision in self.overrides.apply(decisions):
+        decisions = self.grid_guard.apply(schedule(self.overrides.apply(decisions)), snap)
+        for decision in decisions:
             gr = await self.gate.submit(decision, now)
             result.results.append(gr)
             if gr.outcome == Outcome.SENT:
