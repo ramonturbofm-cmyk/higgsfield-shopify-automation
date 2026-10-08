@@ -1,15 +1,30 @@
 // Energy Manager nodes: this computer plus paired Raspberry Pi / Linux / Windows nodes.
-import { ago, api, can, guard, h, toast } from "../lib.js";
+import { ago, api, can, guard, h, state, toast } from "../lib.js";
+import { withPrimaryConfirm } from "./common.js";
+
+const expert = () => state.level === "expert";
+let CAP_LABELS = {};
+/** Human summary of a remote device's functions; raw capability ids only in Expert. */
+function capSummary(caps) {
+  if (!caps.length) return "—";
+  if (expert()) return caps.join(", ");
+  const reads = caps.filter((c) => c.startsWith("read_")).length;
+  const controls = caps.filter((c) => c.startsWith("control_")).map((c) => CAP_LABELS[c] || c);
+  return `${reads} meetwaarde${reads === 1 ? "" : "n"}${controls.length ? ` · bediening: ${controls.join(", ")}` : " · alleen meten"}`;
+}
 
 const PLATFORM = { WINDOWS: "Windows", RASPBERRY_PI: "Raspberry Pi", LINUX: "Linux", OTHER: "Overig" };
-const RELATION = { self: "deze computer", gateway: "apparaatgateway (deze node regelt)", controller: "controller (regelt mijn apparaten)" };
+// A gateway measures and executes commands for its own devices; it does not decide. The controller decides.
+const RELATION = { self: "deze computer", gateway: "apparaatgateway — meet en voert opdrachten uit, beslist niet",
+  controller: "controller — beslist voor de apparaten van deze computer" };
 
 export async function render(root) {
   const body = h("div", {});
   root.append(h("div", { class: "row spread" }, h("h1", {}, "Nodes"),
     h("span", { class: "muted small" }, "Meerdere computers (Windows, Raspberry Pi, Linux) vormen samen één Energy Manager.")), body);
   const load = async () => {
-    const data = await api("/nodes");
+    const [data, schemas] = await Promise.all([api("/nodes"), api("/device-schemas")]);
+    CAP_LABELS = Object.fromEntries(schemas.flatMap((x) => x.capabilities.map((c) => [c.id, c.label])));
     const labels = data.role_labels || {};
     const me = data.self;
     body.replaceChildren(
@@ -19,9 +34,11 @@ export async function render(root) {
             h("tr", {}, h("td", {}, "Naam"), h("td", {}, me.name)),
             h("tr", {}, h("td", {}, "Platform"), h("td", {}, `${PLATFORM[me.platform] || me.platform} · ${me.os}`)),
             h("tr", {}, h("td", {}, "Rollen"), h("td", {}, me.roles.map((r) => h("span", { class: "pill", style: { margin: "2px" } }, labels[r] || r)))),
-            h("tr", {}, h("td", {}, "Node-ID"), h("td", { class: "small muted" }, me.node_id)),
-            h("tr", {}, h("td", {}, "Regelrecht eigen apparaten"), h("td", {}, data.lease.holder
-              ? (data.lease.holder_is_self ? "deze computer" : `node ${data.lease.holder.slice(0, 8)}…`) + ` (epoch ${data.lease.epoch})` : "vrij")))),
+            expert() ? h("tr", {}, h("td", {}, "Node-ID"), h("td", { class: "small muted" }, me.node_id)) : null,
+            h("tr", {}, h("td", {}, "Wie beslist over mijn apparaten"), h("td", {}, data.lease.holder
+              ? (data.lease.holder_is_self ? "deze computer" : `een andere node (${data.lease.holder.slice(0, 8)}…)`)
+                + (expert() ? ` · lease epoch ${data.lease.epoch}` : "") : "nog niemand — apparaten op eigen regeling")))),
+          h("p", { class: "small muted" }, "Valt de verbinding met de beslissende node weg, dan gaan de apparaten binnen 30 seconden terug naar hun eigen regeling."),
           h("p", { class: "small muted" }, "Rol wijzigen: Instellingen → Algemeen → Node (ADVANCED).")),
         pairingCard(load)),
       h("h2", {}, "Gekoppelde nodes"),
@@ -40,7 +57,7 @@ function nodeCard(n, labels, reload) {
       h("div", { class: "row" },
         h("span", { class: `pill ${n.online ? "good" : "bad"}` }, h("span", { class: "dot" }), n.online ? "online" : "offline"),
         n.lease ? h("span", { class: `pill ${n.lease.granted ? "good" : "warn"}`, title: n.lease.error || "" },
-          n.lease.granted ? `regelrecht (epoch ${n.lease.epoch})` : "geen regelrecht") : null,
+          n.lease.granted ? `deze computer beslist${expert() ? ` (epoch ${n.lease.epoch})` : ""}` : "een andere controller beslist") : null,
         can("installer") ? h("button", { class: "btn sm danger", onclick: () => {
           if (confirm(`Koppeling met ${n.name} verwijderen?`)) guard(() => api(`/nodes/${n.node_id}`, { method: "DELETE" }), "Ontkoppeld").then(reload);
         } }, "Ontkoppelen") : null)),
@@ -51,12 +68,12 @@ function nodeCard(n, labels, reload) {
     devs.length ? h("table", { style: { marginTop: "10px" } }, h("thead", {}, h("tr", {}, ["Apparaat op deze node", "Status", "Functies", ""].map((t) => h("th", {}, t)))),
       h("tbody", {}, devs.map((d) => h("tr", {}, h("td", {}, d.name, h("div", { class: "small muted" }, d.category)),
         h("td", {}, h("span", { class: `pill ${d.status === "online" ? "good" : "warn"}` }, d.status)),
-        h("td", { class: "small" }, d.capabilities.length ? d.capabilities.join(", ") : "—"),
+        h("td", { class: "small" }, capSummary(d.capabilities)),
         h("td", {}, (n.imported || {})[d.id] ? h("a", { class: "pill good", href: `#/devices/${n.imported[d.id]}` }, "toegevoegd") : can("installer") ? h("div", { class: "row" },
           h("button", { class: "btn sm", onclick: () => guard(() => api(`/nodes/${n.node_id}/devices/${d.id}/import`, { method: "POST", body: {} }),
             `${d.name} toegevoegd (alleen lezen)`).then(reload) }, "Toevoegen"),
-          d.grid_meter_kind ? h("button", { class: "btn sm", onclick: () => guard(() => api(`/nodes/${n.node_id}/devices/${d.id}/import`,
-            { method: "POST", body: { primary_grid_meter: true } }), `${d.name} is nu de primaire netmeter`).then(reload) }, "Als netmeter") : null) : null)))))
+          d.grid_meter_kind ? h("button", { class: "btn sm", onclick: (ev) => withPrimaryConfirm((replace) => api(`/nodes/${n.node_id}/devices/${d.id}/import`,
+            { method: "POST", body: { primary_grid_meter: true, replace_primary: replace } }), ev.target.closest(".card"), reload) }, "Als netmeter") : null) : null)))))
       : (n.relation === "gateway" ? h("div", { class: "muted small" }, "Geen apparaten op deze node (of nog niet opgehaald).") : null));
 }
 

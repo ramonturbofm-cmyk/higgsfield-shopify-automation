@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from typing import Any
 
 import httpx
@@ -17,6 +18,7 @@ from ems.core.models import Command
 
 log = logging.getLogger(__name__)
 COMMAND_TTL_S = 30.0
+MAX_CLOCK_SKEW_S = 10.0     # commands carry a timestamp: refuse to steer when clocks disagree more than this
 
 
 class NodeLinkError(Exception):
@@ -80,7 +82,11 @@ class NodeLink:
 
     # ------------------------------------------------------------ heartbeat
     async def heartbeat(self, want_lease: bool) -> None:
+        t0 = time.time()
         self.info = await self._req("GET", "/info")
+        t1 = time.time()
+        if self.info.get("server_time") is not None:
+            self.clock_offset_s = float(self.info["server_time"]) - (t0 + t1) / 2
         if want_lease:
             res = await self._req("POST", "/lease")
             self.lease = res
@@ -101,8 +107,13 @@ class NodeLink:
     async def command(self, remote_id: str, cmd: Command, reason: str = "") -> dict:
         if not self.lease_ok or self.epoch is None:
             raise NodeLinkError(self.lease_error or self.error or "geen regelrecht (lease) op deze node")
+        offset = getattr(self, "clock_offset_s", 0.0) or 0.0
+        if abs(offset) > MAX_CLOCK_SKEW_S:
+            raise NodeLinkError(f"klokverschil met node {self.name} is {offset:+.0f} s — synchroniseer de tijd (NTP); "
+                                "geen opdrachten tot dit is opgelost")
         res = await self._req("POST", f"/devices/{remote_id}/command", json={
-            "action": cmd.action.value, "value": cmd.value, "epoch": self.epoch, "issued_ts": time.time(),
+            "command_id": uuid.uuid4().hex, "action": cmd.action.value, "value": cmd.value, "epoch": self.epoch,
+            "issued_ts": time.time(),
             "ttl_s": COMMAND_TTL_S, "reason": reason})
         if res.get("outcome") not in ("sent", "refreshed", "skipped", "dry_run", "shadow"):
             raise NodeLinkError(f"{res.get('outcome')}: {res.get('error') or ''}".strip(": "))
@@ -123,5 +134,6 @@ class NodeLink:
         lease = {"granted": self.lease_ok, "epoch": self.epoch, "error": self.lease_error}
         lease.update({k: v for k, v in self.lease.items() if k in ("holder", "expires_in_s")})
         return {"node_id": self.node_id, "name": self.name, "address": self.address, "online": self.online,
+                "clock_offset_s": None if getattr(self, "clock_offset_s", None) is None else round(self.clock_offset_s, 1),
                 "last_seen": self.last_seen, "error": self.error, "latency_ms": self.latency_ms,
                 "lease": lease, "info": self.info, "device_count": len(self.devices)}

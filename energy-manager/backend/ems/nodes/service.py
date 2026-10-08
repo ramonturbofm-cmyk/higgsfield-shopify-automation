@@ -118,6 +118,15 @@ class NodeService:
         reason = self.lease.check(peer["node_id"], int(body.get("epoch") or -1))
         if reason:
             return {"outcome": "rejected", "error": reason}
+        # Replay protection: every command id is accepted once (kept until well past its TTL).
+        now_s = time.time()
+        seen = self.__dict__.setdefault("_seen_commands", {})
+        for k in [k for k, exp in seen.items() if exp < now_s]:
+            del seen[k]
+        key = (peer["node_id"], str(body.get("command_id") or ""))
+        if not key[1] or key in seen:
+            return {"outcome": "rejected", "error": "herhaalde of ongeldige opdracht-id (replay) — niet uitgevoerd"}
+        seen[key] = now_s + float(body.get("ttl_s") or 30) + 300
         age = time.time() - float(body.get("issued_ts") or 0)
         if age > float(body.get("ttl_s") or 30) or age < -30:
             return {"outcome": "rejected", "error": f"verouderde opdracht ({age:.0f} s oud) — niet uitgevoerd"}

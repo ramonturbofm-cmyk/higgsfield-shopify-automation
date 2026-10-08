@@ -1,5 +1,6 @@
 """Audit acceptance tests 7 and 8: tax brackets, contract-dependent settlement, year boundary, negative export."""
 
+import importlib
 from datetime import UTC, date, datetime
 
 import pytest
@@ -148,8 +149,8 @@ def test_11_vat_and_fixed_costs_are_not_marginal():
 
 # 12 (finance part) -----------------------------------------------------------------------------
 def test_12_finance_baselines_reconcile_without_double_counting():
-    from conftest import make_config
     from ems.services.finance import finance_summary
+    make_config = importlib.import_module("conftest").make_config
     cfg = make_config()
     t0 = datetime(2026, 6, 1, tzinfo=UTC).timestamp()
     rows = []
@@ -175,9 +176,8 @@ def test_12_finance_baselines_reconcile_without_double_counting():
 
 # 12 (backtest part) ----------------------------------------------------------------------------
 def test_12_backtest_custom_period_reproducible_with_coverage():
-    from conftest import make_config
-
     from ems.services.backtest import load_period, run_backtest
+    make_config = importlib.import_module("conftest").make_config
 
     cfg = make_config(site={"timezone": "Europe/Amsterdam"})
     now = datetime(2026, 11, 2, 12, tzinfo=UTC)

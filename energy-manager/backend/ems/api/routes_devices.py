@@ -17,6 +17,7 @@ from ems.core.config import ConfigError, DeviceConfig
 from ems.core.models import CAPABILITY_LABELS_NL, Command, CommandAction, DeviceCategory
 from ems.devices.base import DriverContext
 from ems.devices.capabilities import TYPE_SCHEMAS, actions_for, capability_view, missing_control_params, schema_view
+from ems.gridmeter.assign import PrimaryMeterConflict, claim_primary
 from ems.integrations.homewizard import client as hw
 from ems.integrations.homewizard.discovery import discover
 from ems.security.auth import Principal
@@ -163,6 +164,7 @@ class DeviceIn(BaseModel):
     connection: dict[str, Any] = Field(default_factory=dict)
     params: dict[str, Any] = Field(default_factory=dict)
     primary_grid_meter: bool = False
+    replace_primary: bool = False       # explicit confirmation to replace an existing primary grid meter
 
 
 def _check_driver(rt: EMSRuntime, driver: str, category: DeviceCategory):
@@ -206,12 +208,12 @@ async def add_device(body: DeviceIn, p: Principal = Depends(installer), rt: EMSR
            "phase": body.phase, "connection": _store_connection_secrets(rt, dev_id, body.connection),
            "params": body.params,
            "control_level": "full" if cls.manifest.simulated else "read_only"}
-    if body.primary_grid_meter:
-        for d in data["devices"]:
-            if d.get("role") in ("primary_grid_meter", "grid_reference"):
-                d["role"] = None
-        dev["role"] = "primary_grid_meter"
     data["devices"].append(dev)
+    if body.primary_grid_meter:
+        try:
+            claim_primary(data, dev_id, rt.engine.grid_selection.device_id, body.replace_primary)
+        except PrimaryMeterConflict as exc:
+            raise HTTPException(409, exc.detail()) from exc
     try:
         await rt.reload(data, p.username, f"apparaat {dev_id} toegevoegd")
     except (ConfigError, ValueError) as exc:
@@ -362,15 +364,17 @@ async def gridmeter(_: Principal = Depends(viewer), rt: EMSRuntime = Depends(get
 
 
 @router.post("/devices/{device_id}/primary-grid-meter", tags=["devices"])
-async def set_primary(device_id: str, p: Principal = Depends(installer), rt: EMSRuntime = Depends(get_runtime)):
+async def set_primary(device_id: str, replace: bool = False, p: Principal = Depends(installer),
+                      rt: EMSRuntime = Depends(get_runtime)):
     cfg = _get(rt, device_id)
     cls = rt.registry.get(cfg.driver)
-    if cls.manifest.grid_meter_kind is None:
+    if cls.manifest.grid_meter_kind is None and cfg.driver != "node.remote":
         raise HTTPException(422, "dit apparaat kan geen netmeting leveren")
     data = rt.config.model_dump(mode="json")
-    for d in data["devices"]:
-        d["role"] = "primary_grid_meter" if d["id"] == device_id else (
-            None if d.get("role") in ("primary_grid_meter", "grid_reference") else d.get("role"))
+    try:
+        claim_primary(data, device_id, rt.engine.grid_selection.device_id, replace)
+    except PrimaryMeterConflict as exc:
+        raise HTTPException(409, exc.detail()) from exc
     await rt.reload(data, p.username, f"{device_id} ingesteld als primaire netmeter")
     return rt.engine.grid_selection.to_dict()
 
@@ -507,7 +511,8 @@ async def hw_pair(body: HostIn, _: Principal = Depends(installer), rt: EMSRuntim
 
 class HomeWizardAdd(HostIn):
     name: str = "HomeWizard P1 Meter"
-    primary_grid_meter: bool = True
+    primary_grid_meter: bool = True     # becomes primary only if there is none, unless replace_primary
+    replace_primary: bool = False
 
 
 @router.post("/integrations/homewizard/add", tags=["homewizard"])
@@ -523,10 +528,14 @@ async def hw_add(body: HomeWizardAdd, p: Principal = Depends(installer), rt: EMS
     existing = [d for d in rt.config.devices if d.driver == "homewizard.p1" and d.connection.get("host") == body.host]
     if existing:
         raise HTTPException(409, f"deze P1 Meter is al toegevoegd als {existing[0].name}")
-    has_primary = rt.engine.grid_selection.status.value == "primary_explicit"
+    has_primary = rt.engine.grid_selection.device_id is not None
+    as_primary = body.primary_grid_meter and (not has_primary or body.replace_primary)
     result = await add_device(DeviceIn(name=body.name, category=DeviceCategory.SMART_METER, driver="homewizard.p1",
-                                       connection=conn, primary_grid_meter=body.primary_grid_meter or not has_primary),
-                              p, rt)
+                                       connection=conn, primary_grid_meter=as_primary,
+                                       replace_primary=body.replace_primary), p, rt)
+    if body.primary_grid_meter and not as_primary:
+        result["primary_note"] = (f"Toegevoegd als extra meter; {rt.engine.grid_selection.device_id} blijft de "
+                                  "primaire netmeter. Vervangen kan op de apparaatpagina.")
     rt.optimizer.request("nieuwe netmeter")
     return result
 

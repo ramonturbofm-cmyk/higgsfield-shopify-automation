@@ -184,8 +184,24 @@ async def test_split_brain_and_partition(cluster, tmp_path):
     # Stale command (issued long ago) is never executed.
     link = ctl.nodes.links[gid]
     res = await link._req("POST", "/devices/battery/command", json={
-        "action": "battery_discharge", "value": 1000, "epoch": link.epoch, "issued_ts": time.time() - 600})
+        "command_id": "stale-command-0001", "action": "battery_discharge", "value": 1000, "epoch": link.epoch,
+        "issued_ts": time.time() - 600})
     assert res["outcome"] == "rejected" and "verouderde" in res["error"]
+
+    # Replay: the same command id is executed at most once.
+    body = {"command_id": "replay-test-0000001", "action": "battery_auto", "value": None, "epoch": link.epoch,
+            "issued_ts": time.time()}
+    first = await link._req("POST", "/devices/battery/command", json=body)
+    assert first["outcome"] != "rejected", first
+    again = await link._req("POST", "/devices/battery/command", json=body)
+    assert again["outcome"] == "rejected" and "replay" in again["error"]
+
+    # Clock skew between controller and gateway: no commands until time is synchronised.
+    link.clock_offset_s = 45.0
+    from ems.nodes.link import NodeLinkError as _NLE
+    with pytest.raises(_NLE, match="klokverschil"):
+        await link.command("battery", Command("x", CommandAction.BATTERY_AUTO))
+    link.clock_offset_s = 0.0
 
     # Partition: no more heartbeats -> lease expires on the Pi -> battery back to its own control.
     gw.nodes.lease.clock = lambda: time.time() + 3600

@@ -1,5 +1,5 @@
 import { api, ago, can, guard, h, num, on, power, state, statusPill, toast } from "../lib.js";
-import { controlStatePill, wouldVsDoes } from "./common.js";
+import { controlStatePill, withPrimaryConfirm, wouldVsDoes } from "./common.js";
 
 const CAT_LABEL = {};
 
@@ -154,14 +154,18 @@ function homewizardFlow(body, setSteps) {
         await new Promise((r) => setTimeout(r, 2000));
       }
     } catch (e) { out.replaceChildren(h("div", { class: "notice bad inline" }, e.message)); return; }
-    const primary = h("input", { type: "checkbox", checked: true });
+    const gmNow = await api("/gridmeter");
+    const current = gmNow.device_id ? (await api(`/devices/${gmNow.device_id}`)).name : null;
+    // Never replace an existing primary meter by default: the user must tick it explicitly.
+    const primary = h("input", { type: "checkbox", checked: current ? null : true });
     const name = h("input", { value: "HomeWizard P1 Meter" });
     out.replaceChildren(h("div", { class: "notice good inline" }, `✓ Gekoppeld (${info.api}${info.firmware_version ? `, firmware ${info.firmware_version}` : ""})`),
       h("div", { class: "form" }, h("label", { class: "f" }, "Naam", name),
-        h("label", { class: "f check" }, primary, "Gebruiken als primaire netmeter (aanbevolen)")),
+        h("label", { class: "f check" }, primary, current ? `Primaire netmeter „${current}” vervangen door deze meter` : "Gebruiken als primaire netmeter (aanbevolen)")),
       h("div", { class: "row", style: { marginTop: "12px" } }, h("button", { class: "btn primary", onclick: () => guard(async () => {
         const dev = await api("/integrations/homewizard/add", { method: "POST",
-          body: { host, serial: info.serial || serial, api: apiVer, name: name.value, primary_grid_meter: primary.checked } });
+          body: { host, serial: info.serial || serial, api: apiVer, name: name.value, primary_grid_meter: primary.checked,
+            replace_primary: Boolean(current && primary.checked) } });
         location.hash = `#/devices/${dev.id}`;
       }, "HomeWizard P1 Meter toegevoegd") }, "Toevoegen")));
   }
@@ -228,7 +232,8 @@ async function detail(root, id) {
           toast(r.reachable ? "Test geslaagd" : "Niet bereikbaar", !r.reachable); load();
         } }, "Verbinding testen"),
         dev.driver === "homewizard.p1" ? h("button", { class: "btn", onclick: () => guard(() => api(`/devices/${id}/identify`, { method: "POST" }), "Lampje knippert") }, "Identificeren (lampje)") : null,
-        isMeter && !dev.is_primary_grid_meter ? h("button", { class: "btn", onclick: () => guard(() => api(`/devices/${id}/primary-grid-meter`, { method: "POST" }), "Ingesteld als primaire netmeter").then(load) }, "Als primaire netmeter gebruiken") : null,
+        isMeter && !dev.is_primary_grid_meter ? h("button", { class: "btn", onclick: (ev) => withPrimaryConfirm(
+          (replace) => api(`/devices/${id}/primary-grid-meter?replace=${replace}`, { method: "POST" }), ev.target.closest(".card"), load) }, "Als primaire netmeter gebruiken") : null,
         isMeter && dev.is_primary_grid_meter && gm?.needs_confirmation ? h("button", { class: "btn primary", onclick: () => guard(() => api(`/devices/${id}/primary-grid-meter`, { method: "POST" }), "Bevestigd").then(load) }, "Bevestigen als primaire netmeter") : null,
         h("button", { class: "btn", onclick: () => guard(() => api(`/devices/${id}`, { method: "PUT", body: { enabled: !dev.enabled } }), dev.enabled ? "Uitgeschakeld" : "Ingeschakeld").then(load) }, dev.enabled ? "Uitschakelen" : "Inschakelen"),
         h("button", { class: "btn danger", onclick: () => { if (confirm(`${dev.name} verwijderen?`)) guard(() => api(`/devices/${id}`, { method: "DELETE" }), "Verwijderd").then(() => { location.hash = "#/devices"; }); } }, "Verwijderen"))) : null,

@@ -109,3 +109,22 @@ export function overridesBox(list, deviceId) {
 }
 
 export const fmtPrice = (v) => v === null || v === undefined ? "—" : `€ ${num(v, 3)}/kWh`;
+
+/** Run ``call(replace)``; when another meter is already primary, ask explicitly (inline, not confirm())
+ *  whether to replace it, and retry with replace=true only after that click. */
+export async function withPrimaryConfirm(call, container, onDone) {
+  try { return onDone(await call(false)); } catch (e) {
+    if (e.status !== 409 || e.data?.code !== "primary_meter_exists") { toastError(e); return null; }
+    const box = h("div", { class: "notice warn inline", role: "alertdialog", "aria-label": "primaire netmeter vervangen" },
+      h("div", {}, h("b", {}, `${e.data.current.name} is nu de primaire netmeter. `),
+        "Zero-export, piekbegrenzing en fasebewaking gaan dan de nieuwe meter gebruiken.",
+        h("div", { class: "row", style: { marginTop: "8px" } },
+          h("button", { class: "btn primary", onclick: () => guard(async () => { box.remove(); onDone(await call(true)); }, "Primaire netmeter vervangen") },
+            `Ja, vervang ${e.data.current.name}`),
+          h("button", { class: "btn", onclick: () => box.remove() }, "Annuleren"))));
+    container.prepend(box);
+    return null;
+  }
+}
+
+function toastError(e) { import("../lib.js").then(({ toast }) => toast(e.message || String(e), true)); }

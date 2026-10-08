@@ -55,7 +55,7 @@ export function svg(tag, attrs = {}, ...children) {
 }
 
 export class ApiError extends Error {
-  constructor(status, detail) { super(detail); this.status = status; }
+  constructor(status, detail, data = null) { super(detail); this.status = status; this.data = data; }
 }
 
 export const API_TIMEOUT_MS = 20000;
@@ -88,10 +88,13 @@ export async function api(path, { method = "GET", body, raw = false, form, timeo
   setOnline(true);
   if (res.status === 401 && !path.startsWith("/auth/")) { logout(false); throw new ApiError(401, "Sessie verlopen"); }
   if (!res.ok) {
-    let detail = res.statusText;
-    try { const j = await res.json(); detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail); }
-    catch { /* not json */ }
-    throw new ApiError(res.status, detail);
+    let detail = res.statusText, data = null;
+    try {
+      const j = await res.json();
+      if (j.detail && typeof j.detail === "object" && !Array.isArray(j.detail)) { data = j.detail; detail = j.detail.message || JSON.stringify(j.detail); }
+      else detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail);
+    } catch { /* not json */ }
+    throw new ApiError(res.status, detail, data);
   }
   if (raw) return res;
   const ct = res.headers.get("content-type") || "";

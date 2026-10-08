@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from ems.api.deps import admin, get_runtime, installer, viewer
 from ems.core.config import ConfigError
+from ems.gridmeter.assign import PrimaryMeterConflict, claim_primary
 from ems.nodes.identity import ROLE_LABELS_NL
 from ems.nodes.link import NodeLinkError
 from ems.security.auth import Principal
@@ -38,7 +39,7 @@ async def peer_node(x_ems_node_token: str = Header(""), rt: EMSRuntime = Depends
 async def node_info(rt: EMSRuntime = Depends(get_runtime)) -> dict:
     me = rt.nodes.identity
     return {**me.to_dict(), "site": rt.config.site.name, "mode": rt.config.runtime.mode,
-            "pairing_open": rt.nodes.pairing.open}
+            "pairing_open": rt.nodes.pairing.open, "server_time": time.time()}
 
 
 class PairBody(BaseModel):
@@ -117,6 +118,7 @@ async def node_device_state(device_id: str, _: dict = Depends(peer_node), rt: EM
 
 
 class RemoteCommand(BaseModel):
+    command_id: str = Field(min_length=16, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")   # replay protection
     action: str
     value: float | str | None = None
     epoch: int
@@ -229,6 +231,7 @@ async def unpair(node_id: str, _: Principal = Depends(installer), rt: EMSRuntime
 class ImportDevice(BaseModel):
     name: str | None = Field(None, max_length=80)
     primary_grid_meter: bool = False
+    replace_primary: bool = False
 
 
 @router.post("/nodes/{node_id}/devices/{remote_id}/import", tags=["nodes"])
@@ -259,12 +262,12 @@ async def import_device(node_id: str, remote_id: str, body: ImportDevice, p: Pri
            "driver": "node.remote", "phase": remote.get("phase", "3P"),
            "connection": {"node_id": node_id, "remote_id": remote_id},
            "params": remote.get("params") or {}, "control_level": "read_only"}
-    if body.primary_grid_meter:
-        for d in data["devices"]:
-            if d.get("role") in ("primary_grid_meter", "grid_reference"):
-                d["role"] = None
-        dev["role"] = "primary_grid_meter"
     data["devices"].append(dev)
+    if body.primary_grid_meter:
+        try:
+            claim_primary(data, candidate, rt.engine.grid_selection.device_id, body.replace_primary)
+        except PrimaryMeterConflict as exc:
+            raise HTTPException(409, exc.detail()) from exc
     try:
         await rt.reload(data, p.username, f"apparaat {candidate} van node {link.name} toegevoegd")
     except (ConfigError, ValueError) as exc:
