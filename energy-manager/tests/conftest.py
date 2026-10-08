@@ -23,10 +23,11 @@ BASE_DEVICES = [
     {"id": "pv", "name": "PV", "category": "pv_inverter", "driver": "mock.pv_inverter",
      "params": {"sim": {"peak_power_kw": 8.0}}},
     {"id": "bat", "name": "Batterij", "category": "battery", "driver": "mock.battery",
-     "params": {"capacity_kwh": 10.0, "sim": {"soc_pct": 50}}},
+     "params": {"capacity_kwh": 10.0, "max_charge_w": 5000, "max_discharge_w": 5000, "sim": {"soc_pct": 50}}},
     {"id": "hp", "name": "Warmtepomp", "category": "heat_pump", "driver": "mock.heat_pump", "phase": "L1"},
     {"id": "ev", "name": "Laadpaal", "category": "ev_charger", "driver": "mock.ev_charger",
-     "params": {"charge_mode": "pv_only", "sim": {"arrive": "00:00", "depart": "23:59", "arrival_soc_pct": 20}}},
+     "params": {"charge_mode": "pv_only", "max_current_a": 16,
+                "sim": {"arrive": "00:00", "depart": "23:59", "arrival_soc_pct": 20}}},
 ]
 
 

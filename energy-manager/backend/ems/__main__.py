@@ -52,6 +52,8 @@ def main(argv: list[str] | None = None) -> int:
     b = sub.add_parser("backup", help="volledige back-up maken")
     b.add_argument("output")
     b.add_argument("--data-dir")
+    b.add_argument("--include-keys", action="store_true",
+                   help="ook de sleutel van de geheimenopslag meenemen (vraagt een wachtwoord; bestand wordt versleuteld)")
     c = sub.add_parser("check-config", help="configuratiebestand valideren")
     c.add_argument("file")
     sub.add_parser("selftest", help="volledige rooktest in Demo Mode (engine, optimizer, database, API, webinterface)")
@@ -113,9 +115,20 @@ def main(argv: list[str] | None = None) -> int:
         from ems.services.backup import create_backup
 
         d = _data_dir(args.data_dir)
+        password = None
+        if args.include_keys:
+            password = getpass.getpass("Back-upwachtwoord (min. 10 tekens; nodig bij herstellen): ")
+            if password != getpass.getpass("Herhaal wachtwoord: "):
+                print("wachtwoorden komen niet overeen", file=sys.stderr)
+                return 1
         Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-        Path(args.output).write_bytes(create_backup(d, os.environ.get("EMS_DATABASE_URL")
-                                                    or f"sqlite:///{d / 'ems.db'}"))
+        try:
+            blob = create_backup(d, os.environ.get("EMS_DATABASE_URL") or f"sqlite:///{d / 'ems.db'}",
+                                 include_keys=args.include_keys, password=password)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        Path(args.output).write_bytes(blob)
         print(f"back-up geschreven naar {args.output}")
         return 0
     if args.cmd == "check-config":

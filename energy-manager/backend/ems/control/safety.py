@@ -102,7 +102,9 @@ class SafetyValidator:
                 raise SafetyRejected(f"batterij op reserve ({float(soc):.0f}% ≤ {floor:.0f}%)")
             key = "max_charge_w" if a == CommandAction.BATTERY_CHARGE else "max_discharge_w"
             limit = _param(params, key)
-            if limit is not None and float(v) > float(limit):
+            if limit is None:
+                raise SafetyRejected(f"apparaatlimiet {key} niet ingesteld — geen vermogensopdracht zonder grens")
+            if float(v) > float(limit):
                 notes.append(f"vermogen begrensd tot apparaatlimiet {float(limit) / 1000:.1f} kW")
                 return replace(cmd, value=float(limit))
         elif a == CommandAction.PV_LIMIT and v is not None:
@@ -116,12 +118,32 @@ class SafetyValidator:
             if amps < 0:
                 raise SafetyRejected("negatieve laadstroom")
             if amps > 0:
-                lo, hi = float(_param(params, "min_current_a", 6)), float(_param(params, "max_current_a", 16))
+                lo = float(_param(params, "min_current_a", 6))
+                limits = [float(x) for x in (_param(params, "max_current_a"), _param(params, "rated_current_a"))
+                          if x is not None]
+                if not limits:
+                    raise SafetyRejected("maximale laadstroom niet ingesteld — geen stroomopdracht zonder grens")
+                hi = min(limits)        # never above the charger's rated current
                 if amps < lo:
                     raise SafetyRejected(f"laadstroom onder minimum {lo:.0f} A")
                 if amps > hi:
                     notes.append(f"laadstroom begrensd tot {hi:.0f} A")
                     return replace(cmd, value=hi)
+        elif a == CommandAction.TEMP_SETPOINT:
+            lo, hi = float(_param(params, "setpoint_min_c", 15)), float(_param(params, "setpoint_max_c", 25))
+            try:
+                t = float(v)
+            except (TypeError, ValueError):
+                raise SafetyRejected("ongeldig temperatuur-setpoint") from None
+            if not lo <= t <= hi:
+                raise SafetyRejected(f"setpoint {t:g} °C buiten bereik {lo:g}–{hi:g} °C")
+        elif a == CommandAction.BATTERY_SOC_LIMIT:
+            try:
+                lim = float(v)
+            except (TypeError, ValueError):
+                raise SafetyRejected("ongeldige SOC-limiet") from None
+            if not self.min_soc <= lim <= 100:
+                raise SafetyRejected(f"SOC-limiet {lim:g}% buiten bereik {self.min_soc:g}–100%")
         elif a == CommandAction.HP_MODE and v not in HP_MODES:
             raise SafetyRejected(f"onbekende warmtepompmodus {v!r}")
         elif a == CommandAction.SWITCH and v not in ("on", "off"):

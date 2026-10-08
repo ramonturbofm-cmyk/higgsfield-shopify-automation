@@ -1,15 +1,22 @@
 """Backup / restore.
 
 A backup is a zip with: manifest.json, ems.yaml, ems.db (consistent SQLite snapshot
-via the online backup API), secrets.enc and — unless excluded — secret.key.
-With secret.key included the backup can restore paired devices on a new Raspberry Pi;
-keep such a backup private. PostgreSQL deployments back up the database with pg_dump.
+via the online backup API), secrets.enc and — only on request — secret.key.
+
+The key file decrypts every stored password/token, so (audit P0-05):
+* keys are excluded by default;
+* a backup *with* keys must be protected with a password: the whole zip is then encrypted
+  (scrypt key derivation + Fernet/AES-128-CBC with HMAC-SHA256). Without the password the file
+  is unreadable. A password can also be used for backups without keys.
+PostgreSQL deployments back up the database with pg_dump.
 """
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
+import os
 import shutil
 import sqlite3
 import tempfile
@@ -21,9 +28,46 @@ from ems import __version__
 
 REQUIRED = ("manifest.json", "ems.yaml")
 MAX_BACKUP_BYTES = 512 * 1024 * 1024
+MAGIC = b"EMSBACKUP1\n"            # encrypted backup: MAGIC + 16-byte salt + Fernet token
+MIN_PASSWORD = 10
+_KDF = {"n": 2**15, "r": 8, "p": 1}
 
 
-def create_backup(data_dir: Path, db_url: str, include_keys: bool = True) -> bytes:
+def _fernet(password: str, salt: bytes):
+    import base64
+
+    from cryptography.fernet import Fernet
+    key = hashlib.scrypt(password.encode(), salt=salt, dklen=32, maxmem=64 * 1024 * 1024, **_KDF)
+    return Fernet(base64.urlsafe_b64encode(key))
+
+
+def encrypt_backup(blob: bytes, password: str) -> bytes:
+    if len(password or "") < MIN_PASSWORD:
+        raise ValueError(f"back-upwachtwoord moet minimaal {MIN_PASSWORD} tekens hebben")
+    salt = os.urandom(16)
+    return MAGIC + salt + _fernet(password, salt).encrypt(blob)
+
+
+def is_encrypted(blob: bytes) -> bool:
+    return blob.startswith(MAGIC)
+
+
+def decrypt_backup(blob: bytes, password: str | None) -> bytes:
+    from cryptography.fernet import InvalidToken
+    if not is_encrypted(blob):
+        return blob
+    if not password:
+        raise ValueError("deze back-up is versleuteld; vul het back-upwachtwoord in")
+    salt, token = blob[len(MAGIC):len(MAGIC) + 16], blob[len(MAGIC) + 16:]
+    try:
+        return _fernet(password, salt).decrypt(token)
+    except InvalidToken:
+        raise ValueError("onjuist back-upwachtwoord of beschadigd bestand") from None
+
+
+def create_backup(data_dir: Path, db_url: str, include_keys: bool = False, password: str | None = None) -> bytes:
+    if include_keys and not password:
+        raise ValueError("een back-up met sleutels moet met een wachtwoord worden versleuteld")
     data_dir = Path(data_dir)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
@@ -45,12 +89,14 @@ def create_backup(data_dir: Path, db_url: str, include_keys: bool = True) -> byt
         for name in ("secrets.enc",) + (("secret.key",) if include_keys else ()):
             if (data_dir / name).exists():
                 z.write(data_dir / name, name)
-    return buf.getvalue()
+    blob = buf.getvalue()
+    return encrypt_backup(blob, password) if password else blob
 
 
-def inspect_backup(blob: bytes) -> dict:
+def inspect_backup(blob: bytes, password: str | None = None) -> dict:
     if len(blob) > MAX_BACKUP_BYTES:
         raise ValueError("back-up is te groot")
+    blob = decrypt_backup(blob, password)
     try:
         z = zipfile.ZipFile(io.BytesIO(blob))
     except zipfile.BadZipFile as exc:
@@ -68,8 +114,9 @@ def inspect_backup(blob: bytes) -> dict:
     return {"manifest": manifest, "files": sorted(names)}
 
 
-def restore_backup(blob: bytes, data_dir: Path, db_url: str) -> dict:
+def restore_backup(blob: bytes, data_dir: Path, db_url: str, password: str | None = None) -> dict:
     """Validate, keep a safety copy of the current files, then replace them."""
+    blob = decrypt_backup(blob, password)
     info = inspect_backup(blob)
     import yaml
 

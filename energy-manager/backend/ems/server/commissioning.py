@@ -9,7 +9,9 @@ Levels: connection_test → read_only → shadow → limited → full. What each
                (e.g. maximum charge power, rated current); + shadow mode actually observed: the EMS
                produced at least one "EMS zou …" decision for this device while in shadow mode.
 * full       — + a passed write test (the device was handed back to its own regulation and still
-               answered afterwards); + typed confirmation: the installer types the device name.
+               answered afterwards); + a driver proven on real hardware (``manifest.verified``) or a
+               simulated Demo device — audit P0-08: full control stays blocked while unproven;
+               + typed confirmation: the installer types the device name.
 
 A gateway node enforces the documentation/driver/safety-parameter part for its own devices as well
 (``node_level_problem``), so a controller can never switch a device on another node to writes the
@@ -50,8 +52,9 @@ def driver_facts(rt, device_id: str) -> dict:
     documented = bool(info.get("documented", info.get("write_capable"))) if remote else \
         bool(manifest and (simulated or (manifest.write_capable and manifest.documentation)))
     controls = [] if drv is None else sorted(c.value for c in drv.device_capabilities() if c.value.startswith("control_"))
+    verified = bool(info.get("verified")) if remote else bool(manifest and (manifest.verified or simulated))
     return {"remote": remote, "simulated": simulated, "writes": writes, "documented": documented,
-            "controls": controls, "verified": bool(manifest and manifest.verified),
+            "controls": controls, "verified": verified,
             "documentation": None if manifest is None else manifest.documentation}
 
 
@@ -68,6 +71,8 @@ def node_level_problem(rt, device_id: str, level: str) -> str | None:
     missing = missing_control_params(cfg.category, cfg.params)
     if missing:
         return "veiligheidsinstellingen ontbreken: " + ", ".join(missing)
+    if level == "full" and not f["verified"]:
+        return "driver niet op echte hardware bewezen; volledige regeling geblokkeerd"
     return None
 
 
@@ -96,6 +101,9 @@ def build_view(rt, device_id: str) -> dict:
          "detail": f"sinds {shadow_since}" if shadow_since else "nog niet in schaduwmodus geweest"},
         {"id": "write_test", "label": "Schrijftest geslaagd", "done": bool(write_test and write_test.get("ok")),
          "detail": None if write_test is None else write_test.get("detail")},
+        {"id": "hardware_verified", "label": "Driver bewezen op echte hardware (vereist voor volledige regeling)",
+         "done": f["verified"], "detail": "Demo (gesimuleerd)" if f["simulated"] else (
+             "getest" if f["verified"] else "nog niet met echte hardware getest — volledige regeling geblokkeerd")},
     ]
     done = {s["id"]: s["done"] for s in steps}
     levels = {}
@@ -113,6 +121,8 @@ def build_view(rt, device_id: str) -> dict:
             why = "eerst schaduwmodus doorlopen tot het EMS een beslissing voor dit apparaat heeft getoond"
         elif lvl == "full" and not done["write_test"]:
             why = "eerst een geslaagde schrijftest"
+        elif lvl == "full" and not done["hardware_verified"]:
+            why = "deze driver is nog niet op echte hardware bewezen; volledige regeling blijft geblokkeerd"
         levels[lvl] = {"label": LEVEL_LABELS[lvl], "allowed": not why, "reason": why}
 
     snap = rt.engine.last_snapshot

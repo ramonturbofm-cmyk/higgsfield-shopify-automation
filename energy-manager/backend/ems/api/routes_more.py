@@ -7,7 +7,7 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel, Field
 
 from ems.api.deps import admin, get_runtime, operator, viewer
@@ -214,20 +214,31 @@ async def act_on_suggestion(suggestion_id: str, action: str, p: Principal = Depe
 
 
 # ------------------------------------------------------------------ backup
-@router.get("/backup", tags=["backup"])
-async def download_backup(include_keys: bool = True, _: Principal = Depends(admin),
-                          rt: EMSRuntime = Depends(get_runtime)) -> Response:
-    blob = await asyncio.to_thread(create_backup, rt.data_dir, rt.db_url, include_keys)
-    name = f"energy-manager-backup-{datetime.now(UTC):%Y%m%d-%H%M%S}.zip"
-    return Response(blob, media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+class BackupIn(BaseModel):
+    include_keys: bool = False                     # audit P0-05: keys only on explicit request
+    password: str | None = Field(None, max_length=256)
+
+
+@router.post("/backup", tags=["backup"])
+async def download_backup(body: BackupIn, _: Principal = Depends(admin), rt: EMSRuntime = Depends(get_runtime)):
+    """Back-up as a download. With keys a password is mandatory and the whole file is encrypted."""
+    try:
+        blob = await asyncio.to_thread(create_backup, rt.data_dir, rt.db_url, body.include_keys, body.password)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    ext = "emsbackup" if body.password else "zip"
+    name = f"energy-manager-backup-{datetime.now(UTC):%Y%m%d-%H%M%S}.{ext}"
+    return Response(blob, media_type="application/octet-stream" if body.password else "application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"})
 
 
 @router.post("/backup/restore", tags=["backup"])
-async def restore(file: UploadFile = File(...), _: Principal = Depends(admin), rt: EMSRuntime = Depends(get_runtime)):
+async def restore(file: UploadFile = File(...), password: str | None = Form(None), _: Principal = Depends(admin),
+                  rt: EMSRuntime = Depends(get_runtime)):
     blob = await file.read()
     try:
-        inspect_backup(blob)
-        result = await rt.restart(lambda: restore_backup(blob, rt.data_dir, rt.db_url))
+        inspect_backup(blob, password)
+        result = await rt.restart(lambda: restore_backup(blob, rt.data_dir, rt.db_url, password))
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     return {"ok": True, "restored": result["files"], "safety_copy": result["safety_copy"]}

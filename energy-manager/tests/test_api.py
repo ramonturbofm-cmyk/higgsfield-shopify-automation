@@ -240,12 +240,25 @@ async def test_backtest_and_autotune_jobs(env):
 async def test_backup_restore_roundtrip(env):
     rt, c = env
     await c.put("/api/v1/settings", json={"site": {"name": "Voor back-up"}})
-    blob = (await c.get("/api/v1/backup")).content
-    names = zipfile.ZipFile(io.BytesIO(blob)).namelist()
-    assert {"manifest.json", "ems.yaml", "ems.db", "secrets.enc", "secret.key"} <= set(names)
+    # Default: no keys (audit P0-05).
+    plain = (await c.post("/api/v1/backup", json={})).content
+    names = set(zipfile.ZipFile(io.BytesIO(plain)).namelist())
+    assert {"manifest.json", "ems.yaml", "ems.db", "secrets.enc"} <= names and "secret.key" not in names
+    # Keys only with a password; the file is then encrypted as a whole.
+    assert (await c.post("/api/v1/backup", json={"include_keys": True})).status_code == 422
+    assert (await c.post("/api/v1/backup", json={"include_keys": True, "password": "kort"})).status_code == 422
+    pw = "lang-genoeg-wachtwoord"
+    blob = (await c.post("/api/v1/backup", json={"include_keys": True, "password": pw})).content
+    assert blob.startswith(b"EMSBACKUP1") and b"secret.key" not in blob
+    with pytest.raises(zipfile.BadZipFile):
+        zipfile.ZipFile(io.BytesIO(blob))
     await c.put("/api/v1/settings", json={"site": {"name": "Na back-up"}})
-    r = await c.post("/api/v1/backup/restore", files={"file": ("b.zip", blob, "application/zip")})
+    files = {"file": ("b.emsbackup", blob, "application/octet-stream")}
+    assert (await c.post("/api/v1/backup/restore", files=files)).status_code == 422                 # no password
+    assert (await c.post("/api/v1/backup/restore", files=files, data={"password": "fout-wachtwoord"})).status_code == 422
+    r = await c.post("/api/v1/backup/restore", files=files, data={"password": pw})
     assert r.status_code == 200, r.text
+    assert "secret.key" in r.json()["restored"]
     assert rt.config.site.name == "Voor back-up"
     assert (await c.get("/api/v1/auth/me")).status_code == 200      # same jwt secret restored
     bad = await c.post("/api/v1/backup/restore", files={"file": ("x.zip", b"not a zip", "application/zip")})

@@ -83,6 +83,7 @@ def _device_entry(rt: EMSRuntime, cfg) -> dict:
             "capabilities": sorted(c.value for c in drv.device_capabilities()) if drv else [],
             "write_capable": bool(manifest and (manifest.write_capable or manifest.simulated)),
             "documented": bool(manifest and (manifest.simulated or (manifest.write_capable and manifest.documentation))),
+            "verified": bool(manifest and (manifest.simulated or manifest.verified)),
             "grid_meter_kind": manifest.grid_meter_kind if manifest else None,
             "is_primary_grid_meter": rt.engine.grid_selection.device_id == cfg.id,
             "status": st.status.value if st else "unknown"}
