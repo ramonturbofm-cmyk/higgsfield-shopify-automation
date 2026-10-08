@@ -49,6 +49,21 @@ jobs:
           .\dist\EnergyManagerServer\EnergyManagerServer.exe --selftest
           if ($LASTEXITCODE -ne 0) { throw "server selftest failed" }
 
+      - name: Server really serves (Demo Mode, like the Start menu shortcut)
+        run: |
+          $p = Start-Process -FilePath .\dist\EnergyManagerServer\EnergyManagerServer.exe -ArgumentList "--demo","--no-browser" -PassThru -RedirectStandardOutput server-out.txt -RedirectStandardError server-err.txt
+          $ok = $false
+          for ($i = 0; $i -lt 60; $i++) {
+            Start-Sleep -Seconds 2
+            if ($p.HasExited) { break }
+            try { $r = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8080/api/v1/system/info -Headers @{Origin="http://tauri.localhost"}; $ok = $true; break } catch { }
+          }
+          Get-Content server-out.txt, server-err.txt -ErrorAction SilentlyContinue | Select-Object -Last 60
+          if (-not $ok) { throw "server did not answer on 127.0.0.1:8080 (exited: $($p.HasExited))" }
+          Write-Host $r.Content
+          Write-Host "CORS: $($r.Headers['access-control-allow-origin'])"
+          Stop-Process -Id $p.Id -Force
+
       - name: Build Windows app (Tauri)
         working-directory: energy-manager/windows-app
         run: |

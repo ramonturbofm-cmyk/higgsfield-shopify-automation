@@ -37,5 +37,26 @@ def run() -> int:
     return main(cli + (["--demo"] if demo else []))
 
 
+def _pause(message: str) -> None:
+    # The console window closes as soon as the process ends; keep errors readable.
+    print(message)
+    try:
+        input("Druk op Enter om dit venster te sluiten…")
+    except (EOFError, KeyboardInterrupt):
+        pass
+
+
 if __name__ == "__main__":
-    sys.exit(run())
+    try:
+        code = run()
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else 1
+    except BaseException:
+        import traceback
+
+        traceback.print_exc()
+        code = 1
+    if code and "--selftest" not in sys.argv:
+        _pause(f"\nDe server is gestopt met foutcode {code}. Is poort 8080 al in gebruik (draait de server al)? "
+               "Maak een foto/screenshot van dit venster.")
+    sys.exit(code)
