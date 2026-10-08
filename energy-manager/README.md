@@ -68,11 +68,26 @@ gebruik `${VARIABELE}` met de waarde in `.env` voor eigen geheimen.
 Installer: **`EnergyManagerSetup-<versie>.exe`** — wordt gebouwd door GitHub Actions
 (workflow *Energy Manager — Windows installer*, artifact *EnergyManager-Windows*).
 
-* **"Alleen de app"** — de normale keuze: de app zoekt de EMS-server op het netwerk
-  (`energy-manager.local`, `raspberrypi.local`, eerder gebruikte servers) of u voert het IP-adres in.
-  Daarna verbindt de app automatisch met de laatst gebruikte server; via "Andere server" kiest u opnieuw.
-* **"App + lokale EMS-server"** — om zonder Pi te testen: startmenu → *Energy Manager Server (Demo Mode)*,
-  daarna in de app verbinden met `127.0.0.1`.
+**Alles in één op uw Windows-pc — geen Raspberry Pi nodig.** Kies bij de installatie
+*"Alles op deze computer"* (standaard). Open daarna **Energy Manager** en kies onder *Op deze computer*:
+
+* **Mijn eigen installatie** — echte apparaten (slimme meter, zonnepanelen, …); bij de eerste keer maakt u
+  een beheerdersaccount aan;
+* **Demo** — een gesimuleerd huis om alles uit te proberen (inloggen: demo / demo).
+
+Klik op **Starten**. Het EMS draait daarna op de achtergrond (zonder venster) en blijft werken als u de app
+sluit; met de installatie-optie *"EMS automatisch starten bij aanmelden"* start het ook na een herstart van
+Windows vanzelf. De app opent voortaan automatisch het EMS op deze computer. Stoppen: in de app via
+*Andere server* → **EMS stoppen**, of Startmenu → *Energy Manager → Hulpmiddelen → EMS stoppen*.
+Logboek bij problemen: `%LOCALAPPDATA%\EnergyManager\logs\server.log`, of Startmenu → *Hulpmiddelen →
+EMS starten met venster (foutzoeken)*.
+
+Let op: voor regeling 24/7 moet de pc aan blijven (slaapstand uit). Een Raspberry Pi is zuiniger en
+betrouwbaarder voor permanent gebruik; de app werkt met beide.
+
+**Met een Raspberry Pi**: kies *"Alleen de app"* of gebruik in de app *Raspberry Pi of andere server*: de app
+zoekt de Pi (`energy-manager.local`, `raspberrypi.local`, eerder gebruikte servers) of u voert het IP-adres in.
+
 * Installeert per gebruiker (geen beheerdersrechten); gegevens staan in `%LOCALAPPDATA%\EnergyManager`.
 * Nog niet digitaal ondertekend: SmartScreen → *Meer informatie* → *Toch uitvoeren*.
 
@@ -110,7 +125,7 @@ cd energy-manager
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 ems serve --demo --data-dir ./data-demo     # http://127.0.0.1:8080 (login demo/demo)
-pytest -q                                   # 144 tests
+pytest -q                                   # 145 tests
 ruff check backend tests
 ems-sim --start 2026-06-15 --days 2 --compare-native   # simulator-CLI
 ```

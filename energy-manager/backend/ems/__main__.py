@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import getpass
 import os
 import sys
@@ -17,6 +18,19 @@ from pathlib import Path
 
 def _data_dir(arg: str | None) -> Path:
     return Path(arg or os.environ.get("EMS_DATA_DIR") or "data")
+
+
+def _port_free(host: str, port: int) -> bool:
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        if os.name != "nt":
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((host if host not in ("", "0.0.0.0") else "0.0.0.0", port))
+        except OSError:
+            return False
+    return True
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -30,6 +44,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--tls-cert")
     s.add_argument("--tls-key")
     s.add_argument("--log-level", default=os.environ.get("EMS_LOG_LEVEL", "info"))
+    s.add_argument("--local-control-file", help="schrijf een token waarmee lokaal (127.0.0.1) gestopt kan worden")
     u = sub.add_parser("create-user", help="gebruiker aanmaken")
     u.add_argument("username")
     u.add_argument("--role", default="admin", choices=["viewer", "operator", "admin", "installer"])
@@ -54,10 +69,32 @@ def main(argv: list[str] | None = None) -> int:
 
         setup_logging(args.log_level.upper(), json_output=os.environ.get("EMS_LOG_JSON", "1") == "1")
         runtime = EMSRuntime(_data_dir(args.data_dir), mode="demo" if args.demo else None)
-        app = create_app(runtime)
-        uvicorn.run(app, host=args.host, port=args.port, log_level=args.log_level.lower(),
-                    ssl_certfile=args.tls_cert, ssl_keyfile=args.tls_key, proxy_headers=False)
-        return 0
+        if not _port_free(args.host, args.port):
+            print(f"Poort {args.port} is al in gebruik — draait Energy Manager al? (http://127.0.0.1:{args.port})",
+                  file=sys.stderr)
+            return 3
+        token = None
+        if args.local_control_file:
+            import secrets
+
+            token = secrets.token_urlsafe(32)
+            ctl = Path(args.local_control_file)
+            ctl.parent.mkdir(parents=True, exist_ok=True)
+            ctl.write_text(f"{args.port}\n{token}\n", encoding="utf-8")
+            with contextlib.suppress(OSError):
+                os.chmod(ctl, 0o600)
+        app = create_app(runtime, local_control_token=token)
+        server = uvicorn.Server(uvicorn.Config(app, host=args.host, port=args.port, log_level=args.log_level.lower(),
+                                               ssl_certfile=args.tls_cert, ssl_keyfile=args.tls_key,
+                                               proxy_headers=False))
+        app.state.request_shutdown = lambda: setattr(server, "should_exit", True)
+        try:
+            server.run()
+        finally:
+            if args.local_control_file:
+                with contextlib.suppress(OSError):
+                    Path(args.local_control_file).unlink()
+        return 0 if server.started else 1
     if args.cmd == "create-user":
         from ems.database import Database
         from ems.security.auth import hash_password

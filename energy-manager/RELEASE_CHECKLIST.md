@@ -43,7 +43,8 @@ Werk deze lijst af vóór elke release. Vink alleen af wat echt is gecontroleerd
 - [ ] Installer (`EnergyManagerSetup-<versie>.exe`) op een schone Windows 10 en 11 installeren
 - [ ] App vindt de Pi automatisch (mDNS) én via handmatig IP-adres
 - [ ] Opnieuw starten → automatisch verbinden; "Andere server" werkt
-- [ ] Optionele lokale server: Demo Mode start, app verbindt met `127.0.0.1`
+- [ ] Alles-in-één: "Op deze computer" → Starten (eigen installatie én Demo), app sluiten → EMS blijft draaien, herstart Windows → EMS start vanzelf (autostart), "EMS stoppen" werkt
+- [ ] Bijwerken terwijl het EMS op de achtergrond draait: installer stopt het eerst; daarna start de app het weer
 - [ ] Bijwerken over de vorige versie heen behoudt instellingen; verwijderen werkt
 - [ ] (Indien beschikbaar) installer en exe ondertekend
 

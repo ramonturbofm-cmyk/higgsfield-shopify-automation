@@ -9,17 +9,27 @@
 <body>
 <main class="wrap">
   <div class="brand"><img src="icon.svg" alt=""> Energy Manager</div>
-  <h1>Verbinden met uw EMS</h1>
-  <p class="muted">De Windows-app is het bedieningsscherm; het EMS zelf draait 24/7 op de Raspberry Pi (of op deze pc als test).</p>
+  <h1>Energy Manager starten</h1>
+  <p class="muted">Het EMS kan op deze computer draaien of op een Raspberry Pi in uw netwerk.</p>
   <div id="auto" class="notice" hidden></div>
-  <section class="card">
-    <div class="row spread"><h2>Gevonden servers</h2><button id="scan" class="btn primary">Zoeken</button></div>
-    <div id="list" class="list"><p class="muted">Klik op Zoeken.</p></div>
+  <section class="card" id="local" hidden>
+    <h2>Op deze computer</h2>
+    <p class="muted small">Alles in één: het EMS draait op de achtergrond op deze pc en blijft werken als u dit venster sluit.
+      Voor regeling 24/7 moet de pc aan blijven.</p>
+    <div class="choices">
+      <label class="choice"><input type="radio" name="mode" value="production" checked>
+        <span><b>Mijn eigen installatie</b><br><span class="muted small">echte apparaten (slimme meter, zonnepanelen, …)</span></span></label>
+      <label class="choice"><input type="radio" name="mode" value="demo">
+        <span><b>Demo</b><br><span class="muted small">gesimuleerd huis om alles uit te proberen (inloggen: demo / demo)</span></span></label>
+    </div>
+    <div class="row"><button id="startLocal" class="btn primary">Starten</button><button id="stopLocal" class="btn" hidden>EMS stoppen</button></div>
+    <p id="localMsg" class="small"></p>
   </section>
   <section class="card">
-    <h2>Adres handmatig invoeren</h2>
-    <form id="manual" class="row">
-      <input id="addr" placeholder="bijv. 192.168.1.20 of energy-manager.local" autocomplete="off">
+    <div class="row spread"><h2>Raspberry Pi of andere server</h2><button id="scan" class="btn">Zoeken</button></div>
+    <div id="list" class="list"><p class="muted small">Klik op Zoeken.</p></div>
+    <form id="manual" class="row" style="margin-top:12px">
+      <input id="addr" placeholder="adres, bijv. 192.168.1.20 of energy-manager.local" autocomplete="off">
       <button class="btn">Verbinden</button>
     </form>
     <p id="msg" class="small err"></p>

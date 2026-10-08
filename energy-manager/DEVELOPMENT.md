@@ -13,7 +13,7 @@ Laatst bijgewerkt: versie 0.2.0 — alle fases zonder hardwareafhankelijkheid zi
 
 Teststatus per onderdeel:
 
-* **UNIT TESTED** — geautomatiseerde tests (`pytest`, 144 tests) tegen echte code, met nagebootste
+* **UNIT TESTED** — geautomatiseerde tests (`pytest`, 145 tests) tegen echte code, met nagebootste
   apparaten waar nodig (TLS-fake van een HomeWizard P1, fake Modbus TCP-server, lokale HTTP-server,
   echte Mosquitto-broker, DSMR-telegrammen uit de standaard).
 * **SIMULATOR TESTED** — draait end-to-end tegen de fysieke woningsimulator (Demo Mode / `ems-sim`).
@@ -82,8 +82,9 @@ Teststatus per onderdeel:
 | Demo Mode "Demo Home" (8 kWp, 15 kWh, warmtepomp, EV, 3×25 A, dynamische prijs) | `[x]` | UNIT, SIMULATOR |
 | Productiemodus zonder nepdata ("Niet beschikbaar"/"Geen data") | `[x]` | UNIT |
 | Raspberry Pi: Docker-image (amd64 + arm64), docker-compose, `install.sh` (install/demo/update met rollback/backup/watchdog) | `[x]` | Docker build + healthcheck in sandbox en CI (arm64 via QEMU); **niet op een fysieke Pi gedraaid** |
-| Windows-app (Tauri 2): server zoeken/handmatig, automatisch opnieuw verbinden, "Andere server" | `[~]` | Gecompileerd (Linux), verbindingsscherm getest in Chromium tegen een echte server; Windows-build via CI |
-| Windows-installer `EnergyManagerSetup-<versie>.exe` (app + optionele lokale server) | `[~]` | Gebouwd door GitHub Actions; niet ondertekend (SmartScreen-melding) |
+| Windows alles-in-één: app start de ingebouwde EMS-server op de achtergrond (eigen installatie of Demo), automatisch starten bij aanmelden, netjes stoppen (token, alleen 127.0.0.1) | `[~]` | UNIT (start/stop/al-actief), startscherm getest in Chromium met echte server; achtergrondserver starten/opvragen/stoppen getest op Windows in CI; app zelf niet op een fysieke Windows-pc getest |
+| Windows-app (Tauri 2): Raspberry Pi zoeken/handmatig, automatisch opnieuw verbinden, "Andere server" | `[~]` | Gecompileerd, verbindingsscherm getest in Chromium tegen een echte server; Windows-build via CI |
+| Windows-installer `EnergyManagerSetup-<versie>.exe` (standaard alles op deze computer, of alleen de app) | `[~]` | Gebouwd door GitHub Actions; niet ondertekend (SmartScreen-melding) |
 
 ## Openstaande punten / wat de gebruiker nog moet aanleveren
 
@@ -139,6 +140,10 @@ Teststatus per onderdeel:
     bevat alleen `secret:device.<id>.<veld>` (of `${VAR}`).
 16. **Back-up terugzetten** gebeurt terwijl de engine stilstaat en de database gesloten is (Windows
     vergrendelt open bestanden).
+17. **Windows alles-in-één = aparte achtergrondserver** (`EnergyManagerService.exe`, zonder venster) die de app
+    start, i.p.v. de server ín het app-proces: het EMS blijft regelen als het app-venster dicht is, kan bij
+    aanmelden starten en wordt netjes gestopt via een lokaal token (`control.txt`), zodat apparaten eerst
+    worden vrijgegeven.
 
 ## Testen
 
@@ -146,7 +151,7 @@ Teststatus per onderdeel:
 cd energy-manager
 pip install -e ".[dev]"
 ruff check backend tests
-pytest -q                 # 144 tests, ~1 min
+pytest -q                 # 145 tests, ~1,5 min
 ems selftest              # snelle zelftest van een geïnstalleerde build
 ```
 

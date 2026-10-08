@@ -49,20 +49,28 @@ jobs:
           .\dist\EnergyManagerServer\EnergyManagerServer.exe --selftest
           if ($LASTEXITCODE -ne 0) { throw "server selftest failed" }
 
-      - name: Server really serves (Demo Mode, like the Start menu shortcut)
+      - name: All-in-one server - background start, query, graceful stop (as the app does)
         run: |
-          $p = Start-Process -FilePath .\dist\EnergyManagerServer\EnergyManagerServer.exe -ArgumentList "--demo","--no-browser" -PassThru -RedirectStandardOutput server-out.txt -RedirectStandardError server-err.txt
+          $svc = ".\dist\EnergyManagerServer\EnergyManagerService.exe"
+          $p = Start-Process -FilePath $svc -ArgumentList "--background","--demo" -PassThru
           $ok = $false
           for ($i = 0; $i -lt 60; $i++) {
             Start-Sleep -Seconds 2
             if ($p.HasExited) { break }
             try { $r = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8080/api/v1/system/info -Headers @{Origin="http://tauri.localhost"}; $ok = $true; break } catch { }
           }
-          Get-Content server-out.txt, server-err.txt -ErrorAction SilentlyContinue | Select-Object -Last 60
-          if (-not $ok) { throw "server did not answer on 127.0.0.1:8080 (exited: $($p.HasExited))" }
+          Get-Content "$env:LOCALAPPDATA\EnergyManager\logs\server.log" -ErrorAction SilentlyContinue | Select-Object -Last 40
+          if (-not $ok) { throw "background server did not answer on 127.0.0.1:8080 (exited: $($p.HasExited))" }
           Write-Host $r.Content
-          Write-Host "CORS: $($r.Headers['access-control-allow-origin'])"
-          Stop-Process -Id $p.Id -Force
+          if ($r.Headers['access-control-allow-origin'] -ne "http://tauri.localhost") { throw "CORS header missing for the app" }
+          if (-not ($r.Content -match '"mode":"demo"')) { throw "server not in demo mode" }
+          if (-not (Test-Path "$env:LOCALAPPDATA\EnergyManager\control.txt")) { throw "control file missing" }
+          .\dist\EnergyManagerServer\EnergyManagerServer.exe --stop
+          if ($LASTEXITCODE -ne 0) { throw "stop failed" }
+          if (-not $p.WaitForExit(30000)) { throw "server process did not exit after stop" }
+          Write-Host "exit code: $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) { throw "server exited with $($p.ExitCode)" }
+          if (Test-Path "$env:LOCALAPPDATA\EnergyManager\control.txt") { throw "control file not removed" }
 
       - name: Build Windows app (Tauri)
         working-directory: energy-manager/windows-app

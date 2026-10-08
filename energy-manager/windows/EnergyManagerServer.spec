@@ -9,5 +9,8 @@ datas = collect_data_files("ems", include_py_files=False) + collect_data_files("
 a = Analysis(["server_launcher.py"], pathex=["../backend"], datas=datas, hiddenimports=hiddenimports,
              excludes=["tkinter", "pytest", "matplotlib", "IPython"])
 pyz = PYZ(a.pure)
+# Same program twice: with a console window (troubleshooting) and without (background service
+# started by the app and at Windows sign-in). Both share the files in one folder.
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="EnergyManagerServer", console=True, upx=False)
-coll = COLLECT(exe, a.binaries, a.datas, name="EnergyManagerServer", upx=False)
+svc = EXE(pyz, a.scripts, [], exclude_binaries=True, name="EnergyManagerService", console=False, upx=False)
+coll = COLLECT(exe, svc, a.binaries, a.datas, name="EnergyManagerServer", upx=False)

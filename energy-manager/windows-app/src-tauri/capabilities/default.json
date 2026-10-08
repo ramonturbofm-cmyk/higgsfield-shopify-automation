@@ -1,7 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The connect screen needs no native APIs; remote pages get none either.",
-  "windows": ["main"],
-  "permissions": []
+  "description": "Only the bundled connect screen (local origin) may call the app commands that start/stop the built-in server; remote pages get no IPC.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default"
+  ]
 }

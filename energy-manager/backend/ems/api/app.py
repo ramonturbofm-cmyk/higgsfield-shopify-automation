@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -28,7 +29,10 @@ CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
 TAURI_ORIGINS = ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"]
 
 
-def create_app(runtime: EMSRuntime, *, start_runtime: bool = True, loops: bool = True) -> FastAPI:
+def create_app(runtime: EMSRuntime, *, start_runtime: bool = True, loops: bool = True,
+               local_control_token: str | None = None) -> FastAPI:
+    """``local_control_token`` enables POST /api/v1/system/local-shutdown for the
+    Windows app/launcher (loopback only, token from a file only the user can read)."""
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if start_runtime:
@@ -72,6 +76,20 @@ def create_app(runtime: EMSRuntime, *, start_runtime: bool = True, loops: bool =
         ok = runtime.running and not runtime.watchdog_tripped and runtime.db.ping()
         return JSONResponse({"ok": ok, "version": __version__, "mode": runtime.config.runtime.mode},
                             status_code=200 if ok else 503)
+
+    app.state.request_shutdown = None
+
+    @app.post("/api/v1/system/local-shutdown", include_in_schema=False)
+    async def local_shutdown(request: Request):
+        client = request.client.host if request.client else ""
+        given = request.headers.get("x-ems-local-token", "")
+        if (not local_control_token or client not in ("127.0.0.1", "::1")
+                or not secrets.compare_digest(given, local_control_token)):
+            return JSONResponse({"detail": "niet toegestaan"}, status_code=403)
+        if app.state.request_shutdown is None:
+            return JSONResponse({"detail": "stoppen niet beschikbaar"}, status_code=409)
+        app.state.request_shutdown()   # graceful: lifespan stops the engine and releases devices
+        return {"ok": True}
 
     @app.websocket("/api/v1/ws")
     async def ws(websocket: WebSocket):
