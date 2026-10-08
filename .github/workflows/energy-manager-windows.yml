@@ -91,11 +91,36 @@ jobs:
           & $iscc "/DAppVersion=$version" windows\installer.iss
           if ($LASTEXITCODE -ne 0) { throw "installer build failed" }
 
+      # Authenticode signing is prepared but only runs when a certificate is configured as
+      # repository secrets (WINDOWS_SIGNING_PFX_BASE64 + WINDOWS_SIGNING_PASSWORD). Without one the
+      # build is reported as an UNSIGNED DEVELOPMENT BUILD — never faked.
+      - name: Code signing (only with a configured certificate)
+        env:
+          PFX_B64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
+        run: |
+          if (-not $env:PFX_B64) { Write-Host "UNSIGNED DEVELOPMENT BUILD (no signing certificate configured)"; "unsigned" | Set-Content dist\signing.txt; exit 0 }
+          $pfx = Join-Path $env:RUNNER_TEMP "sign.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX_B64))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1
+          & $signtool.FullName sign /f $pfx /p $env:PFX_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 (Get-ChildItem dist\EnergyManagerSetup-*.exe).FullName
+          if ($LASTEXITCODE -ne 0) { throw "signing failed" }
+          "signed" | Set-Content dist\signing.txt
+          Remove-Item $pfx
+
+      - name: Windows acceptance test (install, run, restart, upgrade, uninstall)
+        run: |
+          Remove-Item -Recurse -Force "$env:LOCALAPPDATA\EnergyManager" -ErrorAction SilentlyContinue
+          $exe = (Get-ChildItem dist\EnergyManagerSetup-*.exe | Select-Object -First 1).FullName
+          .\windows\acceptance.ps1 -Installer $exe
+          Copy-Item acceptance-results.txt dist\acceptance-results.txt
+
       - uses: actions/upload-artifact@v4
         with:
           name: EnergyManager-Windows
           path: |
             energy-manager/dist/EnergyManagerSetup-*.exe
+            energy-manager/dist/acceptance-results.txt
           if-no-files-found: error
 
       # Direct download link that always points to the newest build:
@@ -110,7 +135,9 @@ jobs:
           $tag = "energy-manager-windows"
           $notes = "Nieuwste Windows-installer van Energy Manager (app + ingebouwde EMS-server, geen Raspberry Pi nodig).`n`n" +
                    "Download **EnergyManagerSetup.exe** hieronder en start het. Windows meldt mogelijk 'Onbekende uitgever' " +
-                   "(nog niet ondertekend): Meer informatie -> Toch uitvoeren.`n`nGebouwd uit commit $env:GITHUB_SHA ($(Get-Date -Format 'yyyy-MM-dd HH:mm') UTC)."
+                   "(nog niet ondertekend): Meer informatie -> Toch uitvoeren.`n`nGebouwd uit commit $env:GITHUB_SHA ($(Get-Date -Format 'yyyy-MM-dd HH:mm') UTC)." +
+                   "`n`nVersie: $((python -c 'import ems; print(ems.__version__)').Trim()) - $((Get-Content dist\signing.txt) -eq 'signed' ? 'ondertekend' : 'UNSIGNED DEVELOPMENT BUILD')" +
+                   "`n`nWindows-acceptatietest:`n" + ((Get-Content dist\acceptance-results.txt | ForEach-Object { "- $_" }) -join "`n")
           gh release view $tag *> $null
           if ($LASTEXITCODE -ne 0) {
             gh release create $tag --prerelease --title "Energy Manager voor Windows (nieuwste versie)" --notes $notes --target $env:GITHUB_SHA
@@ -118,5 +145,5 @@ jobs:
             gh release edit $tag --notes $notes
           }
           if ($LASTEXITCODE -ne 0) { throw "release create/edit failed" }
-          gh release upload $tag dist\EnergyManagerSetup.exe --clobber
+          gh release upload $tag dist\EnergyManagerSetup.exe dist\acceptance-results.txt --clobber
           if ($LASTEXITCODE -ne 0) { throw "upload failed" }

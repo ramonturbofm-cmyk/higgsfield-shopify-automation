@@ -30,12 +30,12 @@ async function probe(base, ms = 3000) {
   } catch { return null; } finally { clearTimeout(t); }
 }
 
-function open(base) {
+function open(base, hash = "#/dashboard") {
   const servers = [base, ...load("servers", []).filter((s) => s !== base)].slice(0, 8);
   save("servers", servers);
   save("last", base);
   // Tell the web UI it runs inside the app so it can offer "Andere server".
-  location.href = `${base}/?app=${encodeURIComponent(location.origin + location.pathname)}#/dashboard`;
+  location.href = `${base}/?app=${encodeURIComponent(location.origin + location.pathname)}${hash}`;
 }
 
 function item(base, info) {
@@ -92,7 +92,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const localMsg = (text, err = false) => { $("localMsg").textContent = text; $("localMsg").className = `small${err ? " err" : ""}`; };
 const selectedMode = () => document.querySelector("input[name=mode]:checked")?.value || "production";
 
-async function startLocal(mode) {
+async function startLocal(mode, hash) {
   save("localMode", mode);
   $("startLocal").disabled = true;
   try {
@@ -112,7 +112,7 @@ async function startLocal(mode) {
         + "'Energy Manager Server (met venster)' uit het Startmenu om de foutmelding te zien.", true);
       return;
     }
-    open(LOCAL);
+    open(LOCAL, hash);
   } catch (e) {
     localMsg(String(e), true);
   } finally {
@@ -136,6 +136,8 @@ async function initLocal() {
   for (const r of document.querySelectorAll("input[name=mode]")) r.checked = r.value === mode;
   $("startLocal").onclick = () => startLocal(selectedMode());
   $("stopLocal").onclick = stopLocal;
+  $("openNodes").hidden = false;
+  $("openNodes").onclick = () => startLocal(load("localMode", selectedMode()), "#/nodes");
   const info = await probe(LOCAL, 1500);
   if (info) {
     $("stopLocal").hidden = false;

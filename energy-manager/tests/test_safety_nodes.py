@@ -115,3 +115,18 @@ def test_identity_is_stable(tmp_path):
     assert a.node_id == b.node_id and json.loads((tmp_path / "node.json").read_text())["node_id"] == a.node_id
     assert a.roles == ["DEVICE_GATEWAY", "USER_INTERFACE"] and not a.is_controller
     assert b.is_controller and b.name == "Meterkast" and detect_platform() in ("LINUX", "RASPBERRY_PI", "WINDOWS", "OTHER")
+
+
+def test_powercfg_parsing_is_locale_independent():
+    from ems.nodes.power import parse_powercfg
+    nl = """Power-schema-GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Gebalanceerd)
+  Subgroep-GUID: 238c9fa8-0aad-41ed-83f4-97be242c8f20  (Slaapstand)
+    Energie-instelling-GUID: 29f6c1db-86da-48c5-9fdb-f2b67b1f44da  (Slaapstand na)
+      Minimaal mogelijke instelling: 0x00000000
+      Maximaal mogelijke instelling: 0xffffffff
+      Toename mogelijke instellingen: 0x00000001
+      Eenheden mogelijke instellingen: Seconden
+    Index van huidige wisselstroominstelling: 0x00000708
+    Index van huidige gelijkstroominstelling: 0x00000384"""
+    assert parse_powercfg(nl) == {"ac_sleep_after_s": 1800, "dc_sleep_after_s": 900}
+    assert parse_powercfg("nothing") is None

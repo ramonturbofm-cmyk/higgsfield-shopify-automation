@@ -1,7 +1,7 @@
 {
   "name": "energy-manager-windows",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Energy Manager Windows-app (Tauri 2): verbindt met de EMS-server op de Raspberry Pi",
   "scripts": {
     "tauri": "tauri",

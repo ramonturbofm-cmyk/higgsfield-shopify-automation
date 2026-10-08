@@ -46,6 +46,7 @@ from ems.devices.registry import registry as default_registry
 from ems.forecasting.service import ForecastService
 from ems.forecasting.weather import DemoWeatherProvider, OpenMeteoProvider
 from ems.gridmeter.meter import GridMeterStatus
+from ems.nodes.power import windows_sleep_settings
 from ems.nodes.service import NodeService
 from ems.optimizer.service import OptimizerService
 from ems.prices.providers import DemoProvider, EnergyZeroProvider, EntsoeProvider, StaticProvider
@@ -678,6 +679,13 @@ class EMSRuntime:
         else:
             add("forecast", "Prognose", "warn" if fc["last_error"] else "ok", fc["last_error"] or "")
         add("time", "Tijd", "ok" if now.year >= 2025 else "error", "" if now.year >= 2025 else "systeemklok onjuist")
+        if self.nodes.identity.platform == "WINDOWS" and self.nodes.identity.is_controller:
+            sleep = windows_sleep_settings()
+            if sleep and sleep["ac_sleep_after_s"] > 0:
+                add("sleep", "Slaapstand", "warn", f"Deze pc gaat na {sleep['ac_sleep_after_s'] // 60} min in slaap; "
+                    "Energy Manager kan dan niet regelen. Zet slaapstand (op netstroom) uit in Windows-instellingen.")
+            elif sleep:
+                add("sleep", "Slaapstand", "ok", "uitgeschakeld op netstroom")
         for link in self.nodes.links.values():
             add(f"node:{link.node_id}", f"Node {link.name}", "ok" if link.online and link.lease_ok else
                 ("warn" if link.online else "error"), link.lease_error or link.error or "")

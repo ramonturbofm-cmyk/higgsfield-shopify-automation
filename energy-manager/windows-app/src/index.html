@@ -9,11 +9,11 @@
 <body>
 <main class="wrap">
   <div class="brand"><img src="icon.svg" alt=""> Energy Manager</div>
-  <h1>Energy Manager starten</h1>
-  <p class="muted">Het EMS kan op deze computer draaien of op een Raspberry Pi in uw netwerk.</p>
+  <h1>Hoe wilt u Energy Manager gebruiken?</h1>
+  <p class="muted">Alles op deze computer, verbinden met een bestaand Energy Manager-systeem, of een Raspberry Pi / Linux-computer toevoegen.</p>
   <div id="auto" class="notice" hidden></div>
   <section class="card" id="local" hidden>
-    <h2>Op deze computer</h2>
+    <h2>Alles op deze computer</h2>
     <p class="muted small">Alles in één: het EMS draait op de achtergrond op deze pc en blijft werken als u dit venster sluit.
       Voor regeling 24/7 moet de pc aan blijven.</p>
     <div class="choices">
@@ -26,13 +26,22 @@
     <p id="localMsg" class="small"></p>
   </section>
   <section class="card">
-    <div class="row spread"><h2>Raspberry Pi of andere server</h2><button id="scan" class="btn">Zoeken</button></div>
+    <div class="row spread"><h2>Verbinden met bestaand Energy Manager-systeem</h2><button id="scan" class="btn">Zoeken</button></div>
     <div id="list" class="list"><p class="muted small">Klik op Zoeken.</p></div>
     <form id="manual" class="row" style="margin-top:12px">
       <input id="addr" placeholder="adres, bijv. 192.168.1.20 of energy-manager.local" autocomplete="off">
       <button class="btn">Verbinden</button>
     </form>
     <p id="msg" class="small err"></p>
+  </section>
+  <section class="card" id="addnode">
+    <h2>Raspberry Pi / Linux-node toevoegen</h2>
+    <ol class="small">
+      <li>Installeer Energy Manager op de Raspberry Pi of Linux-computer: <code>./install.sh</code> (zie README).</li>
+      <li>Open daar in de browser <b>Nodes → Koppelcode tonen</b>.</li>
+      <li>Koppel hem hier: open het EMS op deze computer → <b>Nodes</b> → adres + code. De node kan dan bijvoorbeeld de P1-meter of RS485-apparaten aansluiten.</li>
+    </ol>
+    <button id="openNodes" class="btn" hidden>Nodes openen op deze computer</button>
   </section>
   <p class="muted small">Tip: geef de Raspberry Pi de hostnaam <b>energy-manager</b>; de app vindt hem dan automatisch.</p>
 </main>

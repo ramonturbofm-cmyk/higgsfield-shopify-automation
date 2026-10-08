@@ -14,3 +14,4 @@ input{flex:1 1 260px;min-height:40px;padding:8px 10px;border:1px solid var(--bor
 .choices{display:grid;gap:8px;margin:12px 0}.choice{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--border);border-radius:10px;padding:10px 12px;cursor:pointer}
 .choice input{flex:none;min-height:auto;margin-top:4px}.choice:has(input:checked){border-color:var(--accent)}
 .btn:disabled{opacity:.55;cursor:default}
+code{font-family:ui-monospace,Consolas,monospace;font-size:13px}
