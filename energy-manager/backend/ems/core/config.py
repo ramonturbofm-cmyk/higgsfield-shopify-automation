@@ -257,8 +257,8 @@ class PriceConfig(_Base):
     provider: Literal["none", "entsoe", "manual", "demo"] = setting(
         "none", label="Prijsbron",
         help="ENTSO-E (gratis API-token nodig), handmatig ingevoerde prijzen, of de demo-prijzen.")
-    entsoe_token: str = setting("", label="ENTSO-E API-token", level="advanced",
-                                help="Gebruik bij voorkeur ${ENTSOE_TOKEN} met de waarde in .env.")
+    entsoe_token: str = setting("", label="ENTSO-E API-token", level="simple",
+                                help="Alleen nodig bij prijsbron ENTSO-E. Wordt versleuteld opgeslagen.")
     bidding_zone: str = setting("10YNL----------L", label="Biedzone (EIC)", level="expert")
     refresh_minutes: int = setting(60, label="Verversen elke", unit="min", level="expert", ge=5)
 

@@ -187,6 +187,9 @@ async def energy_live(_: Principal = Depends(viewer), rt: EMSRuntime = Depends(g
 
 
 # ---------------------------------------------------------------- settings
+ENTSOE_SECRET = "prices.entsoe_token"
+
+
 @router.get("/settings", tags=["settings"])
 async def get_settings(_: Principal = Depends(viewer), rt: EMSRuntime = Depends(get_runtime)) -> dict:
     data = rt.config.model_dump(mode="json")
@@ -211,8 +214,16 @@ async def put_settings(body: dict[str, dict[str, Any]], p: Principal = Depends(a
         raise HTTPException(403, "bedrijfsmodus wijzigen vereist installateursrechten")
     data = rt.config.model_dump(mode="json")
     for section, values in body.items():
-        if section == "prices" and values.get("entsoe_token") == "********":
-            values = {k: v for k, v in values.items() if k != "entsoe_token"}
+        if section == "prices" and "entsoe_token" in values:
+            token = str(values["entsoe_token"] or "").strip()
+            if token == "********":                      # masked value: keep the stored token
+                values = {k: v for k, v in values.items() if k != "entsoe_token"}
+            elif token and not token.startswith(("${", "secret:")):
+                rt.secrets.set(ENTSOE_SECRET, token)        # never written to the YAML
+                values = {**values, "entsoe_token": f"secret:{ENTSOE_SECRET}"}
+            elif not token:
+                rt.secrets.delete(ENTSOE_SECRET)
+                values = {**values, "entsoe_token": ""}
         data[section] = {**data[section], **values}
     try:
         await rt.reload(data, p.username, f"instellingen: {', '.join(body)}")

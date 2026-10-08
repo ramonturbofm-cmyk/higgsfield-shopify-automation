@@ -100,7 +100,14 @@ export async function render(root, [tab = "general"]) {
     show();
   } else if (tab === "prices") {
     const csv = h("textarea", { rows: 4, placeholder: "2026-10-07T00:00:00+02:00;0.105\n2026-10-07T01:00:00+02:00;0.098" });
-    root.append(h("div", { class: "grid cols-2" }, card("prices"), card("forecast"), h("div", { class: "card" }, h("h3", {}, "Prijzen handmatig invoeren"),
+    const howto = h("details", { class: "small", style: { marginTop: "10px" } }, h("summary", {}, "Hoe krijg ik een ENTSO-E-token? (gratis)"),
+      h("ol", {},
+        h("li", {}, "Maak een gratis account aan op ", h("a", { href: "https://transparency.entsoe.eu/", target: "_blank", rel: "noopener" }, "transparency.entsoe.eu"), " (Login → Register)."),
+        h("li", {}, "Stuur een e-mail naar transparency@entsoe.eu met als onderwerp “Restful API access” en in de tekst het e-mailadres van uw account."),
+        h("li", {}, "Na goedkeuring (meestal binnen enkele werkdagen): log in → My Account Settings → Generate a new token."),
+        h("li", {}, "Kopieer het token hierboven, kies prijsbron ENTSO-E en klik op Opslaan.")),
+      h("p", { class: "muted" }, "Zolang u geen token hebt, kunt u prijsbron „Handmatig” kiezen en prijzen hieronder invoeren, of een vast/variabel contract instellen bij Energiecontract."));
+    root.append(h("div", { class: "grid cols-2" }, card("prices", howto), card("forecast"), h("div", { class: "card" }, h("h3", {}, "Prijzen handmatig invoeren"),
       h("p", { class: "muted small" }, "Eén regel per uur: tijdstip met tijdzone;marktprijs in €/kWh (excl. btw)."), csv,
       h("div", { class: "row", style: { marginTop: "10px" } }, h("button", { class: "btn", disabled: ro || null, onclick: () => guard(async () => {
         const points = csv.value.trim().split(/\n+/).map((l) => { const [start, price] = l.split(/[;,\t]/); return { start: start.trim(), price_eur_kwh: Number(price), resolution_min: 60 }; });

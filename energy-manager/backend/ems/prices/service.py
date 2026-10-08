@@ -72,7 +72,7 @@ class PriceService:
         try:
             points = await self.provider.fetch(start, end)
         except Exception as exc:
-            self.last_error = f"{type(exc).__name__}: {exc}"
+            self.last_error = str(exc) if isinstance(exc, ValueError) else f"{type(exc).__name__}: {exc}"
             log.warning("price fetch failed", extra={"provider": self.provider.name, "error": self.last_error})
             return 0
         self.last_error = None

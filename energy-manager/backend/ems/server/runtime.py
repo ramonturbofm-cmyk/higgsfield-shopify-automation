@@ -175,7 +175,10 @@ class EMSRuntime:
         try:
             match cfg.prices.provider:
                 case "entsoe":
-                    provider = EntsoeProvider(cfg.prices.entsoe_token, cfg.prices.bidding_zone)
+                    token = cfg.prices.entsoe_token
+                    if token.startswith("secret:"):
+                        token = self.secrets.get(token.removeprefix("secret:")) or ""
+                    provider = EntsoeProvider(token, cfg.prices.bidding_zone)
                 case "manual":
                     provider = StaticProvider()
                 case "demo":

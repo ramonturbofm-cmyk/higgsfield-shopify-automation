@@ -302,3 +302,18 @@ async def test_generic_device_password_goes_to_secret_store(env):
     assert r.status_code == 200 and rt.secrets.get(f"device.{dev['id']}.password") == "s3cret-pw"
     assert (await c.delete(f"/api/v1/devices/{dev['id']}")).status_code == 200
     assert rt.secrets.get(f"device.{dev['id']}.password") is None
+
+
+async def test_entsoe_token_is_stored_encrypted(env):
+    rt, c = env
+    r = await c.put("/api/v1/settings", json={"prices": {"provider": "entsoe", "entsoe_token": "abc-123-token"}})
+    assert r.status_code == 200, r.text
+    assert r.json()["prices"]["entsoe_token"] == "********"
+    assert "abc-123-token" not in rt.config_path.read_text()
+    assert rt.secrets.get("prices.entsoe_token") == "abc-123-token"
+    assert rt.prices.provider is not None and rt.prices.provider.token == "abc-123-token"
+    # Saving again with the masked value keeps the token; an empty value removes it.
+    await c.put("/api/v1/settings", json={"prices": {"provider": "entsoe", "entsoe_token": "********"}})
+    assert rt.secrets.get("prices.entsoe_token") == "abc-123-token"
+    await c.put("/api/v1/settings", json={"prices": {"provider": "manual", "entsoe_token": ""}})
+    assert rt.secrets.get("prices.entsoe_token") is None

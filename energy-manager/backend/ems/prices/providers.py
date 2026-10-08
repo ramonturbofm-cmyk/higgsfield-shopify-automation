@@ -84,7 +84,7 @@ class EntsoeProvider(PriceProvider):
 
     def __init__(self, token: str, bidding_zone: str, client: httpx.AsyncClient | None = None) -> None:
         if not token:
-            raise ValueError("ENTSO-E vereist een API-token")
+            raise ValueError("ENTSO-E-token ontbreekt: vul het in bij Instellingen → Prijzen & prognoses")
         self.token = token
         self.zone = bidding_zone
         self.client = client
@@ -103,7 +103,8 @@ class EntsoeProvider(PriceProvider):
             if self.client is None:
                 await client.aclose()
         if resp.status_code == 401:
-            raise ValueError("ENTSO-E: ongeldig API-token")
+            raise ValueError("ENTSO-E: het API-token wordt niet geaccepteerd — "
+                             "controleer het token in Instellingen → Prijzen & prognoses")
         if resp.status_code >= 400 and "Acknowledgement" not in resp.text:
             raise ValueError(f"ENTSO-E: HTTP {resp.status_code}")
         return parse_entsoe_a44(resp.text)
