@@ -102,8 +102,18 @@ async def test_devices_crud_test_and_commissioning(env):
     assert com["level"] == "full" and com["levels"]["shadow"]["allowed"]
     r = await c.put("/api/v1/devices/battery/commissioning", json={"level": "shadow"})
     assert r.status_code == 200 and r.json()["level"] == "shadow"
+    # Full control needs the real procedure: a shadow decision, a write test and the typed device name.
+    com = r.json()
+    assert com["levels"]["full"]["allowed"] is False and {s["id"] for s in com["procedure"]} >= {
+        "connection", "safety_params", "shadow", "write_test"}
+    await rt.tick_once()
+    assert (await c.post("/api/v1/devices/battery/commissioning/write-test")).json()["ok"]
+    name = rt.config.device("battery").name
     assert (await c.put("/api/v1/devices/battery/commissioning", json={"level": "full"})).status_code == 409
-    assert (await c.put("/api/v1/devices/battery/commissioning", json={"level": "full", "confirm": True})).status_code == 200
+    r = await c.put("/api/v1/devices/battery/commissioning", json={"level": "full", "confirm_text": "ja"})
+    assert r.status_code == 409 and name in r.text
+    r = await c.put("/api/v1/devices/battery/commissioning", json={"level": "full", "confirm_text": name.upper()})
+    assert r.status_code == 200, r.text
 
 
 async def test_shadow_mode_reports_without_writing(env):

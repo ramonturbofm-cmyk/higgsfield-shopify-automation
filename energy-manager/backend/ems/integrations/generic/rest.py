@@ -36,7 +36,7 @@ class GenericHTTPJSONDriver(DeviceDriver):
         display_name="Generiek HTTP/JSON (alleen lezen)",
         vendor="Generiek",
         categories=READ_CATEGORIES,
-        capabilities=frozenset(c for c in Capability if c.value.startswith("read_")),
+        capabilities=frozenset(),   # derived per device from its validated mapping only
         connection_types=("rest",),
         documentation="URL en JSON-paden uit de documentatie van het apparaat",
         grid_meter_kind="rest",

@@ -12,7 +12,9 @@ from pydantic import BaseModel, Field
 
 from ems.api.deps import admin, get_runtime, operator, viewer
 from ems.automations.engine import ACTION_TYPES, METRICS, OPS, evaluate_condition, validate_definition
-from ems.core.models import CommandAction
+from ems.control.authority import ControlState, can_execute
+from ems.core.models import Command, CommandAction
+from ems.devices.capabilities import actions_for
 from ems.security.auth import Principal
 from ems.server.runtime import EMSRuntime
 from ems.services.backtest import apply_overrides, autotune, run_backtest
@@ -33,9 +35,14 @@ async def catalog(_: Principal = Depends(viewer), rt: EMSRuntime = Depends(get_r
     metrics = dict(METRICS)
     for d in rt.config.devices:
         metrics[f"device.{d.id}.status"] = f"{d.name}: status"
-    return {"metrics": metrics, "ops": list(OPS), "action_types": list(ACTION_TYPES),
-            "device_actions": [a.value for a in CommandAction],
-            "devices": [{"id": d.id, "name": d.name, "category": d.category.value} for d in rt.config.devices]}
+    devices = []
+    for d in rt.config.devices:
+        md = rt.devices.devices.get(d.id)
+        caps = frozenset() if md is None or md.driver is None else md.driver.device_capabilities()
+        devices.append({"id": d.id, "name": d.name, "category": d.category.value,
+                        # only the actions this device supports, with its own value ranges
+                        "actions": [a.to_dict() for a in actions_for(d.category, caps, d.params, rt.config)]})
+    return {"metrics": metrics, "ops": list(OPS), "action_types": list(ACTION_TYPES), "devices": devices}
 
 
 @router.get("/automations/metrics", tags=["automations"])
@@ -48,16 +55,30 @@ async def list_automations(_: Principal = Depends(viewer), rt: EMSRuntime = Depe
     return await asyncio.to_thread(rt.db.list_automations)
 
 
-def _validate(body: AutomationIn) -> None:
+def _validate(body: AutomationIn, rt: EMSRuntime) -> None:
     try:
         validate_definition(body.definition)
     except (ValueError, KeyError, TypeError) as exc:
         raise HTTPException(422, f"ongeldige automatisering: {exc}") from exc
+    # Device-specific: every override must be an action this device supports, within its own limits.
+    for branch in ("then", "else"):
+        for a in body.definition.get(branch) or []:
+            if a.get("type") not in ("override", "clear_override"):
+                continue
+            md = rt.devices.devices.get(a.get("device"))
+            if md is None:
+                raise HTTPException(422, f"ongeldige automatisering: onbekend apparaat {a.get('device')!r}")
+            if a["type"] == "clear_override":
+                continue
+            chk = can_execute(md, Command(md.config.id, CommandAction(a["action"]), a.get("value")), None,
+                              ControlState.FULL_CONTROL, config=rt.config)
+            if not chk.allowed:
+                raise HTTPException(422, f"ongeldige automatisering ({md.config.name}): {'; '.join(chk.reasons)}")
 
 
 @router.post("/automations", tags=["automations"])
 async def create_automation(body: AutomationIn, _: Principal = Depends(admin), rt: EMSRuntime = Depends(get_runtime)):
-    _validate(body)
+    _validate(body, rt)
     aid = await asyncio.to_thread(rt.db.save_automation, body.name, body.enabled, body.definition)
     return await asyncio.to_thread(rt.db.get_automation, aid)
 
@@ -67,7 +88,7 @@ async def update_automation(automation_id: int, body: AutomationIn, _: Principal
                             rt: EMSRuntime = Depends(get_runtime)):
     if await asyncio.to_thread(rt.db.get_automation, automation_id) is None:
         raise HTTPException(404, "automatisering niet gevonden")
-    _validate(body)
+    _validate(body, rt)
     await asyncio.to_thread(rt.db.save_automation, body.name, body.enabled, body.definition, automation_id)
     rt.automations._state.pop(automation_id, None)
     return await asyncio.to_thread(rt.db.get_automation, automation_id)

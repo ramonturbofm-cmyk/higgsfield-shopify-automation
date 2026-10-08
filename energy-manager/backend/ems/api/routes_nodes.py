@@ -19,6 +19,7 @@ from ems.core.config import ConfigError
 from ems.nodes.identity import ROLE_LABELS_NL
 from ems.nodes.link import NodeLinkError
 from ems.security.auth import Principal
+from ems.server.commissioning import node_level_problem
 from ems.server.runtime import EMSRuntime
 
 log = logging.getLogger(__name__)
@@ -81,6 +82,7 @@ def _device_entry(rt: EMSRuntime, cfg) -> dict:
             "phase": cfg.phase, "params": cfg.params, "control_level": cfg.control_level,
             "capabilities": sorted(c.value for c in drv.device_capabilities()) if drv else [],
             "write_capable": bool(manifest and (manifest.write_capable or manifest.simulated)),
+            "documented": bool(manifest and (manifest.simulated or (manifest.write_capable and manifest.documentation))),
             "grid_meter_kind": manifest.grid_meter_kind if manifest else None,
             "is_primary_grid_meter": rt.engine.grid_selection.device_id == cfg.id,
             "status": st.status.value if st else "unknown"}
@@ -146,6 +148,9 @@ class LevelBody(BaseModel):
 async def node_device_level(device_id: str, body: LevelBody, peer: dict = Depends(peer_node),
                             rt: EMSRuntime = Depends(get_runtime)) -> dict:
     _local(rt, device_id)
+    problem = node_level_problem(rt, device_id, body.control_level)   # this node checks its own device too
+    if problem:
+        raise HTTPException(409, problem)
     data = rt.config.model_dump(mode="json")
     for d in data["devices"]:
         if d["id"] == device_id:

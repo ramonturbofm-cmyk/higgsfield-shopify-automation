@@ -33,7 +33,9 @@ def test_registry_rejects_conflicting_ids():
 def test_all_manifests_are_honest():
     for drv in registry.list():
         m = drv.manifest
-        assert m.categories and m.capabilities
+        assert m.categories
+        # Generic drivers claim nothing up front: capabilities come only from a validated mapping.
+        assert m.capabilities or m.driver_id.startswith("generic.")
         if m.verified:
             assert m.documentation, f"{m.driver_id}: verified driver needs a documentation source"
 

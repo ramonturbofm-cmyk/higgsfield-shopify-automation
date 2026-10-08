@@ -96,7 +96,11 @@ async def test_full_chain_controller_gateway(cluster):
     assert (await c.post(f"/api/v1/devices/{batt_id}/test")).json()["reachable"]
     assert (await c.put(f"/api/v1/devices/{batt_id}/commissioning", json={"level": "shadow"})).status_code == 200
     assert gw.config.device("battery").control_level == "shadow"
-    r = await c.put(f"/api/v1/devices/{batt_id}/commissioning", json={"level": "full", "confirm": True})
+    await gw.tick_once()
+    await ctl.tick_once()
+    assert (await c.post(f"/api/v1/devices/{batt_id}/commissioning/write-test")).json()["ok"]
+    r = await c.put(f"/api/v1/devices/{batt_id}/commissioning",
+                    json={"level": "full", "confirm_text": ctl.config.device(batt_id).name})
     assert r.status_code == 200, r.text
     assert gw.config.device("battery").control_level == "full"
 
@@ -139,7 +143,13 @@ async def test_split_brain_and_partition(cluster, tmp_path):
     r = await c.post(f"/api/v1/nodes/{gid}/devices/battery/import", json={})
     batt_id = r.json()["device_id"]
     await c.post(f"/api/v1/devices/{batt_id}/test")
-    await c.put(f"/api/v1/devices/{batt_id}/commissioning", json={"level": "full", "confirm": True})
+    assert (await c.put(f"/api/v1/devices/{batt_id}/commissioning", json={"level": "shadow"})).status_code == 200
+    await gw.tick_once()
+    await ctl.tick_once()
+    assert (await c.post(f"/api/v1/devices/{batt_id}/commissioning/write-test")).json()["ok"]
+    r = await c.put(f"/api/v1/devices/{batt_id}/commissioning",
+                    json={"level": "full", "confirm_text": ctl.config.device(batt_id).name})
+    assert r.status_code == 200, r.text
     gw.site.component("battery").soc_pct = 50.0
     await gw.tick_once()
 

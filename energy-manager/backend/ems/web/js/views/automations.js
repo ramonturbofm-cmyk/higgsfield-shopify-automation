@@ -1,8 +1,6 @@
 import { api, can, guard, h } from "../lib.js";
 
 const OP_LABEL = { "<": "kleiner dan", "<=": "≤", ">": "groter dan", ">=": "≥", "==": "gelijk aan", "!=": "niet gelijk aan", between: "tussen", in: "is een van" };
-const ACTION_LABEL = { battery_charge: "batterij laden (W)", battery_discharge: "batterij ontladen (W)", battery_standby: "batterij stand-by",
-  battery_auto: "batterij automatisch", pv_limit: "PV begrenzen (W)", hp_mode: "warmtepompmodus", ev_current: "laadstroom (A)", switch: "schakelen" };
 
 export async function render(root) {
   const cat = await api("/automations/catalog");
@@ -28,10 +26,11 @@ export async function render(root) {
       h("div", { class: "small muted" }, describe(r.definition)))) : [h("div", { class: "card empty" }, "Nog geen automatiseringen.")]));
   }
 
+  const actionLabel = (dev, act) => devById[dev]?.actions.find((x) => x.action === act)?.label || act;
   function describe(d) {
     const c = (x) => x.all ? x.all.map(c).join(" EN ") : x.any ? `(${x.any.map(c).join(" OF ")})` : x.not ? `NIET ${c(x.not)}`
       : `${cat.metrics[x.metric] || x.metric} ${OP_LABEL[x.op]} ${Array.isArray(x.value) ? x.value.join(" en ") : x.value}`;
-    const a = (list) => (list || []).map((x) => x.type === "override" ? `${ACTION_LABEL[x.action] || x.action}${x.value !== null && x.value !== undefined ? ` ${x.value}` : ""} (${x.device}, ${x.duration_min} min)`
+    const a = (list) => (list || []).map((x) => x.type === "override" ? `${actionLabel(x.device, x.action)}${x.value !== null && x.value !== undefined ? ` ${x.value}` : ""} (${devById[x.device]?.name || x.device}, ${x.duration_min} min)`
       : x.type === "notify" ? `melding "${x.message}"` : x.type === "set_profile" ? `profiel ${x.profile}` : x.type).join(", ");
     return `ALS ${c(d.if)} DAN ${a(d.then)}${d.else?.length ? ` ANDERS ${a(d.else)}` : ""}`;
   }
@@ -51,25 +50,72 @@ export async function render(root) {
     return row;
   }
 
-  function actionRow(a = { type: "override", device: cat.devices[0]?.id, action: "battery_charge", value: 3000, duration_min: 30 }) {
-    const type = h("select", {}, [["override", "Apparaat bedienen"], ["notify", "Melding sturen"], ["set_profile", "Profiel kiezen"], ["replan", "Opnieuw plannen"]].map(([v, l]) => h("option", { value: v }, l)));
+  // Only devices that can be controlled, and per device only the actions it really supports.
+  const controllable = cat.devices.filter((d) => d.actions.length);
+  const devById = Object.fromEntries(cat.devices.map((d) => [d.id, d]));
+
+  function valueInput(spec, current) {
+    if (!spec) return null;
+    if (spec.type === "enum") {
+      const sel = h("select", { "aria-label": "waarde" }, spec.options.map((o) => h("option", { value: o }, o)));
+      if (current != null) sel.value = current;
+      return sel;
+    }
+    const attrs = { type: "number", step: spec.step ?? 1, "aria-label": `waarde (${spec.unit})` };
+    if (spec.min != null) attrs.min = spec.min;
+    if (spec.max != null) attrs.max = spec.max;
+    attrs.value = current ?? spec.min ?? 0;
+    return h("input", attrs);
+  }
+
+  function actionRow(a = null) {
+    a = a || { type: controllable.length ? "override" : "notify", device: controllable[0]?.id, action: controllable[0]?.actions[0]?.action, value: null, duration_min: 30 };
+    const types = [["notify", "Melding sturen"], ["set_profile", "Profiel kiezen"], ["replan", "Opnieuw plannen"]];
+    if (controllable.length) types.unshift(["override", "Apparaat bedienen"]);
+    const type = h("select", { "aria-label": "soort actie" }, types.map(([v, l]) => h("option", { value: v }, l)));
     type.value = a.type;
-    const device = h("select", {}, cat.devices.map((d) => h("option", { value: d.id }, d.name)));
-    if (a.device) device.value = a.device;
-    const action = h("select", {}, cat.device_actions.map((x) => h("option", { value: x }, ACTION_LABEL[x] || x)));
-    if (a.action) action.value = a.action;
-    const value = h("input", { value: a.value ?? a.message ?? a.profile ?? "", placeholder: "waarde / tekst" });
-    const dur = h("input", { type: "number", value: a.duration_min ?? 30, title: "duur in minuten" });
-    const row = h("div", { class: "row" }, type, device, action, value, dur, h("span", { class: "small muted" }, "min"), h("button", { class: "btn sm", onclick: () => row.remove() }, "×"));
-    const sync = () => { const ov = type.value === "override"; [device, action, dur].forEach((e) => { e.style.display = ov ? "" : "none"; }); value.style.display = type.value === "replan" ? "none" : ""; };
-    type.addEventListener("change", sync); sync();
+    const device = h("select", { "aria-label": "apparaat" }, controllable.map((d) => h("option", { value: d.id }, d.name)));
+    if (a.device && devById[a.device]?.actions.length) device.value = a.device;
+    const action = h("select", { "aria-label": "bediening" });
+    const valueBox = h("span", {});
+    const unit = h("span", { class: "small muted" });
+    const text = h("input", { value: a.message ?? a.profile ?? "", placeholder: a.type === "set_profile" ? "profiel" : "tekst" });
+    const dur = h("input", { type: "number", min: 1, max: 1440, value: a.duration_min ?? 30, "aria-label": "duur in minuten" });
+    const durLabel = h("span", { class: "small muted" }, "min");
+    const note = h("div", { class: "small muted" });
+    let input = null;
+    const fillActions = (keep) => {
+      const d = devById[device.value];
+      action.replaceChildren(...(d?.actions || []).map((x) => h("option", { value: x.action }, x.label)));
+      if (keep && d?.actions.some((x) => x.action === keep)) action.value = keep;
+    };
+    const fillValue = (current) => {
+      const spec = devById[device.value]?.actions.find((x) => x.action === action.value)?.value;
+      input = valueInput(spec, current);
+      valueBox.replaceChildren(...(input ? [input] : []));
+      unit.textContent = spec?.unit || "";
+      note.textContent = spec?.type === "number" && spec.max == null && ["W", "A"].includes(spec.unit)
+        ? "Apparaatlimiet niet ingesteld: stel eerst het maximum in bij het apparaat." : "";
+    };
+    device.addEventListener("change", () => { fillActions(); fillValue(); });
+    action.addEventListener("change", () => fillValue());
+    const row = h("div", { class: "rule-action" }, h("div", { class: "row" }, type, device, action, valueBox, unit, text, dur, durLabel,
+      h("button", { class: "btn sm", "aria-label": "actie verwijderen", onclick: () => row.remove() }, "×")), note);
+    const sync = () => {
+      const ov = type.value === "override";
+      [device, action, valueBox, unit, dur, durLabel, note].forEach((e) => { e.style.display = ov ? "" : "none"; });
+      text.style.display = ["notify", "set_profile"].includes(type.value) ? "" : "none";
+    };
+    type.addEventListener("change", sync);
+    fillActions(a.action); fillValue(a.value); sync();
     row.get = () => {
       if (type.value === "override") {
-        const v = value.value.trim();
-        return { type: "override", device: device.value, action: action.value, value: v === "" ? null : Number.isNaN(Number(v)) ? v : Number(v), duration_min: Number(dur.value) };
+        const raw = input ? input.value : null;
+        const value = raw === null || raw === "" ? null : input.type === "number" ? Number(raw) : raw;
+        return { type: "override", device: device.value, action: action.value, value, duration_min: Number(dur.value) };
       }
-      if (type.value === "notify") return { type: "notify", message: value.value };
-      if (type.value === "set_profile") return { type: "set_profile", profile: value.value };
+      if (type.value === "notify") return { type: "notify", message: text.value };
+      if (type.value === "set_profile") return { type: "set_profile", profile: text.value };
       return { type: "replan" };
     };
     return row;
@@ -92,7 +138,7 @@ export async function render(root) {
         h("button", { class: "btn sm", onclick: () => conds.append(condRow()) }, "+ voorwaarde")),
       h("div", { class: "rule" }, h("b", {}, "DAN"), thens, h("button", { class: "btn sm", onclick: () => thens.append(actionRow()) }, "+ actie")),
       h("div", { class: "rule" }, h("b", {}, "ANDERS (optioneel, wanneer de voorwaarde weer onwaar wordt)"), elses,
-        h("button", { class: "btn sm", onclick: () => elses.append(actionRow({ type: "override", device: cat.devices[0]?.id, action: "battery_auto", value: null, duration_min: 5 })) }, "+ actie")),
+        h("button", { class: "btn sm", onclick: () => elses.append(actionRow()) }, "+ actie")),
       h("div", { class: "row" }, h("button", { class: "btn primary", onclick: () => guard(async () => {
         const body = { name: name.value, enabled: enabled.checked, definition: { if: { [mode.value]: [...conds.children].map((r) => r.get()) },
           then: [...thens.children].map((r) => r.get()), else: [...elses.children].map((r) => r.get()), cooldown_s: Number(cooldown.value) } };

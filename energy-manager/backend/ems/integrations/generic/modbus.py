@@ -123,7 +123,7 @@ class GenericModbusTCPDriver(DeviceDriver):
         display_name="Generiek Modbus TCP (alleen lezen)",
         vendor="Generiek",
         categories=READ_CATEGORIES,
-        capabilities=frozenset(c for c in Capability if c.value.startswith("read_")),
+        capabilities=frozenset(),   # derived per device from its validated mapping only
         connection_types=("modbus_tcp",),
         documentation="Modbus Application Protocol V1.1b3; registers uit de handleiding van het apparaat",
         grid_meter_kind="modbus",

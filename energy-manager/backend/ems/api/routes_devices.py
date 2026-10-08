@@ -20,13 +20,10 @@ from ems.devices.capabilities import TYPE_SCHEMAS, actions_for, capability_view,
 from ems.integrations.homewizard import client as hw
 from ems.integrations.homewizard.discovery import discover
 from ems.security.auth import Principal
+from ems.server import commissioning
 from ems.server.runtime import EMSRuntime
 
 router = APIRouter(prefix="/api/v1")
-
-LEVELS = ["connection_test", "read_only", "shadow", "limited", "full"]
-LEVEL_LABELS = {"connection_test": "1. Verbindingstest", "read_only": "2. Alleen lezen", "shadow": "3. Schaduwmodus",
-                "limited": "4. Beperkte regeling", "full": "5. Volledige regeling"}
 
 
 def _slug(text: str, existing: set[str]) -> str:
@@ -390,57 +387,37 @@ async def unset_primary(device_id: str, p: Principal = Depends(installer), rt: E
 
 
 # --------------------------------------------------------- commissioning
-def _commissioning_view(rt: EMSRuntime, device_id: str, test: dict | None) -> dict:
-    cfg = rt.config.device(device_id)
-    md = rt.devices.devices[device_id]
-    manifest = None if md.driver is None else md.driver.manifest
-    controls = [] if md.driver is None else [c.value for c in md.driver.device_capabilities() if c.value.startswith("control_")]
-    allowed = {}
-    for lvl in LEVELS:
-        ok, why = True, ""
-        if lvl != "connection_test" and not (manifest and manifest.simulated) and not (test and test.get("reachable")):
-            ok, why = False, "eerst een geslaagde verbindingstest"
-        if lvl in ("shadow", "limited", "full") and not controls:
-            ok, why = False, "dit apparaat is niet bestuurbaar (alleen meten)"
-        remote = cfg.driver == "node.remote"
-        writes = (md.driver is not None and md.driver.write_capable) if remote else \
-            bool(manifest and (manifest.write_capable or manifest.simulated))
-        if lvl in ("limited", "full") and manifest and not writes:
-            ok, why = False, "de driver ondersteunt nog geen schrijfopdrachten voor dit apparaat"
-        allowed[lvl] = {"label": LEVEL_LABELS[lvl], "allowed": ok, "reason": why}
-    snap = rt.engine.last_snapshot
-    st = None if snap is None else snap.devices.get(device_id)
-    return {"device_id": device_id, "name": cfg.name, "level": cfg.control_level,
-            "limited_fraction": cfg.limited_fraction, "levels": allowed, "control_capabilities": controls,
-            "last_test": test, "actual": {} if st is None else {str(k): v for k, v in st.values.items()},
-            "ems_would_do": rt.engine.last_decisions.get(device_id)}
-
-
 @router.get("/devices/{device_id}/commissioning", tags=["commissioning"])
 async def get_commissioning(device_id: str, _: Principal = Depends(viewer), rt: EMSRuntime = Depends(get_runtime)):
     _get(rt, device_id)
-    test = await asyncio.to_thread(rt.db.kv_get, f"commissioning.{device_id}.test")
-    return _commissioning_view(rt, device_id, test)
+    return await asyncio.to_thread(commissioning.build_view, rt, device_id)
 
 
 class CommissioningIn(BaseModel):
     level: Literal["connection_test", "read_only", "shadow", "limited", "full"]
     limited_fraction: float | None = Field(None, gt=0, le=1)
-    confirm: bool = False
+    confirm_text: str | None = Field(None, max_length=80)   # full control: the device name, typed
+
+
+@router.post("/devices/{device_id}/commissioning/write-test", tags=["commissioning"])
+async def write_test(device_id: str, _: Principal = Depends(installer), rt: EMSRuntime = Depends(get_runtime)):
+    cfg = _get(rt, device_id)
+    if cfg.control_level not in ("shadow", "limited", "full"):
+        raise HTTPException(409, "schrijftest pas vanaf schaduwmodus")
+    result = await commissioning.run_write_test(rt, device_id, rt.now())
+    return {**result, "commissioning": await asyncio.to_thread(commissioning.build_view, rt, device_id)}
 
 
 @router.put("/devices/{device_id}/commissioning", tags=["commissioning"])
 async def set_commissioning(device_id: str, body: CommissioningIn, p: Principal = Depends(installer),
                             rt: EMSRuntime = Depends(get_runtime)) -> dict:
-    _get(rt, device_id)
-    test = await asyncio.to_thread(rt.db.kv_get, f"commissioning.{device_id}.test")
-    view = _commissioning_view(rt, device_id, test)
+    cfg = _get(rt, device_id)
+    view = await asyncio.to_thread(commissioning.build_view, rt, device_id)
     info = view["levels"][body.level]
     if not info["allowed"]:
         raise HTTPException(409, f"{info['label']} niet mogelijk: {info['reason']}")
-    if body.level == "full" and not body.confirm:
-        raise HTTPException(409, "bevestig volledige regeling expliciet (confirm=true)")
-    cfg = rt.config.device(device_id)
+    if body.level == "full" and (body.confirm_text or "").strip().casefold() != cfg.name.strip().casefold():
+        raise HTTPException(409, f"typ de apparaatnaam '{cfg.name}' om volledige regeling te bevestigen")
     if cfg.driver == "node.remote":   # the owner node enforces the level as well
         link = rt.nodes.links.get(cfg.connection.get("node_id"))
         if link is None:
@@ -457,7 +434,11 @@ async def set_commissioning(device_id: str, body: CommissioningIn, p: Principal 
             if body.limited_fraction is not None:
                 d["limited_fraction"] = body.limited_fraction
     await rt.reload(data, p.username, f"inbedrijfstelling {device_id}: {body.level}")
-    return _commissioning_view(rt, device_id, test)
+    if body.level == "shadow" and cfg.control_level != "shadow":
+        await asyncio.to_thread(rt.db.kv_set, f"commissioning.{device_id}.shadow_since", rt.now().isoformat())
+    if body.level in ("connection_test", "read_only"):
+        await asyncio.to_thread(rt.db.kv_set, f"commissioning.{device_id}.write_test", None)
+    return await asyncio.to_thread(commissioning.build_view, rt, device_id)
 
 
 # -------------------------------------------------------------- HomeWizard

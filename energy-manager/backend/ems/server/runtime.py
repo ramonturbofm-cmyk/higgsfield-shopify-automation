@@ -742,6 +742,10 @@ class EMSRuntime:
         if t == "override":
             cmd = Command(action["device"], CommandAction(action["action"]), action.get("value"))
             self.config.device(cmd.device_id)  # raises KeyError for unknown devices
+            chk = self.engine.check(cmd)       # same validation as a manual override (capability, range, state)
+            if not chk.allowed:
+                raise ValueError("geweigerd: " + "; ".join(chk.reasons))
+            cmd = Command(cmd.device_id, cmd.action, chk.value)
             self.engine.overrides.set(cmd, float(action.get("duration_min", 60)), user=who, source="automation")
             self.optimizer.request("handmatige bediening (automatisering)")
             return f"override {cmd.describe_nl()}"

@@ -52,7 +52,7 @@ class GenericMQTTDriver(DeviceDriver):
         display_name="Generiek MQTT (alleen lezen)",
         vendor="Generiek",
         categories=READ_CATEGORIES,
-        capabilities=frozenset(c for c in Capability if c.value.startswith("read_")),
+        capabilities=frozenset(),   # derived per device from its validated mapping only
         connection_types=("mqtt",),
         documentation="Topics en payloadformaat uit de documentatie van het apparaat/de gateway",
         grid_meter_kind="mqtt",
