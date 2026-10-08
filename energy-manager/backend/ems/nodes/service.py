@@ -61,6 +61,8 @@ class NodeService:
         new = load_identity(self.rt.data_dir, cfg.name, cfg.role_preset)
         self.identity.name, self.identity.roles = new.name, new.roles
         self.lease.ttl = cfg.lease_ttl_s
+        if not self.identity.is_controller:     # a gateway never keeps the control lease itself
+            self.lease.release(self.identity.node_id)
 
     async def start_advertising(self, port: int) -> None:
         if self.rt.config.node.advertise:
@@ -263,6 +265,8 @@ class NodeService:
             entry = {"node_id": row["node_id"], "name": row["name"], "relation": row["relation"],
                      "address": row["address"], "platform": row["platform"], "version": row["version"],
                      "roles": row["roles"] or [], "last_seen": row["last_seen_ts"], "paired": row["paired_ts"]}
+            entry["imported"] = {d.connection.get("remote_id"): d.id for d in self.rt.config.devices
+                                 if d.driver == "node.remote" and d.connection.get("node_id") == row["node_id"]}
             if link is not None:
                 entry.update(online=link.online, error=link.error, latency_ms=link.latency_ms,
                              lease=link.to_dict()["lease"], remote_devices=list(link.devices.values()))

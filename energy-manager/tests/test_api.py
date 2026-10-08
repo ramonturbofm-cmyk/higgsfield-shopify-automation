@@ -186,7 +186,7 @@ async def test_history_export_finance(env):
     assert csv_text.startswith("local_time,")
     excel = (await c.get("/api/v1/history/export?hours=2&fmt=excel&resolution=15m")).text
     assert excel.startswith("﻿local_time;")
-    fin = (await c.get("/api/v1/finance/summary?period=1d")).json()
+    fin = (await c.get("/api/v1/finance/summary?period=2d")).json()
     assert fin["available"] and "with_ems_eur" in fin["comparison"]
 
 

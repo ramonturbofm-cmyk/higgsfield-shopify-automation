@@ -1,12 +1,12 @@
 import { api, can, connectWs, disconnectWs, guard, h, logout, on, saveToken, state, wsStatus } from "./lib.js";
 
 const NAV = [
-  ["dashboard", "Dashboard", "⚡"], ["energy", "Energie", "📈"], ["planning", "Planning", "🗓"],
+  ["dashboard", "Dashboard", "⚡"], ["installation", "Mijn installatie", "🏠"], ["energy", "Energie", "📈"], ["planning", "Planning", "🗓"],
   ["prices", "Prijzen", "€"], ["battery", "Batterij", "🔋"], ["pv", "Zonnepanelen", "☀"],
   ["heatpump", "Warmtepomp", "🌡"], ["ev", "Laadpaal / EV", "🚗"], "-",
   ["devices", "Apparaten", "🔌"], ["automations", "Automatiseringen", "⚙"], ["finance", "Financiën", "💶"],
   ["backtest", "Backtest & Auto-Tune", "🧪"], ["notifications", "Meldingen", "🔔"], "-",
-  ["settings", "Instellingen", "🛠"], ["system", "Systeem", "🖥"],
+  ["settings", "Instellingen", "🛠"], ["nodes", "Nodes", "🖧"], ["system", "Systeem", "🖥"],
 ];
 const VIEWS = {
   dashboard: () => import("./views/dashboard.js"), energy: () => import("./views/energy.js"),
@@ -16,7 +16,8 @@ const VIEWS = {
   devices: () => import("./views/devices.js"), automations: () => import("./views/automations.js"),
   finance: () => import("./views/finance.js"), backtest: () => import("./views/backtest.js"),
   notifications: () => import("./views/notifications.js"), settings: () => import("./views/settings.js"),
-  system: () => import("./views/system.js"),
+  system: () => import("./views/system.js"), installation: () => import("./views/installation.js"),
+  nodes: () => import("./views/nodes.js"),
 };
 const TITLES = Object.fromEntries(NAV.filter((n) => n !== "-").map(([k, t]) => [k, t]));
 let cleanup = null;
@@ -67,7 +68,11 @@ function renderTopbar(title) {
       : h("span", { class: `pill ${gm.available ? "good" : "bad"}`, title: gm.reason },
         h("span", { class: "dot" }), `Netmeter ${gm.available ? "online" : "offline"}`));
   }
-  if (live?.failsafe?.active) pills.push(h("span", { class: "pill bad", title: live.failsafe.reason }, "Fallback actief"));
+  const st = live?.ems_status;
+  if (st) {
+    const cls = { AUTOMATIC: "good", SHADOW_MODE: "warn", MANUAL_OVERRIDE: "warn", DEGRADED: "warn", SAFE_MODE: "bad", ERROR: "bad" }[st.state] || "";
+    pills.push(h("a", { class: `pill ${cls}`, href: "#/installation", title: st.reason || "" }, h("span", { class: "dot" }), `EMS: ${st.label}`));
+  } else if (live?.failsafe?.active) pills.push(h("span", { class: "pill bad", title: live.failsafe.reason }, "Fallback actief"));
   pills.push(h("span", { class: `pill ${wsStatus.connected ? "good" : ""}`, title: "Live-verbinding (WebSocket)" },
     h("span", { class: "dot" }), wsStatus.connected ? "live" : "verbinden…"));
   bar.replaceChildren(

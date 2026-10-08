@@ -631,9 +631,9 @@ class EMSRuntime:
             link.online for link in self.nodes.links.values()) else "ERROR",
             "detail": f"{self.nodes.identity.name} ({self.nodes.identity.platform})"
                       + (f" + {len(self.nodes.links)} gekoppeld" if self.nodes.links else "")})
+        from ems.api.routes_core import PROFILE_LABELS  # labels live with the API texts
         items.append({"key": "strategy", "label": "EMS-strategie", "state": "CONFIGURED",
-                      "detail": cfg.strategy.profile.value if hasattr(cfg.strategy.profile, "value")
-                      else str(cfg.strategy.profile)})
+                      "detail": PROFILE_LABELS.get(cfg.strategy.profile.value, cfg.strategy.profile.value)})
         return {"items": items, "status": self.ems_status(), "warnings": self.config_warnings()}
 
     def health(self) -> dict:
@@ -670,7 +670,8 @@ class EMSRuntime:
                     f"meetwaarden tellen niet op (rest {snap.balance['residual_w']:.0f} W)")
         if self.nodes.identity.is_controller:
             st = self.optimizer.status()
-            add("optimizer", "Optimizer", "ok" if st["status"] == "optimal" else "warn", st.get("message") or "")
+            add("optimizer", "Optimizer", "ok" if st["status"] == "optimal" else "warn",
+                "" if st["status"] == "optimal" else (st.get("message") or "nog geen planning"))
         fc = self.forecast.status()
         if fc["weather_provider"] is None:
             add("forecast", "Prognose", "warn", "geen weerbron: standaardprofielen")

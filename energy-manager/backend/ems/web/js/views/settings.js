@@ -1,8 +1,8 @@
-import { api, can, field, guard, h, num, state } from "../lib.js";
+import { api, can, eur, field, guard, h, num, state } from "../lib.js";
 
 const SECTION_LABEL = { site: "Woning", grid: "Netaansluiting", battery: "Batterij", heatpump: "Warmtepomp", strategy: "Strategie",
   optimizer: "Optimizer", control: "Regeling", forecast: "Prognoses", notifications: "Meldingen", runtime: "Systeem", tariff: "Energiecontract",
-  prices: "Prijzen" };
+  prices: "Prijzen", node: "Deze computer (node)" };
 const LEVELS = ["simple", "advanced", "expert"];
 const ENUM_LABEL = { lowest_cost: "Laagste kosten", maximum_profit: "Maximale opbrengst", maximum_self_consumption: "Maximale zelfconsumptie",
   zero_export: "Geen teruglevering", battery_saver: "Batterij sparen", peak_shaving: "Piekbegrenzing", comfort: "Comfort", eco: "Eco",
@@ -79,7 +79,7 @@ export async function render(root, [tab = "general"]) {
       }, `${SECTION_LABEL[section]} opgeslagen`) }, "Opslaan")));
   };
   if (tab === "general") {
-    root.append(h("div", { class: "grid cols-2" }, ...["site", "grid", "battery", "heatpump", "strategy", "optimizer", "notifications", "control", "runtime"]
+    root.append(h("div", { class: "grid cols-2" }, ...["site", "grid", "battery", "heatpump", "strategy", "optimizer", "notifications", "control", "node", "runtime"]
       .filter((s) => state.level !== "simple" || ["site", "grid", "battery", "heatpump", "strategy"].includes(s)).map((s) => card(s))));
   } else if (tab === "tariff") {
     const prev = h("div", {});
@@ -116,10 +116,34 @@ export async function render(root, [tab = "general"]) {
       }, "Prijzen opgeslagen") }, "Opslaan")))));
   } else if (tab === "profile") {
     const p = await api("/profiles");
+    const sim = h("div", {});
+    const simulate = (x) => guard(async () => {
+      sim.replaceChildren(h("div", { class: "muted" }, `Simuleren: ${x.label} over de afgelopen 30 dagen…`));
+      const { job_id } = await api("/backtest", { method: "POST", body: { days: 30, overrides: { strategy: { profile: x.id } } } });
+      let j;
+      for (;;) { j = await api(`/jobs/${job_id}`); if (j.status !== "running") break; await new Promise((r) => setTimeout(r, 1000)); }
+      if (j.status !== "done") { sim.replaceChildren(h("div", { class: "notice bad inline" }, j.error)); return; }
+      const r = j.result, cur = r.current, neu = r.proposed;
+      sim.replaceChildren(h("div", { class: "card" }, h("h3", {}, `Simulatie: ${x.label}`),
+        h("table", {}, h("tbody", {},
+          h("tr", {}, h("td", {}, "Huidig"), h("td", { class: "num" }, eur(cur.net_cost_incl_wear_eur))),
+          h("tr", {}, h("td", {}, "Nieuw"), h("td", { class: "num" }, eur(neu.net_cost_incl_wear_eur))),
+          h("tr", {}, h("td", {}, h("b", {}, r.difference_eur <= 0 ? "Extra voordeel" : "Extra kosten")), h("td", { class: "num" }, h("b", {}, eur(Math.abs(r.difference_eur))))),
+          h("tr", {}, h("td", {}, "Extra batterijcycli"), h("td", { class: "num" }, num(neu.battery_cycles - cur.battery_cycles, 1))))),
+        h("p", { class: "small muted" }, `${r.days} dagen, ${r.source}. ${r.method}.`),
+        h("div", { class: "row" }, h("button", { class: "btn", onclick: () => sim.replaceChildren() }, "Annuleren"),
+          h("button", { class: "btn primary", disabled: !can("operator") || null, onclick: () => guard(() => api("/profiles/active", { method: "PUT", body: { profile: x.id } }), `Profiel: ${x.label}`)
+            .then(() => { root.replaceChildren(); render(root, [tab]); }) }, "Toepassen"))));
+    });
     root.append(h("div", { class: "card" }, h("h3", {}, "EMS-strategie"), h("div", { class: "grid cols-3" }, p.profiles.map((x) =>
-      h("button", { class: `btn ${x.id === p.active ? "primary" : ""}`, disabled: !can("operator") || null, onclick: () => guard(() => api("/profiles/active", { method: "PUT", body: { profile: x.id } }), `Profiel: ${x.label}`)
-        .then(() => { root.replaceChildren(); render(root, [tab]); }) }, x.label))),
-      h("p", { class: "muted small" }, "De strategie bepaalt hoe de optimizer kosten, opbrengst, batterijslijtage, comfort en teruglevering afweegt.")), card("strategy"));
+      h("div", { class: `card flat profile ${x.id === p.active ? "active" : ""}` },
+        h("div", { class: "row spread" }, h("b", {}, x.label), x.id === p.active ? h("span", { class: "pill good" }, "actief") : null),
+        h("div", { class: "small muted", style: { margin: "6px 0 10px" } }, x.help),
+        x.id === p.active ? null : h("div", { class: "row" },
+          h("button", { class: "btn sm", disabled: !can("operator") || null, onclick: () => simulate(x) }, "Simuleer wijziging"),
+          h("button", { class: "btn sm", disabled: !can("operator") || null, onclick: () => guard(() => api("/profiles/active", { method: "PUT", body: { profile: x.id } }), `Profiel: ${x.label}`)
+            .then(() => { root.replaceChildren(); render(root, [tab]); }) }, "Kiezen"))))),
+      h("p", { class: "muted small" }, "De strategie bepaalt hoe de optimizer kosten, opbrengst, batterijslijtage, comfort en teruglevering afweegt.")), sim, card("strategy"));
   } else if (tab === "users") {
     if (!can("admin")) { root.append(h("div", { class: "card muted" }, "Vereist beheerdersrechten.")); return; }
     const [users, tokens] = await Promise.all([api("/users"), api("/auth/tokens")]);

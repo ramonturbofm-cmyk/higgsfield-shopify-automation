@@ -1,5 +1,7 @@
-import { api, h, on, pct, power, state, svg, temp, time } from "../lib.js";
-import { decisionList, fmtPrice, kpi, slotSummary } from "./common.js";
+import { api, eur, h, on, pct, power, state, svg, temp, time } from "../lib.js";
+import { decisionList, fmtPrice, kpi } from "./common.js";
+
+const QUALITY = { STALE: "verouderd", ESTIMATED: "geschat", INVALID: "ongeldig", MISSING: "ontbreekt", FORECAST: "prognose" };
 
 const NODES = {
   pv: { x: 380, y: 62, label: "Zonnepanelen", cls: "c4" },
@@ -51,7 +53,7 @@ function flowDiagram(f, present) {
 
 export async function render(root) {
   const flowBox = h("div", { class: "card" });
-  const tiles = h("div", { class: "grid cols-4" });
+  const tiles = h("div", { class: "grid cols-6" });
   const nowBox = h("div", { class: "card" });
   const devBox = h("div", { class: "card" });
   const decBox = h("div", {});
@@ -70,18 +72,35 @@ export async function render(root) {
     flowBox.replaceChildren(h("h3", {}, "Live energiestromen"), live.flows ? flowDiagram(f, cats(live)) : h("div", { class: "empty" }, "Nog geen meetgegevens"),
       h("div", { class: "muted small" }, `Bijgewerkt ${time(live.timestamp, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`,
         live.grid_meter?.age_s !== null && live.grid_meter?.age_s !== undefined ? ` · netmeting ${live.grid_meter.age_s.toFixed(1).replace(".", ",")} s oud` : ""));
+    const q = live.quality || {};
+    const na = (key, v) => (q[key] && ["MISSING", "INVALID", "UNKNOWN"].includes(q[key])) ? "N/A" : v;
+    const qnote = (key) => q[key] && !["GOOD", "CALCULATED", "UNKNOWN"].includes(q[key]) ? ` · ${QUALITY[q[key]] || q[key]}` : "";
+    const st = live.ems_status || {};
     tiles.replaceChildren(
-      h("div", { class: "card kpi" }, h("div", { class: "l" }, "Stroomprijs nu (afname)"), h("div", { class: "v" }, fmtPrice(live.price?.import)),
-        h("div", { class: "s" }, `markt ${fmtPrice(live.price?.spot)} · teruglevering ${fmtPrice(live.price?.export)}`)),
-      kpi("Net", f.grid_w === null || f.grid_w === undefined ? "Geen data" : power(f.grid_w, true), f.grid_w > 0 ? "afname" : f.grid_w < 0 ? "teruglevering" : ""),
-      kpi("Zonnepanelen", power(f.pv_w), "opwek nu"),
-      kpi("Batterij", pct(f.soc_pct), power(f.battery_w, true)));
-    const slot = live.plan_slot;
+      kpi("Zonnepanelen", na("pv", power(f.pv_w)), `opwek nu${qnote("pv")}`),
+      kpi("Huis", na("house", power(f.house_w)), q.house === "CALCULATED" ? "berekend uit netmeting" : (q.house === "MISSING" ? "niet te bepalen" : "")),
+      kpi("Batterij", na("soc", pct(f.soc_pct)), `${power(f.battery_w, true)}${f.battery_w > 20 ? " laden" : f.battery_w < -20 ? " ontladen" : ""}${qnote("battery")}`),
+      kpi("Net", f.grid_w === null || f.grid_w === undefined ? "N/A" : power(f.grid_w, true),
+        f.grid_w === null || f.grid_w === undefined ? "geen actuele netmeting" : f.grid_w > 20 ? "afname" : f.grid_w < -20 ? "teruglevering" : "in balans"),
+      h("div", { class: "card kpi" }, h("div", { class: "l" }, "Stroomprijs nu"),
+        h("div", { class: "v" }, fmtPrice(live.price?.import)),
+        h("div", { class: "s" }, "afname · ", h("b", {}, "markt "), fmtPrice(live.price?.spot), " · ", h("b", {}, "teruglevering "), fmtPrice(live.price?.export))),
+      h("a", { class: `card kpi status-${(st.state || "").toLowerCase()}`, href: "#/installation", style: { textDecoration: "none", color: "inherit" } },
+        h("div", { class: "l" }, "EMS-status"), h("div", { class: "v" }, st.label || "—"), h("div", { class: "s" }, st.reason || "")));
+    const n = live.now;
     nowBox.replaceChildren(h("h3", {}, "Wat doet het EMS nu?"),
-      slot ? h("div", { class: "grid" }, h("div", { class: "row" }, slotSummary(slot).map((p) => h("span", { class: "pill" }, p))),
-        h("div", { class: "small muted" }, `Plan voor ${time(slot.start)} · importprijs ${fmtPrice(slot.import_price)}`, slot.price_estimated ? " (prijsschatting)" : ""))
-        : h("div", { class: "muted" }, "Nog geen planning — het EMS draait op zelfconsumptie."),
-      live.failsafe?.active ? h("div", { class: "notice bad inline" }, "Fallback: ", live.failsafe.reason) : null);
+      n ? h("div", { class: "now" },
+        h("div", { class: "now-what" }, n.what, n.outcome && n.outcome !== "sent" ? h("span", { class: "pill warn", style: { marginLeft: "8px" } },
+          { shadow: "schaduw: EMS zou", rejected: "geweigerd", not_commissioned: "niet in bedrijf", dry_run: "proef" }[n.outcome] || n.outcome) : null),
+        h("dl", { class: "now-dl" },
+          h("dt", {}, "Waarom?"), h("dd", {}, n.why?.length ? h("ul", {}, n.why.map((r) => h("li", {}, r))) : "—"),
+          h("dt", {}, "Tot wanneer?"), h("dd", {}, n.until ? `ongeveer ${time(n.until)} (volgens planning)` : "tot de volgende herberekening (elke 5 min)"),
+          h("dt", {}, "Verwacht voordeel"), h("dd", {}, n.expected_benefit_eur === null || n.expected_benefit_eur === undefined ? "—" : `${eur(n.expected_benefit_eur)} t.o.v. zonder EMS (planning)`),
+          h("dt", {}, "Grenzen"), h("dd", { class: "small" }, (n.limits || []).join(" · "))))
+        : h("div", { class: "muted" }, "Nog geen beslissing — het EMS start op of er zijn geen bestuurbare apparaten."),
+      live.balance && live.balance.ok === false ? h("div", { class: "notice warn inline" }, "Energiebalans klopt niet: ",
+        `${power(live.balance.residual_w)} onverklaard. Mogelijke oorzaken: `, live.balance.hints.join("; ")) : null,
+      live.failsafe?.active ? h("div", { class: "notice bad inline" }, "Veilige modus: ", live.failsafe.reason) : null);
     devBox.replaceChildren(h("h3", {}, "Apparaten"), h("table", {}, h("tbody", {},
       Object.entries(live.devices || {}).map(([id, d]) => h("tr", {},
         h("td", {}, h("a", { href: `#/devices/${id}` }, d.name)),

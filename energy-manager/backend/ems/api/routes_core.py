@@ -34,7 +34,20 @@ PROFILE_LABELS = {
     "lowest_cost": "Laagste kosten", "maximum_profit": "Maximale opbrengst",
     "maximum_self_consumption": "Maximale zelfconsumptie", "zero_export": "Geen teruglevering",
     "battery_saver": "Batterij sparen", "peak_shaving": "Piekbegrenzing", "comfort": "Comfort", "eco": "Eco",
-    "backup_priority": "Noodstroom eerst", "custom": "Aangepast",
+    "backup_priority": "Noodstroom eerst", "custom": "Aangepast", "balanced": "Gebalanceerd",
+}
+PROFILE_HELP = {
+    "lowest_cost": "Laagste totale energiekosten; batterij en apparaten worden ingezet waar dat geld oplevert.",
+    "maximum_profit": "Ook actief handelen met de batterij als het prijsverschil groot genoeg is (meer cycli).",
+    "maximum_self_consumption": "Zoveel mogelijk eigen zonnestroom zelf gebruiken; niet laden uit het net.",
+    "balanced": "Kosten besparen met beperkte batterijslijtage — aanbevolen standaard.",
+    "zero_export": "Niets terugleveren; PV wordt zo nodig begrensd (vereist een primaire netmeter).",
+    "battery_saver": "Batterij zo min mogelijk belasten (max. 1 cyclus per dag).",
+    "peak_shaving": "Afnamepieken beperken tot de ingestelde piekgrens.",
+    "comfort": "Comfort gaat voor: warmtepomp wijkt minder af van de gewenste temperatuur.",
+    "eco": "Meer flexibiliteit in temperatuur voor meer besparing.",
+    "backup_priority": "Altijd minimaal de helft van de batterij vol houden voor stroomuitval.",
+    "custom": "Eigen instellingen uit Instellingen → Batterij / Strategie.",
 }
 SETTINGS_SECTIONS = ("runtime", "site", "grid", "control", "optimizer", "battery", "heatpump", "strategy", "tariff",
                      "prices", "forecast", "notifications", "node")
@@ -365,7 +378,8 @@ async def run_optimizer(p: Principal = Depends(operator), rt: EMSRuntime = Depen
 @router.get("/profiles", tags=["settings"])
 async def profiles(_: Principal = Depends(viewer), rt: EMSRuntime = Depends(get_runtime)) -> dict:
     return {"active": rt.config.strategy.profile.value,
-            "profiles": [{"id": p.value, "label": PROFILE_LABELS[p.value]} for p in StrategyProfile]}
+            "profiles": [{"id": p.value, "label": PROFILE_LABELS.get(p.value, p.value),
+                          "help": PROFILE_HELP.get(p.value, "")} for p in StrategyProfile]}
 
 
 class ProfileChoice(BaseModel):
