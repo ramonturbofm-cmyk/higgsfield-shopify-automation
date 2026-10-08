@@ -109,6 +109,9 @@ class ControlConfig(_Base):
         300.0, label="Commando opnieuw sturen na", unit="s", level="expert", gt=0)
     failsafe_recover_ticks: int = setting(3, label="Herstel na gezonde cycli", level="expert", ge=1)
     reconnect_backoff_s: float = setting(10.0, label="Herverbinden na", unit="s", level="expert", gt=0)
+    min_command_interval_s: float = setting(
+        5.0, label="Minimale tijd tussen stuurwijzigingen", unit="s", level="expert", ge=0,
+        help="Beschermt apparaten tegen te snel wisselende opdrachten (veiligheidscontrole).")
 
 
 class OptimizerConfig(_Base):
@@ -284,6 +287,19 @@ class NotificationConfig(_Base):
                                          level="advanced")
 
 
+class NodeConfig(_Base):
+    name: str = setting("", label="Naam van deze computer",
+                        help="Zoals deze Energy Manager-node in het overzicht verschijnt. Leeg = computernaam.")
+    role_preset: Literal["all_in_one", "controller", "gateway"] = setting(
+        "all_in_one", label="Rol van deze node", level="advanced",
+        help="'all_in_one': alles op deze computer (standaard). 'controller': regelt ook apparaten op "
+             "gekoppelde nodes. 'gateway': alleen apparaten aansluiten; een andere node regelt.")
+    advertise: bool = setting(True, label="Vindbaar voor andere Energy Manager-nodes (mDNS)", level="expert")
+    lease_ttl_s: float = setting(30.0, label="Regelrecht verloopt na", unit="s", level="expert", ge=10, le=300,
+                                 help="Zonder hartslag van de controller geeft een gateway zijn apparaten na deze "
+                                      "tijd terug aan hun eigen regeling.")
+
+
 class DeviceConfig(_Base):
     """One configured device. ``role='primary_grid_meter'`` marks the meter that is the
     truth at the grid connection (``grid_reference`` is accepted as legacy alias).
@@ -316,6 +332,7 @@ class EMSConfig(_Base):
     prices: PriceConfig = Field(default_factory=PriceConfig)
     forecast: ForecastConfig = Field(default_factory=ForecastConfig)
     notifications: NotificationConfig = Field(default_factory=NotificationConfig)
+    node: NodeConfig = Field(default_factory=NodeConfig)
     devices: list[DeviceConfig] = Field(default_factory=list)
     # JSON paths whose value came from a ${VAR} reference: (path -> original text).
     _env_refs: dict[tuple, tuple[str, Any]] = PrivateAttr(default_factory=dict)

@@ -52,7 +52,8 @@ async def drivers(category: DeviceCategory | None = None, _: Principal = Depends
     out = []
     for cls in rt.registry.list(category):
         d = _manifest_dict(cls)
-        d["available_in_mode"] = (not cls.manifest.simulated) or rt.demo
+        # node.remote devices are added via Systeem -> Nodes, not via the device wizard
+        d["available_in_mode"] = ((not cls.manifest.simulated) or rt.demo) and cls.manifest.driver_id != "node.remote"
         out.append(d)
     return out
 
@@ -351,7 +352,10 @@ def _commissioning_view(rt: EMSRuntime, device_id: str, test: dict | None) -> di
             ok, why = False, "eerst een geslaagde verbindingstest"
         if lvl in ("shadow", "limited", "full") and not controls:
             ok, why = False, "dit apparaat is niet bestuurbaar (alleen meten)"
-        if lvl in ("limited", "full") and manifest and not manifest.write_capable:
+        remote = cfg.driver == "node.remote"
+        writes = (md.driver is not None and md.driver.write_capable) if remote else \
+            bool(manifest and (manifest.write_capable or manifest.simulated))
+        if lvl in ("limited", "full") and manifest and not writes:
             ok, why = False, "de driver ondersteunt nog geen schrijfopdrachten voor dit apparaat"
         allowed[lvl] = {"label": LEVEL_LABELS[lvl], "allowed": ok, "reason": why}
     snap = rt.engine.last_snapshot
@@ -386,6 +390,16 @@ async def set_commissioning(device_id: str, body: CommissioningIn, p: Principal 
         raise HTTPException(409, f"{info['label']} niet mogelijk: {info['reason']}")
     if body.level == "full" and not body.confirm:
         raise HTTPException(409, "bevestig volledige regeling expliciet (confirm=true)")
+    cfg = rt.config.device(device_id)
+    if cfg.driver == "node.remote":   # the owner node enforces the level as well
+        link = rt.nodes.links.get(cfg.connection.get("node_id"))
+        if link is None:
+            raise HTTPException(409, "eigenaar-node niet gekoppeld")
+        try:
+            await link.set_control_level(cfg.connection.get("remote_id"), body.level,
+                                         body.limited_fraction or cfg.limited_fraction)
+        except Exception as exc:
+            raise HTTPException(502, f"node {link.name}: {exc}") from exc
     data = rt.config.model_dump(mode="json")
     for d in data["devices"]:
         if d["id"] == device_id:

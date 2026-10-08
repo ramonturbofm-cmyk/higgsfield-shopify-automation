@@ -165,3 +165,21 @@ kv = Table(
     Column("value", JSON),
     Column("updated_ts", Float),
 )
+
+
+# Version 2: Energy Manager nodes (this node's peers). relation = "gateway" (we control its devices)
+# or "controller" (it controls our devices). token_hash only for controllers paired to us.
+nodes = Table(
+    "nodes", metadata,
+    Column("node_id", String(64), primary_key=True),
+    Column("name", String(128), nullable=False),
+    Column("relation", String(16), nullable=False),
+    Column("address", String(256)),
+    Column("platform", String(32)),
+    Column("version", String(32)),
+    Column("roles", JSON),
+    Column("token_hash", String(128)),
+    Column("paired_ts", Float, nullable=False),
+    Column("last_seen_ts", Float),
+    Column("info", JSON),
+)

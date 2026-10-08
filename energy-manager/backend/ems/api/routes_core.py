@@ -35,7 +35,7 @@ PROFILE_LABELS = {
     "backup_priority": "Noodstroom eerst", "custom": "Aangepast",
 }
 SETTINGS_SECTIONS = ("runtime", "site", "grid", "control", "optimizer", "battery", "heatpump", "strategy", "tariff",
-                     "prices", "forecast", "notifications")
+                     "prices", "forecast", "notifications", "node")
 
 
 def _err(exc: Exception, code: int = 422) -> HTTPException:

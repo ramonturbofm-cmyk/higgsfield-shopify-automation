@@ -16,14 +16,18 @@ log = logging.getLogger(__name__)
 
 # Migrations: version -> callable(engine). Version 1 = initial schema.
 # Later versions add ALTER/CREATE statements; never edit an applied migration.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def _migrate_1(engine: Engine) -> None:
     s.metadata.create_all(engine)
 
 
-MIGRATIONS = {1: _migrate_1}
+def _migrate_2(engine: Engine) -> None:
+    s.nodes.create(engine, checkfirst=True)
+
+
+MIGRATIONS = {1: _migrate_1, 2: _migrate_2}
 
 RETENTION_DAYS = {"samples": 14, "device_samples": 14, "decisions": 365, "notifications": 180, "plans": 30}
 
@@ -309,6 +313,46 @@ class Database:
             q = q.where(s.jobs.c.kind == kind)
         with self.engine.connect() as c:
             return [dict(r) for r in c.execute(q).mappings().all()]
+
+    # ----------------------------------------------------------------- nodes
+    def upsert_node(self, row: dict) -> None:
+        with self.engine.begin() as c:
+            exists = c.execute(select(s.nodes.c.node_id).where(s.nodes.c.node_id == row["node_id"])).first()
+            if exists:
+                c.execute(update(s.nodes).where(s.nodes.c.node_id == row["node_id"]).values(**row))
+            else:
+                c.execute(insert(s.nodes).values(**row))
+
+    def list_nodes(self, relation: str | None = None) -> list[dict]:
+        q = select(s.nodes)
+        if relation:
+            q = q.where(s.nodes.c.relation == relation)
+        with self.engine.connect() as c:
+            return [dict(r._mapping) for r in c.execute(q.order_by(s.nodes.c.name))]
+
+    def get_node(self, node_id: str) -> dict | None:
+        with self.engine.connect() as c:
+            r = c.execute(select(s.nodes).where(s.nodes.c.node_id == node_id)).first()
+            return dict(r._mapping) if r else None
+
+    def find_node_by_token(self, token_hash: str) -> dict | None:
+        with self.engine.connect() as c:
+            r = c.execute(select(s.nodes).where(s.nodes.c.token_hash == token_hash,
+                                                s.nodes.c.relation == "controller")).first()
+            return dict(r._mapping) if r else None
+
+    def delete_node(self, node_id: str) -> bool:
+        with self.engine.begin() as c:
+            return c.execute(delete(s.nodes).where(s.nodes.c.node_id == node_id)).rowcount > 0
+
+    def replace_device_samples(self, device_id: str, start: float, end: float, rows: list[dict]) -> int:
+        """Fill a gap with history buffered on another node: one transaction, no duplicates."""
+        with self.engine.begin() as c:
+            c.execute(delete(s.device_samples).where(s.device_samples.c.device_id == device_id,
+                                                     s.device_samples.c.ts >= start, s.device_samples.c.ts <= end))
+            if rows:
+                c.execute(insert(s.device_samples), rows)
+        return len(rows)
 
     # -------------------------------------------------------------------- kv
     def kv_get(self, key: str, default: Any = None) -> Any:

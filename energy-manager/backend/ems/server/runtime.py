@@ -29,6 +29,7 @@ import yaml
 
 from ems import __version__
 from ems.automations import AutomationEngine
+from ems.control.base import NativeController
 from ems.control.optimizing import OptimizingController
 from ems.core.clock import SimulatedClock, SystemClock
 from ems.core.config import EMSConfig, StrategyProfile, config_from_dict, dump_config, load_config, save_config
@@ -45,6 +46,7 @@ from ems.devices.registry import registry as default_registry
 from ems.forecasting.service import ForecastService
 from ems.forecasting.weather import DemoWeatherProvider, OpenMeteoProvider
 from ems.gridmeter.meter import GridMeterStatus
+from ems.nodes.service import NodeService
 from ems.optimizer.service import OptimizerService
 from ems.prices.providers import DemoProvider, EnergyZeroProvider, EntsoeProvider, StaticProvider
 from ems.prices.service import PriceService
@@ -132,6 +134,8 @@ class EMSRuntime:
         self.tokens = TokenIssuer(jwt_secret)
         self.notifications = NotificationService(self.db, self.bus, self.config.notifications.webhook_url)
         self.automations = AutomationEngine(self.db, self._run_automation_action)
+        self.nodes = NodeService(self)
+        self.nodes.load_links()
         if self.config.runtime.mode == "demo" and await asyncio.to_thread(self.db.count_users) == 0:
             await asyncio.to_thread(self.db.create_user, "demo", hash_password("demo"), "installer")
         self.bus.subscribe("decision", self._on_decision)
@@ -169,7 +173,9 @@ class EMSRuntime:
         else:
             self.clock = SystemClock()
             self.site = None
-        ctx = DriverContext(self.clock, simulator=self.site, secrets=self.secrets)  # type: ignore[arg-type]
+        self.nodes.reconfigure()
+        ctx = DriverContext(self.clock, simulator=self.site, secrets=self.secrets,  # type: ignore[arg-type]
+                            nodes=self.nodes.links)
         self.devices = DeviceManager(cfg, ctx, self.registry, strict=False)
         provider, provider_error = None, None
         try:
@@ -201,9 +207,12 @@ class EMSRuntime:
         self.forecast = ForecastService(cfg, self.db, weather)
         caps = {i: d.driver.capabilities() for i, d in self.devices.devices.items() if d.driver is not None}
         self.optimizer = OptimizerService(cfg, self.prices, self.tariff, self.forecast, caps)
-        self.controller = OptimizingController(self.optimizer)
+        # A pure device-gateway node never decides itself; its controller sends commands via the node API.
+        self.controller = OptimizingController(self.optimizer) if self.nodes.identity.is_controller \
+            else NativeController()
         self.journal = DBJournal(self.db)
         self.engine = EMSEngine(cfg, self.devices, self.controller, self.clock, journal=self.journal, bus=self.bus)
+        self.engine.gate.owner_guard = self.nodes.owner_guard
         self.recorder = HistoryRecorder(self.db, cfg.site.id, self.tariff, min_interval_s=max(10.0, cfg.control.interval_s))
         await self.engine.start()
         await self.engine.observe()
@@ -217,8 +226,11 @@ class EMSRuntime:
 
     # ----------------------------------------------------------------- loops
     def _start_loops(self) -> None:
-        for coro in (self._control_loop(), self._optimizer_loop(), self._price_loop(), self._forecast_loop(),
-                     self._maintenance_loop(), self._watchdog_loop()):
+        loops = [self._control_loop(), self._price_loop(), self._forecast_loop(), self._maintenance_loop(),
+                 self._watchdog_loop(), self.nodes.loop()]
+        if self.nodes.identity.is_controller:
+            loops.append(self._optimizer_loop())
+        for coro in loops:
             self.tasks.append(asyncio.create_task(coro))
 
     async def _stop_loops(self) -> None:
@@ -238,6 +250,10 @@ class EMSRuntime:
             await self.engine.stop()
         except Exception:
             log.exception("engine stop failed")
+        try:
+            await self.nodes.stop()
+        except Exception:
+            log.exception("node service stop failed")
         logging.getLogger().removeHandler(self.log_buffer)
         self.db.close()
 
@@ -598,6 +614,9 @@ class EMSRuntime:
             self.tokens = TokenIssuer(self.secrets.get("jwt_secret") or self.tokens.secret)
             self.notifications = NotificationService(self.db, self.bus, self.config.notifications.webhook_url)
             self.automations = AutomationEngine(self.db, self._run_automation_action)
+            await self.nodes.stop()
+            self.nodes = NodeService(self)
+            self.nodes.load_links()
             await self._build()
             if loops:
                 self._start_loops()

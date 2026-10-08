@@ -59,6 +59,10 @@ class DriverRegistry:
                 importlib.import_module(mod.name)
             except Exception:
                 log.exception("failed to import integration module", extra={"module": mod.name})
+        try:  # devices owned by other Energy Manager nodes
+            importlib.import_module("ems.nodes.remote")
+        except Exception:
+            log.exception("failed to load node.remote driver")
         for ep in entry_points(group="ems.drivers"):
             try:
                 ep.load()

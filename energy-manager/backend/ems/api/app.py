@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from ems import __version__
-from ems.api import routes_core, routes_devices, routes_more
+from ems.api import routes_core, routes_devices, routes_more, routes_nodes
 from ems.api.deps import resolve_token
 from ems.core.config import ConfigError
 from ems.security.auth import LoginRateLimiter
@@ -70,6 +70,7 @@ def create_app(runtime: EMSRuntime, *, start_runtime: bool = True, loops: bool =
     app.include_router(routes_core.router)
     app.include_router(routes_devices.router)
     app.include_router(routes_more.router)
+    app.include_router(routes_nodes.router)
 
     @app.get("/healthz", include_in_schema=False)
     async def healthz():

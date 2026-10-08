@@ -71,6 +71,7 @@ class DriverContext:
     clock: Clock
     simulator: Any = None
     secrets: dict[str, str] = field(default_factory=dict)
+    nodes: Any = None   # node_id -> NodeLink (devices owned by other Energy Manager nodes)
 
 
 @dataclass
@@ -118,6 +119,10 @@ class DeviceDriver(ABC):
     def capabilities(self) -> frozenset[Capability]:
         """Capabilities of this instance (may be narrower than the manifest)."""
         return self.manifest.capabilities
+
+    @property
+    def write_capable(self) -> bool:
+        return self.manifest.write_capable or self.manifest.simulated
 
     def supports(self, command: Command) -> bool:
         return ACTION_CAPABILITY[command.action] in self.capabilities()

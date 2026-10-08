@@ -15,6 +15,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from enum import StrEnum
 
+from ems.control.safety import SafetyRejected, SafetyValidator, is_release
 from ems.core.models import Command, CommandAction, Decision
 from ems.devices.manager import DeviceManager
 
@@ -44,6 +45,7 @@ class Outcome(StrEnum):
     FAILED = "failed"
     SHADOW = "shadow"        # commissioning: would do, not executed
     NOT_COMMISSIONED = "not_commissioned"  # connection_test / read_only: never written
+    REJECTED = "rejected"    # refused by the safety validator
 
 
 @dataclass
@@ -73,8 +75,12 @@ def limit_command(cmd: Command, fraction: float, params: dict) -> Command:
 
 class CommandGate:
     def __init__(self, devices: DeviceManager, mode: GateMode, refresh_s: float,
-                 levels: LevelLookup | None = None) -> None:
+                 levels: LevelLookup | None = None, safety: SafetyValidator | None = None) -> None:
         self.devices = devices
+        self.safety = safety
+        # (command, requester node id or None for the local engine) -> refusal reason. Set by the
+        # runtime: enforces the control lease so two controllers can never drive one device.
+        self.owner_guard: Callable[[Command, str | None], str | None] | None = None
         self.mode = mode
         self.levels = levels
         self.refresh = timedelta(seconds=refresh_s)
@@ -102,7 +108,7 @@ class CommandGate:
             return abs(cmd.value - old.value) < DEADBAND.get(cmd.action, 1e-9)
         return old.value == cmd.value
 
-    async def submit(self, decision: Decision, now: datetime) -> GateResult:
+    async def submit(self, decision: Decision, now: datetime, requester: str | None = None) -> GateResult:
         level, fraction = self.levels(decision.command.device_id) if self.levels else ("full", 1.0)
         if level in ("connection_test", "read_only"):
             return GateResult(decision, Outcome.NOT_COMMISSIONED, None,
@@ -114,6 +120,16 @@ class CommandGate:
                 decision = Decision(limited, decision.summary, decision.reasons + [
                     f"Beperkte regeling (inbedrijfstelling): maximaal {fraction:.0%} van het gevraagde"],
                     decision.source, decision.data, decision.expected_benefit_eur)
+        if self.safety is not None:
+            try:
+                checked = self.safety.validate(decision.command, self.devices.devices.get(decision.command.device_id),
+                                               now, record=level != "shadow")
+            except SafetyRejected as exc:
+                return GateResult(decision, Outcome.REJECTED, None, f"veiligheidscontrole: {exc}")
+            if checked.adjusted:
+                decision = Decision(checked.command, decision.summary,
+                                    decision.reasons + [f"Veiligheidscontrole: {n}" for n in checked.notes],
+                                    decision.source, decision.data, decision.expected_benefit_eur)
         cmd = decision.command
         if level == "shadow":
             prev = self._last.get(cmd.group_key)
@@ -121,6 +137,10 @@ class CommandGate:
                 return GateResult(decision, Outcome.SKIPPED, None)
             self._last[cmd.group_key] = (cmd, now)
             return GateResult(decision, Outcome.SHADOW, None, "schaduwmodus: niet uitgevoerd")
+        if self.owner_guard is not None and not is_release(cmd):
+            refused = self.owner_guard(cmd, requester)
+            if refused:
+                return GateResult(decision, Outcome.REJECTED, None, refused)
         prev = self._last.get(cmd.group_key)
         old_value = None if prev is None else (prev[0].action.value, prev[0].value)
         if self._unchanged(cmd, now):

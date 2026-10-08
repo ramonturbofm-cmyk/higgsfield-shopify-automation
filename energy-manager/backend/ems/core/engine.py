@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 from ems.control.base import ControlContext, Controller
 from ems.control.gate import CommandGate, GateMode, GateResult, Outcome
 from ems.control.overrides import OverrideManager
+from ems.control.safety import SafetyValidator
 from ems.core.clock import Clock
 from ems.core.config import EMSConfig
 from ems.core.events import EventBus
@@ -61,7 +62,7 @@ class EMSEngine:
         self.journal = journal or DecisionJournal()
         self.bus = bus or EventBus()
         self.gate = gate or CommandGate(devices, gate_mode(config), config.control.command_refresh_s,
-                                        levels=self._level)
+                                        levels=self._level, safety=SafetyValidator.from_config(config))
         self.last_decisions: dict[str, dict] = {}
         self.tz = ZoneInfo(config.site.timezone)
         self.overrides = overrides or OverrideManager(clock, self.tz)
@@ -75,6 +76,7 @@ class EMSEngine:
         self._healthy_ticks = 0
         self._last_grid_ok: datetime | None = None
         self._counter = itertools.count(1)
+        self._rejected: dict[tuple[str, str], tuple] = {}
 
     # ------------------------------------------------------------ lifecycle
     async def start(self) -> None:
@@ -150,7 +152,14 @@ class EMSEngine:
             result.results.append(gr)
             if gr.outcome == Outcome.SENT:
                 self.commands_sent += 1
-            if gr.outcome not in (Outcome.SKIPPED, Outcome.REFRESHED, Outcome.NOT_COMMISSIONED):
+            repeat_reject = False
+            if gr.outcome == Outcome.REJECTED:   # journal a refusal once, not every cycle
+                key = decision.command.group_key
+                repeat_reject = self._rejected.get(key) == (gr.decision.command, gr.error)
+                self._rejected[key] = (gr.decision.command, gr.error)
+            else:
+                self._rejected.pop(decision.command.group_key, None)
+            if gr.outcome not in (Outcome.SKIPPED, Outcome.REFRESHED, Outcome.NOT_COMMISSIONED) and not repeat_reject:
                 self._journal(gr, run_id, now)
                 await self.bus.publish("decision", gr)
             if gr.outcome != Outcome.SKIPPED or decision.command.device_id not in self.last_decisions:
