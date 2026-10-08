@@ -3,13 +3,14 @@
 # optimizer, WebSocket, settings save, app close (EMS keeps running), restart via the Windows
 # sign-in autostart entry (simulated reboot), history kept, upgrade over the existing install,
 # uninstall (user data kept).
-# Usage: .\windows\acceptance.ps1 -Installer dist\EnergyManagerSetup-0.3.0.exe
+# Usage: .\windows\acceptance.ps1 -Installer dist\EnergyManagerSetup-<versie>.exe
 param([Parameter(Mandatory = $true)][string]$Installer)
 $ErrorActionPreference = "Stop"
 $App = Join-Path $env:LOCALAPPDATA "Programs\Energy Manager"
 $Data = Join-Path $env:LOCALAPPDATA "EnergyManager"
 $Base = "http://127.0.0.1:8080"
 $RunKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+$UninstKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{6F0D2B7C-3E7A-4C55-9C7B-4D2E8E5A1F10}_is1"
 $results = [System.Collections.Generic.List[string]]::new()
 
 function Pass($msg) { Write-Host "PASS  $msg" -ForegroundColor Green; $results.Add("PASS  $msg") }
@@ -135,6 +136,18 @@ if (-not (Healthy)) { Fail "EMS did not start after upgrade" }
 Login
 if ((Api "/settings").site.name -ne "Acceptatietest") { Fail "setting lost after upgrade" }
 Pass "upgrade over existing install: EMS stopped by installer, data and settings kept"
+
+# 9b. Version and downgrade protection ---------------------------------------------------------
+$installed = (Get-ItemProperty $UninstKey).DisplayVersion
+$serverVersion = (Invoke-RestMethod "$Base/healthz").version
+if ($installed -ne $serverVersion) { Fail "installed version $installed differs from running server $serverVersion" }
+Set-ItemProperty $UninstKey -Name DisplayVersion -Value "99.0.0"     # pretend a newer version is installed
+$p = Start-Process $Installer -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$env:TEMP\em-downgrade.log" -Wait -PassThru
+Set-ItemProperty $UninstKey -Name DisplayVersion -Value $installed
+if ($p.ExitCode -eq 0) { Fail "installing an older version over a newer one was not blocked" }
+if (-not (Select-String -Path "$env:TEMP\em-downgrade.log" -Pattern "Downgrade blocked" -Quiet)) { Fail "downgrade block not logged" }
+if (-not (Healthy 10)) { Fail "EMS affected by the refused downgrade" }
+Pass "version $installed everywhere; downgrade over a newer version refused (exit code $($p.ExitCode)), EMS untouched"
 
 # 10. Uninstall ------------------------------------------------------------------------------
 Start-Process (Join-Path $App "unins000.exe") -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait

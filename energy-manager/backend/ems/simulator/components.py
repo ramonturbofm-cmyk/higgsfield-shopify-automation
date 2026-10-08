@@ -23,7 +23,7 @@ def phase_split(phase: str, grid_phases: int) -> tuple[float, float, float]:
     """Fraction of a component's power on L1/L2/L3."""
     if grid_phases == 1:
         return (1.0, 0.0, 0.0)
-    if phase == "3P":
+    if phase in ("3P", "NA"):          # NA: not tied to one phase (spread evenly in the simulation)
         return (1 / 3, 1 / 3, 1 / 3)
     return tuple(1.0 if p == phase else 0.0 for p in PHASES)  # type: ignore[return-value]
 

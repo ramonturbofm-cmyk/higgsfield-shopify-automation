@@ -69,13 +69,13 @@ class SiteConfig(_Base):
 class GridConfig(_Base):
     phases: Literal[1, 3] = setting(3, label="Aantal fasen")
     ampere_per_phase: float = setting(25.0, label="Aansluitwaarde per fase", unit="A", gt=0, le=250)
-    voltage_v: float = setting(230.0, label="Nominale spanning", unit="V", level="expert")
+    voltage_v: float = setting(230.0, label="Nominale spanning", unit="V", level="expert", ge=100, le=480)
     max_import_kw: float | None = setting(
         None, label="Maximale afname", unit="kW", level="advanced",
-        help="Leeg = afgeleid van de aansluitwaarde.")
+        help="Leeg = afgeleid van de aansluitwaarde.", ge=0, le=2000)
     max_export_kw: float | None = setting(
         None, label="Maximale teruglevering", unit="kW", level="advanced",
-        help="Leeg = afgeleid van de aansluitwaarde.")
+        help="Leeg = afgeleid van de aansluitwaarde.", ge=0, le=2000)
     phase_safety_margin_pct: float = setting(
         5.0, label="Veiligheidsmarge per fase", unit="%", level="advanced", ge=0, le=50,
         help="Het EMS houdt de fasestroom zoveel procent onder de zekeringwaarde.")
@@ -188,14 +188,15 @@ SurplusSink = Literal["battery", "flexible", "heat_pump", "boiler", "ev"]
 class StrategyConfig(_Base):
     profile: StrategyProfile = setting(StrategyProfile.MAXIMUM_SELF_CONSUMPTION, label="EMS-strategie")
     export_mode: ExportMode = setting(ExportMode.UNLIMITED, label="Teruglevering")
-    export_target_w: float = setting(0.0, label="Gewenste export bij begrenzing", unit="W", level="advanced")
+    export_target_w: float = setting(0.0, label="Gewenste export bij begrenzing", unit="W", level="advanced",
+                                     ge=-100000, le=100000)
     export_tolerance_w: float = setting(100.0, label="Regelmarge", unit="W", level="advanced", ge=0)
     export_price_threshold_eur: float = setting(
         0.0, label="Teruglevering beperken onder", unit="EUR/kWh", level="advanced",
-        help="Smart Export: PV wordt afgeregeld zodra de terugleverprijs onder deze grens komt.")
+        help="Smart Export: PV wordt afgeregeld zodra de terugleverprijs onder deze grens komt.", ge=-2, le=2)
     peak_limit_kw: float | None = setting(
         None, label="Piekbegrenzing afname", unit="kW", level="advanced",
-        help="Peak shaving: boven deze afname zet het EMS batterij en flexibele lasten in. Leeg = uit.")
+        help="Peak shaving: boven deze afname zet het EMS batterij en flexibele lasten in. Leeg = uit.", ge=0.5, le=2000)
     surplus_priority: list[SurplusSink] = setting(
         ["battery", "flexible", "heat_pump", "boiler", "ev"],
         label="Volgorde PV-overschot", level="advanced",
@@ -216,10 +217,11 @@ class ContractType(StrEnum):
 
 
 class TimeOfUsePrice(_Base):
-    start: str = Field(pattern=r"^\d{2}:\d{2}$")      # local time, inclusive
-    end: str = Field(pattern=r"^\d{2}:\d{2}$")        # local time, exclusive ("00:00" = midnight)
-    weekdays: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4, 5, 6])
-    price_eur_kwh: float
+    start: str = setting("00:00", label="Van (lokale tijd)", pattern=r"^\d{2}:\d{2}$")
+    end: str = setting("00:00", label="Tot (lokale tijd, exclusief)", pattern=r"^\d{2}:\d{2}$")
+    weekdays: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4, 5, 6],
+                                json_schema_extra={"label_nl": "Weekdagen (0 = maandag)"})
+    price_eur_kwh: float = setting(0.0, label="Prijs (incl. alles)", unit="EUR/kWh", ge=-2, le=5)
 
 
 class TariffConfig(_Base):
@@ -230,7 +232,7 @@ class TariffConfig(_Base):
     contract_type: ContractType = setting(ContractType.DYNAMIC, label="Soort contract")
     # Import (afname)
     import_markup_eur_kwh: float = setting(0.02, label="Inkoopopslag", unit="EUR/kWh",
-                                           help="Opslag van de leverancier bovenop de marktprijs (excl. btw).")
+                                           help="Opslag van de leverancier bovenop de marktprijs (excl. btw).", ge=-1, le=1)
     price_resolution_min: Literal[15, 60] = setting(
         15, label="Contractprijs per", unit="min", level="advanced",
         help="15: iedere kwartier eigen prijs. 60: uw leverancier rekent per uur (gemiddelde van de vier "
@@ -241,18 +243,18 @@ class TariffConfig(_Base):
              "'manual': het tarief hieronder.")
     tax_country: str = setting("NL", label="Land voor belastingtabel", level="expert")
     energy_tax_eur_kwh: float = setting(0.0, label="Energiebelasting", unit="EUR/kWh",
-                                        help="Excl. btw. Vul het actuele tarief van uw contract in.")
-    import_other_eur_kwh: float = setting(0.0, label="Overige kosten per kWh", unit="EUR/kWh", level="advanced")
-    transaction_fee_eur_kwh: float = setting(0.0, label="Transactiekosten per kWh", unit="EUR/kWh", level="advanced")
+                                        help="Excl. btw. Vul het actuele tarief van uw contract in.", ge=0, le=1)
+    import_other_eur_kwh: float = setting(0.0, label="Overige kosten per kWh", unit="EUR/kWh", level="advanced", ge=-1, le=1)
+    transaction_fee_eur_kwh: float = setting(0.0, label="Transactiekosten per kWh", unit="EUR/kWh", level="advanced", ge=0, le=1)
     vat_pct: float = setting(21.0, label="Btw", unit="%", ge=0, le=100)
     fixed_import_price_eur_kwh: float | None = setting(
         None, label="Vaste leveringsprijs (incl. alles)", unit="EUR/kWh",
-        help="Alleen voor vaste contracten; overschrijft de berekening hierboven.")
+        help="Alleen voor vaste contracten; overschrijft de berekening hierboven.", ge=0, le=5)
     time_of_use: list[TimeOfUsePrice] = setting([], label="Tijdsafhankelijke prijzen", level="expert")
     # Export (teruglevering)
     export_markup_eur_kwh: float = setting(-0.02, label="Terugleveropslag/-afslag", unit="EUR/kWh",
-                                           help="Negatief = afslag op de marktprijs.")
-    export_fee_eur_kwh: float = setting(0.0, label="Terugleverkosten", unit="EUR/kWh")
+                                           help="Negatief = afslag op de marktprijs.", ge=-1, le=1)
+    export_fee_eur_kwh: float = setting(0.0, label="Terugleverkosten", unit="EUR/kWh", ge=0, le=1)
     export_vat: bool = setting(False, label="Btw over teruglevering", level="advanced")
     netting: bool = setting(False, label="Salderen",
                             help="Teruggeleverde kWh worden verrekend tegen de afnameprijs (zolang export < import).")
@@ -262,14 +264,14 @@ class TariffConfig(_Base):
              "en btw vervallen, iedere kWh tegen de eigen kwartierprijs (gebruikelijk bij dynamisch). "
              "'import_price': tegen de gemiddelde afnameprijs (gebruikelijk bij vast/variabel). 'auto' kiest op "
              "basis van het contracttype. Controleer dit in uw contract.")
-    fixed_export_price_eur_kwh: float | None = setting(None, label="Vaste terugleververgoeding", unit="EUR/kWh")
+    fixed_export_price_eur_kwh: float | None = setting(None, label="Vaste terugleververgoeding", unit="EUR/kWh", ge=-2, le=5)
     # Fixed costs
-    fixed_monthly_eur: float = setting(0.0, label="Vaste kosten per maand", unit="EUR", level="advanced")
-    fixed_daily_eur: float = setting(0.0, label="Vaste kosten per dag", unit="EUR", level="advanced")
-    grid_monthly_eur: float = setting(0.0, label="Netbeheerkosten per maand", unit="EUR", level="advanced")
-    service_monthly_eur: float = setting(0.0, label="Servicekosten per maand", unit="EUR", level="advanced")
+    fixed_monthly_eur: float = setting(0.0, label="Vaste kosten per maand", unit="EUR", level="advanced", ge=0, le=1000)
+    fixed_daily_eur: float = setting(0.0, label="Vaste kosten per dag", unit="EUR", level="advanced", ge=0, le=100)
+    grid_monthly_eur: float = setting(0.0, label="Netbeheerkosten per maand", unit="EUR", level="advanced", ge=0, le=1000)
+    service_monthly_eur: float = setting(0.0, label="Servicekosten per maand", unit="EUR", level="advanced", ge=0, le=1000)
     energy_tax_credit_yearly_eur: float = setting(0.0, label="Vermindering energiebelasting per jaar",
-                                                  unit="EUR", level="advanced")
+                                                  unit="EUR", level="advanced", ge=0, le=5000)
 
 
 class PriceConfig(_Base):
@@ -298,9 +300,9 @@ class NotificationConfig(_Base):
     webhook_url: str = setting("", label="Webhook-URL", level="advanced",
                                help="Optioneel: meldingen worden als JSON naar deze URL gestuurd.")
     extreme_price_eur_kwh: float = setting(0.40, label="Melding bij importprijs boven", unit="EUR/kWh",
-                                           level="advanced")
+                                           level="advanced", ge=0, le=5)
     phase_load_warn_pct: float = setting(90.0, label="Melding bij fasebelasting boven", unit="%",
-                                         level="advanced")
+                                         level="advanced", ge=50, le=100)
 
 
 class NodeConfig(_Base):
@@ -327,11 +329,19 @@ class DeviceConfig(_Base):
     driver: str
     enabled: bool = True
     role: Literal["primary_grid_meter", "grid_reference"] | None = None
-    control_level: Literal["connection_test", "read_only", "shadow", "limited", "full"] = "full"
+    # None -> "full" only for simulated Demo drivers (mock.*), "read_only" for everything else:
+    # a real device never writes unless commissioning explicitly raised the level.
+    control_level: Literal["connection_test", "read_only", "shadow", "limited", "full"] | None = None
     limited_fraction: float = Field(0.3, gt=0, le=1)
-    phase: Literal["L1", "L2", "L3", "3P"] = "3P"
+    phase: Literal["L1", "L2", "L3", "3P", "NA"] = "3P"   # 3P = L1+L2+L3; NA = not connected per phase
     connection: dict[str, Any] = Field(default_factory=dict)
     params: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _default_level(self) -> DeviceConfig:
+        if self.control_level is None:
+            object.__setattr__(self, "control_level", "full" if self.driver.startswith("mock.") else "read_only")
+        return self
 
 
 class EMSConfig(_Base):

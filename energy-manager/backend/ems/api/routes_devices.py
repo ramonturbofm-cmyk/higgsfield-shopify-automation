@@ -14,15 +14,23 @@ from pydantic import BaseModel, Field
 from ems.api.deps import get_runtime, installer, viewer
 from ems.control.authority import EXECUTING, STATE_LABELS
 from ems.core.config import ConfigError, DeviceConfig
-from ems.core.models import CAPABILITY_LABELS_NL, Command, CommandAction, DeviceCategory
+from ems.core.models import CAPABILITY_LABELS_NL, METRIC_LABELS_NL, Command, CommandAction, DeviceCategory
 from ems.devices.base import DriverContext
-from ems.devices.capabilities import TYPE_SCHEMAS, actions_for, capability_view, missing_control_params, schema_view
+from ems.devices.capabilities import (
+    TYPE_SCHEMAS,
+    actions_for,
+    capability_view,
+    missing_control_params,
+    schema_view,
+    validate_params,
+)
 from ems.gridmeter.assign import PrimaryMeterConflict, claim_primary
 from ems.integrations.homewizard import client as hw
 from ems.integrations.homewizard.discovery import discover
 from ems.security.auth import Principal
 from ems.server import commissioning
 from ems.server.runtime import EMSRuntime
+from ems.services.aggregate import time_buckets
 
 router = APIRouter(prefix="/api/v1")
 
@@ -61,6 +69,11 @@ async def drivers(category: DeviceCategory | None = None, _: Principal = Depends
 @router.get("/device-categories", tags=["devices"])
 async def categories(_: Principal = Depends(viewer)) -> list[dict]:
     return [{"id": c.value, "label": TYPE_SCHEMAS[c].label} for c in DeviceCategory]
+
+
+@router.get("/metric-labels", tags=["devices"])
+async def metric_labels(_: Principal = Depends(viewer)) -> dict:
+    return {k: {"label": v[0], "unit": v[1]} for k, v in METRIC_LABELS_NL.items()}
 
 
 @router.get("/device-schemas", tags=["devices"])
@@ -160,7 +173,7 @@ class DeviceIn(BaseModel):
     category: DeviceCategory
     driver: str
     id: str | None = Field(None, pattern=r"^[a-z0-9_-]{1,64}$")
-    phase: Literal["L1", "L2", "L3", "3P"] = "3P"
+    phase: Literal["L1", "L2", "L3", "3P", "NA"] | None = None   # default from the type schema
     connection: dict[str, Any] = Field(default_factory=dict)
     params: dict[str, Any] = Field(default_factory=dict)
     primary_grid_meter: bool = False
@@ -204,8 +217,9 @@ async def add_device(body: DeviceIn, p: Principal = Depends(installer), rt: EMSR
     dev_id = body.id or _slug(body.name, existing)
     if dev_id in existing:
         raise HTTPException(409, f"apparaat-id {dev_id!r} bestaat al")
+    _check_params(body.category, body.params)
     dev = {"id": dev_id, "name": body.name, "category": body.category.value, "driver": body.driver,
-           "phase": body.phase, "connection": _store_connection_secrets(rt, dev_id, body.connection),
+           "phase": _phase(body.category, body.phase), "connection": _store_connection_secrets(rt, dev_id, body.connection),
            "params": body.params,
            "control_level": "full" if cls.manifest.simulated else "read_only"}
     data["devices"].append(dev)
@@ -221,10 +235,28 @@ async def add_device(body: DeviceIn, p: Principal = Depends(installer), rt: EMSR
     return _device_view(rt, rt.config.device(dev_id))
 
 
+def _phase(category: DeviceCategory, phase: str | None) -> str:
+    """Phase only where it is electrically relevant (type schema); otherwise 'NA'."""
+    relevant = TYPE_SCHEMAS[DeviceCategory(category)].phase_relevant
+    if not relevant:
+        return "NA"
+    if phase in (None, ""):
+        return "3P"
+    if phase == "NA":
+        raise HTTPException(422, "kies op welke fase(n) dit apparaat is aangesloten")
+    return phase
+
+
+def _check_params(category: DeviceCategory, params: dict) -> None:
+    errors = validate_params(category, params or {})
+    if errors:
+        raise HTTPException(422, "ongeldige instellingen: " + "; ".join(errors))
+
+
 class DevicePatch(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=80)
     enabled: bool | None = None
-    phase: Literal["L1", "L2", "L3", "3P"] | None = None
+    phase: Literal["L1", "L2", "L3", "3P", "NA"] | None = None
     connection: dict[str, Any] | None = None
     params: dict[str, Any] | None = None
 
@@ -232,7 +264,12 @@ class DevicePatch(BaseModel):
 @router.put("/devices/{device_id}", tags=["devices"])
 async def update_device(device_id: str, body: DevicePatch, p: Principal = Depends(installer),
                         rt: EMSRuntime = Depends(get_runtime)) -> dict:
-    _get(rt, device_id)
+    cfg = _get(rt, device_id)
+    if body.params is not None:
+        merged = {k: v for k, v in {**cfg.params, **body.params}.items() if v is not None}
+        _check_params(cfg.category, merged)
+    if body.phase is not None:
+        body.phase = _phase(cfg.category, body.phase)
     data = rt.config.model_dump(mode="json")
     for d in data["devices"]:
         if d["id"] == device_id:
@@ -273,7 +310,7 @@ class DeviceTest(BaseModel):
     driver: str
     category: DeviceCategory
     name: str = "test"
-    phase: Literal["L1", "L2", "L3", "3P"] = "3P"
+    phase: Literal["L1", "L2", "L3", "3P", "NA"] | None = None   # default from the type schema
     connection: dict[str, Any] = Field(default_factory=dict)
     params: dict[str, Any] = Field(default_factory=dict)
 
@@ -300,7 +337,7 @@ async def _run_test(rt: EMSRuntime, cfg: DeviceConfig) -> dict:
 async def test_new_device(body: DeviceTest, _: Principal = Depends(installer), rt: EMSRuntime = Depends(get_runtime)):
     _check_driver(rt, body.driver, body.category)
     cfg = DeviceConfig(id="test_device", name=body.name, category=body.category, driver=body.driver,
-                       phase=body.phase, connection=body.connection, params=body.params)
+                       phase=_phase(body.category, body.phase), connection=body.connection, params=body.params)
     return await _run_test(rt, cfg)
 
 
@@ -333,12 +370,18 @@ async def device_health(device_id: str, hours: float = Query(24, le=24 * 14), _:
 
 
 @router.get("/devices/{device_id}/history", tags=["devices"])
-async def device_history(device_id: str, hours: float = Query(24, le=24 * 14), _: Principal = Depends(viewer),
+async def device_history(device_id: str, hours: float = Query(24, le=24 * 14),
+                         points: int | None = Query(None, ge=10, le=2000), _: Principal = Depends(viewer),
                          rt: EMSRuntime = Depends(get_runtime)) -> list[dict]:
+    """Raw samples, or with ``points`` equal time buckets with avg/min/max per metric (peaks kept)."""
     _get(rt, device_id)
     now = rt.now()
-    return await asyncio.to_thread(rt.db.device_samples_between, device_id,
-                                   (now - timedelta(hours=hours)).timestamp(), now.timestamp())
+    a, b = (now - timedelta(hours=hours)).timestamp(), now.timestamp()
+    rows = await asyncio.to_thread(rt.db.device_samples_between, device_id, a, b, 200000 if points else 5000)
+    if not points:
+        return rows
+    metrics = sorted({k for r in rows for k in (r.get("values") or {})})
+    return time_buckets(rows, lambda r: r["ts"], metrics, lambda r, m: (r.get("values") or {}).get(m), a, b, points)
 
 
 @router.post("/devices/{device_id}/identify", tags=["devices"])

@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 
+from ems.core.models import CAPABILITY_LABELS_NL, Capability
 from ems.devices.capabilities import TYPE_SCHEMAS, missing_control_params
 
 LEVELS = ["connection_test", "read_only", "shadow", "limited", "full"]
@@ -92,7 +93,7 @@ def build_view(rt, device_id: str) -> dict:
         {"id": "connection", "label": "Verbindingstest geslaagd", "done": reachable,
          "detail": None if test is None else ("bereikbaar" if test.get("reachable") else test.get("error"))},
         {"id": "controls", "label": "Bestuurbare functies aanwezig", "done": bool(f["controls"]),
-         "detail": ", ".join(f["controls"]) or "alleen meten"},
+         "detail": ", ".join(CAPABILITY_LABELS_NL.get(Capability(c), c) for c in f["controls"]) or "alleen meten"},
         {"id": "driver", "label": "Driver schrijft volgens documentatie", "done": f["writes"] and f["documented"],
          "detail": "Demo (gesimuleerd)" if f["simulated"] else (f["documentation"] or "geen schrijvende driver")},
         {"id": "safety_params", "label": f"Veiligheidsinstellingen {TYPE_SCHEMAS[cfg.category].label.lower()}",

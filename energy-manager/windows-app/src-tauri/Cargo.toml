@@ -1,6 +1,6 @@
 [package]
 name = "energy-manager"
-version = "0.3.0"
+version = "0.4.0"
 description = "Energy Manager desktop app"
 edition = "2021"
 

@@ -24,6 +24,7 @@ from ems.prices.providers import parse_manual_prices
 from ems.security.auth import ROLES, Principal, hash_api_token, hash_password, new_api_token, verify_password
 from ems.server.history import day_bounds
 from ems.server.runtime import EMSRuntime
+from ems.services.aggregate import time_buckets
 from ems.services.finance import finance_summary
 from ems.services.settlement import compare, rules_for, settle
 from ems.tariffs.taxes import TAX_TABLE
@@ -532,8 +533,9 @@ def _range(rt: EMSRuntime, start: datetime | None, end: datetime | None, hours: 
 
 @router.get("/history", tags=["history"])
 async def history(start: datetime | None = None, end: datetime | None = None, hours: float = Query(24, le=24 * 400),
-                  resolution: Literal["raw", "15m"] = "15m", _: Principal = Depends(viewer),
-                  rt: EMSRuntime = Depends(get_runtime)) -> dict:
+                  resolution: Literal["raw", "15m"] = "15m", points: int | None = Query(None, ge=10, le=5000),
+                  _: Principal = Depends(viewer), rt: EMSRuntime = Depends(get_runtime)) -> dict:
+    """``points``: reduce to equal time buckets with average, min and max per field (charts)."""
     a, b = _range(rt, start, end, hours)
     if resolution == "raw":
         if b - a > 3 * 86400:
@@ -543,7 +545,15 @@ async def history(start: datetime | None = None, end: datetime | None = None, ho
     else:
         rows = await asyncio.to_thread(rt.db.slots_between, rt.config.site.id, a, b)
         rows = [{k: v for k, v in r.items() if k != "site_id"} for r in rows]
-    return {"resolution": resolution, "rows": rows}
+    if points and len(rows) > points:
+        key = "ts" if resolution == "raw" else "slot_ts"
+        fields = sorted({k for r in rows for k, v in r.items() if k not in ("ts", "slot_ts", "id")
+                         and isinstance(v, (int, float)) and not isinstance(v, bool)})
+        buckets = time_buckets(rows, lambda r: r[key], fields, lambda r, m: r.get(m), a, b, points)
+        rows = [{key: x["ts"], **x["values"], "min": x["min"], "max": x["max"], "n": x["n"], "bucket_s": x["bucket_s"]}
+                for x in buckets]
+        return {"resolution": resolution, "aggregated": True, "rows": rows}
+    return {"resolution": resolution, "aggregated": False, "rows": rows}
 
 
 @router.get("/history/export", tags=["history"])
@@ -551,7 +561,7 @@ async def history_export(start: datetime | None = None, end: datetime | None = N
                          hours: float = Query(24 * 7, le=24 * 400), fmt: Literal["csv", "json", "excel"] = "csv",
                          resolution: Literal["raw", "15m"] = "15m", _: Principal = Depends(viewer),
                          rt: EMSRuntime = Depends(get_runtime)) -> Response:
-    data = await history(start, end, hours, resolution, _, rt)
+    data = await history(start, end, hours, resolution, None, _, rt)
     rows = data["rows"]
     tz = ZoneInfo(rt.config.site.timezone)
     for r in rows:

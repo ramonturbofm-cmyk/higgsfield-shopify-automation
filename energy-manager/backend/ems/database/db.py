@@ -58,6 +58,10 @@ class Database:
 
     def migrate(self) -> int:
         current = self.current_version()
+        if current > SCHEMA_VERSION:
+            # Downgrade protection: an older program must never write to a newer database.
+            raise RuntimeError(f"database heeft schemaversie {current}, deze versie van Energy Manager kent maximaal "
+                               f"{SCHEMA_VERSION}. Installeer de nieuwere versie opnieuw of herstel een back-up.")
         for version in range(current + 1, SCHEMA_VERSION + 1):
             log.info("applying database migration", extra={"version": version})
             MIGRATIONS[version](self.engine)

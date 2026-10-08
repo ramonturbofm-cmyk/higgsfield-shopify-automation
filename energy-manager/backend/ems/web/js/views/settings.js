@@ -37,14 +37,20 @@ function sectionForm(schema, section, values) {
     } else if (type === "boolean") {
       input = h("input", { type: "checkbox", checked: v ? true : null });
     } else if (type === "number" || type === "integer") {
-      input = h("input", { type: "number", step: type === "integer" ? "1" : "any", value: v ?? "", placeholder: nullable ? "leeg = automatisch" : "" });
+      // Range from the backend schema (same bounds the server validates).
+      const lo = base.minimum ?? base.exclusiveMinimum ?? raw.minimum, hi = base.maximum ?? base.exclusiveMaximum ?? raw.maximum;
+      input = h("input", { type: "number", step: type === "integer" ? "1" : "any", value: v ?? "", min: lo ?? null, max: hi ?? null,
+        placeholder: nullable ? "leeg = automatisch" : "", "aria-label": raw.label_nl || key });
+      if (lo !== undefined || hi !== undefined) input.title = `toegestaan: ${lo ?? "…"} – ${hi ?? "…"}${raw.unit ? ` ${raw.unit}` : ""}`;
     } else if (type === "array" || type === "object") {
       input = h("textarea", { rows: 2 }, JSON.stringify(v));
     } else {
       input = h("input", { value: v ?? "", type: key.includes("token") ? "password" : "text" });
     }
     inputs[key] = { input, type, nullable };
-    els.push(type === "boolean" ? h("label", { class: "f check", title: raw.help_nl || "" }, input, label) : field(label, input, raw.help_nl));
+    const rangeTxt = (type === "number" || type === "integer") && input.title ? `${input.title}.` : "";
+    els.push(type === "boolean" ? h("label", { class: "f check", title: raw.help_nl || "" }, input, label)
+      : field(label, input, [raw.help_nl, rangeTxt.trim()].filter(Boolean).join(" ")));
   }
   const read = () => {
     const out = {};
@@ -65,7 +71,7 @@ export async function render(root, [tab = "general"]) {
   const tabs = h("div", { class: "seg" }, [["general", "Algemeen"], ["tariff", "Energiecontract"], ["prices", "Prijzen & prognoses"], ["profile", "EMS-strategie"],
     ["users", "Gebruikers"]].map(([k, l]) => h("button", { class: k === tab ? "on" : "", onclick: () => { location.hash = `#/settings/${k}`; } }, l)));
   const lv = h("div", { class: "seg", title: "Hoeveel instellingen wilt u zien?" }, LEVELS.map((l) => h("button", { class: l === state.level ? "on" : "",
-    onclick: () => { state.level = l; try { localStorage.setItem("ems.level", l); } catch { /* ignore */ } root.replaceChildren(); render(root, [tab]); } },
+    onclick: () => { state.level = l; document.body.dataset.level = l; try { localStorage.setItem("ems.level", l); } catch { /* ignore */ } root.replaceChildren(); render(root, [tab]); } },
   { simple: "SIMPLE", advanced: "ADVANCED", expert: "EXPERT" }[l])));
   root.append(h("div", { class: "row spread" }, h("h1", {}, "Instellingen"), lv), tabs, h("div", { style: { height: "14px" } }));
   const ro = !can("admin");

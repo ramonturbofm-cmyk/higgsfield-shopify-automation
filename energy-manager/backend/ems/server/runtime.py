@@ -489,6 +489,7 @@ class EMSRuntime:
             cfg = self.config.device(dev_id)
             out["devices"][dev_id] = {"name": cfg.name, "category": cfg.category.value, "status": st.status.value,
                                       "error": st.error, "control_level": cfg.control_level,
+                                      "control_state": self.engine.control_state(dev_id).value,
                                       "values": {str(k): v for k, v in st.values.items()}}
         slot = self.optimizer.current_slot(now)
         if slot:

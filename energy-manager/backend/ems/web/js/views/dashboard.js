@@ -1,7 +1,22 @@
 import { api, eur, h, on, pct, power, state, svg, temp, time } from "../lib.js";
-import { decisionList, fmtPrice, kpi } from "./common.js";
 
-const QUALITY = { STALE: "verouderd", ESTIMATED: "geschat", INVALID: "ongeldig", MISSING: "ontbreekt", FORECAST: "prognose" };
+import { controlStatePill, decisionList, fmtPrice } from "./common.js";
+
+// One timeliness label per value, always visible (audit P2-04): never a stale number without a label.
+const FRESH = { GOOD: ["LIVE", "good"], CALCULATED: ["BEREKEND", ""], ESTIMATED: ["GESCHAT", "warn"], FORECAST: ["PROGNOSE", "warn"],
+  STALE: ["VEROUDERD", "bad"], INVALID: ["NIET BESCHIKBAAR", "bad"], MISSING: ["NIET BESCHIKBAAR", "bad"], UNKNOWN: ["ONBEKEND", ""] };
+function freshness(q, ageS) {
+  if (q === "GOOD" && ageS !== null && ageS !== undefined && ageS > 10) return ["VERTRAAGD", "warn"];
+  return FRESH[q] || null;
+}
+function tile(label, value, sub, q, ageS) {
+  const f = freshness(q, ageS);
+  const unavailable = f && f[0] === "NIET BESCHIKBAAR";
+  return h("div", { class: `card kpi${f && f[0] === "VEROUDERD" ? " stale" : ""}` },
+    h("div", { class: "l row spread" }, label, f ? h("span", { class: `pill ${f[1]}`, style: { fontSize: ".7em" } }, f[0]) : null),
+    h("div", { class: "v" }, unavailable ? "—" : value),
+    sub ? h("div", { class: "s" }, f && f[0] === "VEROUDERD" ? `laatst bekende waarde · ${sub}` : sub) : null);
+}
 
 const NODES = {
   pv: { x: 380, y: 62, label: "Zonnepanelen", cls: "c4" },
@@ -10,11 +25,25 @@ const NODES = {
   battery: { x: 650, y: 205, label: "Batterij", cls: "c3" },
   hp: { x: 230, y: 350, label: "Warmtepomp", cls: "c2" },
   ev: { x: 530, y: 350, label: "Laadpaal", cls: "c5" },
+  other: { x: 110, y: 350, label: "Overige gemeten", cls: "c6" },
 };
+// Categories outside the main nodes (boiler, airco, smart plugs, ...): shown as part of the house
+// consumption ("waarvan"), never added on top of it — no double counting.
+const MAIN = new Set(["smart_meter", "energy_meter", "pv_inverter", "hybrid_inverter", "battery", "battery_system",
+  "heat_pump", "heat_pump_boiler", "ev_charger", "ev"]);
+function otherLoads(live) {
+  let w = null, n = 0;
+  for (const d of Object.values(live.devices || {})) {
+    if (MAIN.has(d.category)) continue;
+    const v = d.values?.load_power_w ?? d.values?.hp_power_w;
+    if (typeof v === "number") { w = (w || 0) + v; n += 1; }
+  }
+  return { w, n };
+}
 
 function flowDiagram(f, present) {
   const s = svg("svg", { class: "flow", viewBox: "15 10 730 410", role: "img", "aria-label": "Energiestromen" });
-  const links = [["pv", "house"], ["grid", "house"], ["battery", "house"], ["hp", "house"], ["ev", "house"]];
+  const links = [["pv", "house"], ["grid", "house"], ["battery", "house"], ["hp", "house"], ["ev", "house"], ["other", "house"]];
   for (const [a, b] of links) {
     if (!present[a]) continue;
     const A = NODES[a], B = NODES[b];
@@ -31,6 +60,7 @@ function flowDiagram(f, present) {
   if (present.battery) f.battery_w < 0 ? stream("battery", "house", -f.battery_w, NODES.battery.cls) : stream("house", "battery", f.battery_w, NODES.battery.cls);
   if (present.hp) stream("house", "hp", f.hp_w, NODES.hp.cls);
   if (present.ev) stream("house", "ev", f.ev_w, NODES.ev.cls);
+  if (present.other) stream("house", "other", f.other_w, NODES.other.cls);
   const node = (key, value, extra) => {
     if (!present[key]) return;
     const n = NODES[key];
@@ -48,6 +78,7 @@ function flowDiagram(f, present) {
   node("battery", power(f.battery_w, true), `SOC ${pct(f.soc_pct)}${f.battery_w > 20 ? " · laden" : f.battery_w < -20 ? " · ontladen" : ""}`);
   node("hp", power(f.hp_w), f.indoor_c !== null ? `binnen ${temp(f.indoor_c)}` : null);
   node("ev", power(f.ev_w));
+  node("other", power(f.other_w), `waarvan in huis (${f.other_n})`);
   return s;
 }
 
@@ -64,33 +95,39 @@ export async function render(root) {
   const cats = (live) => {
     const c = new Set(Object.values(live.devices || {}).map((d) => d.category));
     return { pv: c.has("pv_inverter") || c.has("hybrid_inverter"), grid: true, house: true,
-      battery: c.has("battery") || c.has("hybrid_inverter"), hp: c.has("heat_pump"), ev: c.has("ev_charger") };
+      battery: c.has("battery") || c.has("hybrid_inverter") || c.has("battery_system"),
+      hp: c.has("heat_pump") || c.has("heat_pump_boiler"), ev: c.has("ev_charger") || c.has("ev") };
   };
   const paint = (live) => {
     if (!live) return;
     const f = live.flows || {};
-    flowBox.replaceChildren(h("h3", {}, "Live energiestromen"), live.flows ? flowDiagram(f, cats(live)) : h("div", { class: "empty" }, "Nog geen meetgegevens"),
+    const ol = otherLoads(live);
+    const present0 = { ...cats(live), other: ol.n > 0 };
+    flowBox.replaceChildren(h("h3", {}, "Live energiestromen"), live.flows ? flowDiagram({ ...f, other_w: ol.w, other_n: ol.n }, present0) : h("div", { class: "empty" }, "Nog geen meetgegevens"),
       h("div", { class: "muted small" }, `Bijgewerkt ${time(live.timestamp, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`,
         live.grid_meter?.age_s !== null && live.grid_meter?.age_s !== undefined ? ` · netmeting ${live.grid_meter.age_s.toFixed(1).replace(".", ",")} s oud` : ""));
     const q = live.quality || {};
-    const na = (key, v) => (q[key] && ["MISSING", "INVALID", "UNKNOWN"].includes(q[key])) ? "N/A" : v;
-    const qnote = (key) => q[key] && !["GOOD", "CALCULATED", "UNKNOWN"].includes(q[key]) ? ` · ${QUALITY[q[key]] || q[key]}` : "";
     const st = live.ems_status || {};
+    const present = cats(live);
+    const age = live.grid_meter?.age_s;
+    const gridQ = f.grid_w === null || f.grid_w === undefined ? "MISSING" : q.grid || "GOOD";
+    // Only tiles for what is installed (no empty battery/PV cards).
     tiles.replaceChildren(
-      kpi("Zonnepanelen", na("pv", power(f.pv_w)), `opwek nu${qnote("pv")}`),
-      kpi("Huis", na("house", power(f.house_w)), q.house === "CALCULATED" ? "berekend uit netmeting" : (q.house === "MISSING" ? "niet te bepalen" : "")),
-      kpi("Batterij", na("soc", pct(f.soc_pct)), `${power(f.battery_w, true)}${f.battery_w > 20 ? " laden" : f.battery_w < -20 ? " ontladen" : ""}${qnote("battery")}`),
-      kpi("Net", f.grid_w === null || f.grid_w === undefined ? "N/A" : power(f.grid_w, true),
-        f.grid_w === null || f.grid_w === undefined ? "geen actuele netmeting" : f.grid_w > 20 ? "afname" : f.grid_w < -20 ? "teruglevering" : "in balans"),
+      present.pv ? tile("Zonnepanelen", power(f.pv_w), "opwek nu", q.pv) : null,
+      tile("Huis", power(f.house_w), q.house === "CALCULATED" ? "berekend uit netmeting" : "", q.house),
+      present.battery ? tile("Batterij", pct(f.soc_pct), `${power(f.battery_w, true)}${f.battery_w > 20 ? " laden" : f.battery_w < -20 ? " ontladen" : ""}`, q.battery || q.soc) : null,
+      present.hp ? tile("Warmtepomp", power(f.hp_w), f.indoor_c !== null && f.indoor_c !== undefined ? `binnen ${temp(f.indoor_c)}` : "", q.hp) : null,
+      present.ev ? tile("Laadpaal", power(f.ev_w), "", q.ev) : null,
+      tile("Net", power(f.grid_w, true), gridQ === "MISSING" ? "geen actuele netmeting" : f.grid_w > 20 ? "afname" : f.grid_w < -20 ? "teruglevering" : "in balans", gridQ, age),
       h("div", { class: "card kpi" }, h("div", { class: "l" }, "Stroomprijs nu"),
-        h("div", { class: "v" }, fmtPrice(live.price?.import)),
+        h("div", { class: "v" }, live.price?.import === null || live.price?.import === undefined ? "niet beschikbaar" : fmtPrice(live.price.import)),
         h("div", { class: "s" }, "afname · ", h("b", {}, "markt "), fmtPrice(live.price?.spot), " · ", h("b", {}, "teruglevering "), fmtPrice(live.price?.export))),
       h("a", { class: `card kpi status-${(st.state || "").toLowerCase()}`, href: "#/installation", style: { textDecoration: "none", color: "inherit" } },
         h("div", { class: "l" }, "EMS-status"), h("div", { class: "v" }, st.label || "—"), h("div", { class: "s" }, st.reason || "")));
     const n = live.now;
     nowBox.replaceChildren(h("h3", {}, "Wat doet het EMS nu?"),
       n ? h("div", { class: "now" },
-        h("div", { class: "now-what" }, n.what, n.outcome && n.outcome !== "sent" ? h("span", { class: "pill warn", style: { marginLeft: "8px" } },
+        h("div", { class: "now-what" }, h("span", { class: "muted small" }, n.outcome === "sent" || n.outcome === "refreshed" ? "EMS doet nu: " : "EMS zou: "), n.what, n.outcome && n.outcome !== "sent" ? h("span", { class: "pill warn", style: { marginLeft: "8px" } },
           { shadow: "schaduw: EMS zou", rejected: "geweigerd", not_commissioned: "niet in bedrijf", dry_run: "proef" }[n.outcome] || n.outcome) : null),
         h("dl", { class: "now-dl" },
           h("dt", {}, "Waarom?"), h("dd", {}, n.why?.length ? h("ul", {}, n.why.map((r) => h("li", {}, r))) : "—"),
@@ -105,7 +142,7 @@ export async function render(root) {
       Object.entries(live.devices || {}).map(([id, d]) => h("tr", {},
         h("td", {}, h("a", { href: `#/devices/${id}` }, d.name)),
         h("td", {}, h("span", { class: `pill ${d.status === "online" ? "good" : d.status === "offline" ? "bad" : "warn"}` }, d.status)),
-        h("td", { class: "small muted" }, d.control_level === "full" ? "" : `inbedrijfstelling: ${d.control_level}`))))));
+        h("td", { class: "small" }, d.control_state ? controlStatePill(d.control_state) : d.control_level))))));
   };
   paint(state.live);
   const loadDecisions = async () => decBox.replaceChildren(decisionList(await api("/decisions?limit=6")));

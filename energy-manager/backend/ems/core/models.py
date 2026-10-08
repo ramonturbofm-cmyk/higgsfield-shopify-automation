@@ -85,6 +85,29 @@ class Metric(StrEnum):
     LOAD_POWER_W = "load_power_w"
 
 
+# Human label and unit per metric (single source for the UI; raw keys only in Expert mode).
+METRIC_LABELS_NL: dict[str, tuple[str, str]] = {
+    "grid_power_w": ("Netvermogen (+ afname)", "W"), "grid_import_power_w": ("Afname", "W"),
+    "grid_export_power_w": ("Teruglevering", "W"),
+    **{f"grid_voltage_l{n}_v": (f"Spanning L{n}", "V") for n in (1, 2, 3)},
+    **{f"grid_current_l{n}_a": (f"Stroom L{n}", "A") for n in (1, 2, 3)},
+    **{f"grid_power_l{n}_w": (f"Vermogen L{n}", "W") for n in (1, 2, 3)},
+    "grid_import_energy_kwh": ("Meterstand afname", "kWh"), "grid_export_energy_kwh": ("Meterstand teruglevering", "kWh"),
+    "pv_power_w": ("PV-vermogen", "W"), "pv_limit_w": ("PV-begrenzing", "W"), "pv_energy_kwh": ("PV-opbrengst totaal", "kWh"),
+    "battery_power_w": ("Batterijvermogen (+ laden)", "W"), "battery_soc_pct": ("Laadtoestand", "%"),
+    "battery_temperature_c": ("Batterijtemperatuur", "°C"), "battery_mode": ("Batterijmodus", ""),
+    "battery_max_soc_pct": ("Maximale laadtoestand (apparaat)", "%"),
+    "hp_power_w": ("Elektrisch vermogen warmtepomp", "W"), "hp_thermal_power_w": ("Warmtevermogen", "W"),
+    "hp_cop": ("COP", ""), "hp_compressor_on": ("Compressor aan", ""), "hp_setpoint_c": ("Setpoint", "°C"),
+    "hp_mode": ("Warmtepompmodus", ""), "indoor_temp_c": ("Binnentemperatuur", "°C"),
+    "outdoor_temp_c": ("Buitentemperatuur", "°C"), "flow_temp_c": ("Aanvoertemperatuur", "°C"),
+    "return_temp_c": ("Retourtemperatuur", "°C"), "dhw_temp_c": ("Tapwatertemperatuur", "°C"),
+    "ev_power_w": ("Laadvermogen", "W"), "ev_connected": ("Auto aangesloten", ""), "ev_soc_pct": ("Laadtoestand auto", "%"),
+    "ev_current_limit_a": ("Ingestelde laadstroom", "A"), "ev_session_energy_kwh": ("Geladen deze sessie", "kWh"),
+    "load_power_w": ("Vermogen", "W"),
+}
+
+
 class Capability(StrEnum):
     # Read capabilities
     READ_GRID_POWER = "read_grid_power"

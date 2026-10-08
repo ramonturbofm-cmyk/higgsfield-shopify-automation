@@ -19,7 +19,7 @@ export function lineChart(opts) {
   const W = 900, H = height, L = 50, R = 14, T = 10, B = 26;
   const wrap = h("div", { class: "chart" });
   if (!times.length) { wrap.append(h("div", { class: "empty" }, "Geen gegevens beschikbaar")); return wrap; }
-  const vals = series.flatMap((s) => s.values).filter((v) => v !== null && v !== undefined && !Number.isNaN(v));
+  const vals = series.flatMap((s) => [...s.values, ...(s.min || []), ...(s.max || [])]).filter((v) => v !== null && v !== undefined && !Number.isNaN(v));
   if (!vals.length) { wrap.append(h("div", { class: "empty" }, "Geen gegevens beschikbaar")); return wrap; }
   let lo = Math.min(...vals), hi = Math.max(...vals);
   if (zero) { lo = Math.min(lo, 0); hi = Math.max(hi, 0); }
@@ -33,8 +33,10 @@ export function lineChart(opts) {
     s.append(svg("text", { class: "ax", x: L - 6, y: y(t) + 4, "text-anchor": "end" }, num(t, Math.abs(hi - lo) < 2 ? 2 : Math.abs(hi - lo) < 20 ? 1 : 0)));
   }
   const step = Math.max(1, Math.ceil(n / 8));
+  const span = n > 1 ? new Date(times[n - 1]) - new Date(times[0]) : 0;
+  const tick = span > 20 * 3600e3 ? (t) => time(t, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : (t) => time(t);
   for (let i = 0; i < n; i += step) {
-    s.append(svg("text", { class: "ax", x: x(i), y: H - 6, "text-anchor": "middle" }, time(times[i])));
+    s.append(svg("text", { class: "ax", x: x(i), y: H - 6, "text-anchor": "middle" }, tick(times[i])));
   }
   if (marker !== null && marker >= 0 && marker < n) {
     s.append(svg("line", { class: "zero-l", x1: x(marker), x2: x(marker), y1: T, y2: H - B, "stroke-dasharray": "3 4" }));
@@ -48,6 +50,12 @@ export function lineChart(opts) {
       d += `${pen ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`;
       pen = true;
     });
+    if (ser.min && ser.max) {          // min/max band of each time bucket: short peaks stay visible
+      let up = "", down = "";
+      ser.max.forEach((v, i) => { if (v !== null && v !== undefined) up += `${up ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`; });
+      for (let i = n - 1; i >= 0; i--) { const v = ser.min[i]; if (v !== null && v !== undefined) down += `L${x(i).toFixed(1)},${y(v).toFixed(1)}`; }
+      if (up && down) s.append(svg("path", { class: `area ${cls}`, d: `${up}${down}Z`, stroke: "none", opacity: 0.25 }));
+    }
     if (ser.area && d) {
       const base = y(Math.max(lo, Math.min(0, hi)));
       s.append(svg("path", { class: `area ${cls}`, d: `${d}V${base}H${x(0)}Z`, stroke: "none" }));

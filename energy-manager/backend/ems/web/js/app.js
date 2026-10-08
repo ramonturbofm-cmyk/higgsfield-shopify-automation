@@ -38,12 +38,37 @@ function cycleTheme() {
 }
 
 // ------------------------------------------------------------------ layout
+// Pages per device category: only shown when such a device is installed (audit P2-07).
+const NEEDS = { battery: ["battery", "hybrid_inverter", "battery_system"], pv: ["pv_inverter", "hybrid_inverter"],
+  heatpump: ["heat_pump", "heat_pump_boiler"], ev: ["ev_charger", "ev"] };
+// Pages for advanced users only; Simple mode keeps the essentials.
+const LEVEL_MIN = { backtest: "advanced", nodes: "advanced", system: "advanced", automations: "advanced" };
+const LEVELS = ["simple", "advanced", "expert"];
+const LEVEL_LABEL = { simple: "Eenvoudig", advanced: "Uitgebreid", expert: "Expert" };
+
+function visible(key) {
+  if (LEVEL_MIN[key] && LEVELS.indexOf(state.level) < LEVELS.indexOf(LEVEL_MIN[key])) return false;
+  const need = NEEDS[key];
+  if (!need) return true;
+  const cats = new Set(Object.values(state.live?.devices || {}).map((d) => d.category));
+  return need.some((c) => cats.has(c));
+}
+
+export function setLevel(level) {
+  state.level = level;
+  document.body.dataset.level = level;
+  try { localStorage.setItem("ems.level", level); } catch { /* ignore */ }
+  route();
+}
+
 function renderSidebar(active) {
   const side = document.getElementById("sidebar");
+  document.body.dataset.level = state.level;
+  const items = NAV.filter((n) => n === "-" || visible(n[0]) || n[0] === active);
   side.replaceChildren(
     h("div", { class: "brand" }, h("img", { src: "/static/icon.svg", alt: "" }), "Energy Manager"),
-    h("nav", { class: "nav" }, NAV.map((n) => n === "-" ? h("div", { class: "sep" }) :
-      h("a", { href: `#/${n[0]}`, class: n[0] === active ? "active" : "", onclick: () => side.classList.remove("open") },
+    h("nav", { class: "nav", "aria-label": "Hoofdmenu" }, items.map((n) => n === "-" ? h("div", { class: "sep" }) :
+      h("a", { href: `#/${n[0]}`, class: n[0] === active ? "active" : "", "aria-current": n[0] === active ? "page" : null, onclick: () => side.classList.remove("open") },
         h("span", { "aria-hidden": "true" }, n[2]), n[1]))));
 }
 
@@ -81,6 +106,9 @@ function renderTopbar(title) {
     h("button", { class: "btn sm hamb", "aria-label": "Menu", onclick: () => document.getElementById("sidebar").classList.toggle("open") }, "☰"),
     h("span", { class: "title" }, bar.dataset.title || ""),
     ...pills,
+    h("label", { class: "level-pick" }, h("span", { class: "sr-only" }, "Weergaveniveau"),
+      (() => { const sel = h("select", { "aria-label": "Weergaveniveau", title: "Eenvoudig / Uitgebreid / Expert" },
+        LEVELS.map((l) => h("option", { value: l }, LEVEL_LABEL[l]))); sel.value = state.level; sel.addEventListener("change", () => setLevel(sel.value)); return sel; })()),
     h("button", { class: "btn sm", title: "Thema: automatisch / licht / donker", onclick: cycleTheme },
       { auto: "◐ Auto", light: "☀ Licht", dark: "☾ Donker" }[theme]),
     state.user ? h("span", { class: "pill", title: `rol: ${state.role}` }, state.user) : null,

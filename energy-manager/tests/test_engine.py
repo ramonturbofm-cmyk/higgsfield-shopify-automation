@@ -73,7 +73,7 @@ async def test_simulation_mode_blocks_real_hardware():
     for cls in (MockSmartMeter, MockSolarInverter, MockHeatPump, MockEVCharger, RealBattery):
         reg.register(cls)
     devices = [dict(d) for d in BASE_DEVICES]
-    devices[2] = {**devices[2], "driver": "test.real_battery"}
+    devices[2] = {**devices[2], "driver": "test.real_battery", "control_level": "full"}  # explicitly commissioned
     engine, site, clock = await make_engine(
         make_config(devices), NOON, registry=reg,
         prepare_site=lambda s: s.add(SimBattery(id="bat", capacity_kwh=10)))  # stand-in plant

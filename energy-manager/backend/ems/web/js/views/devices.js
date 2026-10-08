@@ -35,70 +35,120 @@ function checksList(result) {
     `${c.ok ? "✓" : "✗"} ${c.label}`, c.detail ? h("span", { class: "muted small" }, ` — ${c.detail}`) : null)));
 }
 
+const PHASES = [["3P", "Driefasig (L1 + L2 + L3)"], ["L1", "Alleen L1"], ["L2", "Alleen L2"], ["L3", "Alleen L3"]];
+
+/** Schema-driven device form (wizard and edit): name, phase only where electrically relevant,
+ *  connection fields of the driver, and the type's parameters with their own ranges and help. */
+function deviceForm({ schema, driver, caps, existing = null }) {
+  const name = h("input", { value: existing?.name ?? driver.name, required: true, maxlength: 80, "aria-label": "naam" });
+  const phase = schema.phase_relevant ? h("select", { "aria-label": "fase" }, PHASES.map(([v, l]) => h("option", { value: v }, l))) : null;
+  if (phase) phase.value = existing?.phase && existing.phase !== "NA" ? existing.phase : "3P";
+  const conn = {};
+  const connFields = Object.entries(driver.connection_schema || {}).filter(([, s]) => !s.readonly).map(([k, s]) => {
+    let input;
+    const cur = existing?.connection?.[k];
+    if (s.enum) input = h("select", {}, s.enum.map((v) => h("option", { value: v }, v)));
+    else if (s.type === "boolean") input = h("input", { type: "checkbox", checked: (cur ?? s.default) ? true : null });
+    else if (s.type === "array") input = h("textarea", { rows: 7, class: "mono", spellcheck: "false", placeholder: s.example ? JSON.stringify(s.example, null, 1) : "[]" });
+    else input = h("input", { type: s.type === "integer" ? "number" : (/pass|token|secret/i.test(k) ? "password" : "text"), value: cur ?? s.default ?? "" });
+    if (s.enum) input.value = cur ?? s.default ?? s.enum[0];
+    if (s.type === "array" && cur) input.value = JSON.stringify(cur, null, 1);
+    conn[k] = [input, s];
+    const f = h("label", { class: s.type === "boolean" ? "f check" : "f" }, s.label_nl || k, input, s.help_nl ? h("span", { class: "muted small" }, s.help_nl) : null);
+    return f;
+  });
+  const params = {};
+  const capSet = new Set(caps || []);
+  const paramFields = (schema.params || []).filter((p) => !p.show_if || capSet.has(p.show_if[0]) === p.show_if[1]).map((p) => {
+    const cur = existing?.params?.[p.key];
+    let input;
+    if (p.kind === "enum") { input = h("select", {}, p.options.map((o) => h("option", { value: o }, o))); input.value = cur ?? p.options[0]; }
+    else if (p.kind === "time") input = h("input", { type: "time", value: cur ?? "" });
+    else input = h("input", { type: "number", min: p.min ?? null, max: p.max ?? null, step: p.step ?? "any", value: cur ?? "", placeholder: p.recommended ?? "" });
+    params[p.key] = [input, p];
+    const range = p.kind === "number" && (p.min !== null || p.max !== null) ? ` (${p.min ?? "…"}–${p.max ?? "…"} ${p.unit || ""})` : "";
+    return h("label", { class: "f" }, `${p.label}${p.unit && !range ? ` (${p.unit})` : ""}${range}${p.required_for_control ? " *" : ""}`, input,
+      p.help ? h("span", { class: "muted small" }, p.help) : null);
+  });
+  const el = h("div", {}, h("div", { class: "form" }, h("label", { class: "f" }, "Naam", name),
+    phase ? h("label", { class: "f" }, "Aansluiting", phase, h("span", { class: "muted small" }, "Op welke fase(n) het apparaat is aangesloten (voor fasebewaking).")) : null,
+    ...connFields),
+  paramFields.length ? h("div", {}, h("h4", {}, "Apparaatgegevens"), h("p", { class: "small muted" }, "* nodig voordat het EMS dit apparaat mag regelen. Neem de waarden over van het typeplaatje of datablad."),
+    h("div", { class: "form" }, ...paramFields)) : null);
+  const collect = () => {
+    if (!name.value.trim()) throw new Error("Naam is verplicht");
+    const c = {};
+    for (const [k, [input, s]] of Object.entries(conn)) {
+      if (s.type === "boolean") c[k] = input.checked;
+      else if (s.type === "array") {
+        if (!input.value.trim()) continue;
+        try { c[k] = JSON.parse(input.value); } catch (e) { throw new Error(`${s.label_nl || k}: ongeldige JSON (${e.message})`); }
+      } else if (input.value !== "") c[k] = s.type === "integer" ? Number(input.value) : input.value;
+    }
+    const pr = {};
+    for (const [k, [input, p]] of Object.entries(params)) {
+      if (input.value === "") { if (existing?.params?.[k] !== undefined) pr[k] = null; continue; }
+      if (p.kind === "number") {
+        const v = Number(input.value);
+        if ((p.min !== null && v < p.min) || (p.max !== null && v > p.max)) throw new Error(`${p.label}: toegestaan ${p.min}–${p.max} ${p.unit || ""}`);
+        pr[k] = v;
+      } else pr[k] = input.value;
+    }
+    return { name: name.value.trim(), phase: phase ? phase.value : "NA", connection: c, params: pr };
+  };
+  return { el, collect };
+}
+
 async function addWizard(root, cats, preset) {
   if (!can("installer")) { root.append(h("div", { class: "notice warn inline" }, "Apparaten toevoegen vereist installateursrechten.")); return; }
-  const drivers = await api("/drivers");
+  const [drivers, schemas] = await Promise.all([api("/drivers"), api("/device-schemas")]);
+  const schemaOf = Object.fromEntries(schemas.map((x) => [x.category, x]));
   const steps = h("div", { class: "steps" });
   const body = h("div", { class: "card" });
   root.append(h("h1", {}, "Apparaat toevoegen"), steps, body);
   const wiz = { category: null, driver: null };
-  const setSteps = (n) => steps.replaceChildren(...["Soort", "Fabrikant / driver", "Verbinding", "Testen"].map((s, i) =>
-    h("span", { class: i === n ? "on" : i < n ? "done" : "" }, `${i < n ? "✓ " : ""}${s}`)));
+  const expert = state.level === "expert";
+  const setSteps = (n) => steps.replaceChildren(...["Soort", "Merk en model", "Gegevens", "Testen"].map((x, i) =>
+    h("span", { class: i === n ? "on" : i < n ? "done" : "" }, `${i < n ? "✓ " : ""}${x}`)));
 
   const stepCategory = () => {
     setSteps(0);
     body.replaceChildren(h("h3", {}, "Welk soort apparaat?"), h("div", { class: "grid cols-4" }, cats.map((c) => {
       const n = drivers.filter((d) => d.categories.includes(c.id) && d.available_in_mode).length;
-      return h("button", { class: "btn", disabled: n === 0, title: n ? "" : "nog geen driver beschikbaar",
-        onclick: () => { wiz.category = c.id; stepDriver(); } }, c.label, n ? "" : " (nog geen driver)");
-    })), h("p", { class: "muted small" }, "Ontbreekt uw merk? Met de generieke Modbus TCP-, HTTP/JSON- of MQTT-driver leest u waarden uit volgens de handleiding van het apparaat. Merkspecifieke (sturende) drivers worden alleen gebouwd op basis van officiële documentatie."));
+      return h("button", { class: "btn", disabled: n === 0, title: n ? "" : "nog geen koppeling beschikbaar",
+        onclick: () => { wiz.category = c.id; stepDriver(); } }, c.label, n ? "" : " (nog niet beschikbaar)");
+    })));
   };
+  const card = (d) => h("div", { class: "card flat row spread" }, h("div", {},
+    h("b", {}, d.generic ? d.name : `${d.vendor} — ${d.models.length ? d.models.join(", ") : d.name}`),
+    h("div", { class: "muted small" }, d.simulated ? "Simulatie (Demo Mode)" : d.verified ? "Getest op hardware" : "Nog niet op hardware getest",
+      d.write_capable && !d.simulated ? " · kan regelen" : " · alleen meten",
+      expert ? ` · driver ${d.driver_id} · ${d.connection_types.join(", ")}` : ""),
+    d.notes ? h("div", { class: "small muted" }, d.notes) : null),
+  h("button", { class: "btn primary", onclick: () => { wiz.driver = d; d.driver_id === "homewizard.p1" ? homewizardFlow(body, setSteps) : stepConnection(); } }, "Kiezen"));
   const stepDriver = () => {
     setSteps(1);
-    const options = drivers.filter((d) => d.categories.includes(wiz.category) && d.available_in_mode);
-    body.replaceChildren(h("h3", {}, `${CAT_LABEL[wiz.category]}: fabrikant / koppeling`), h("div", { class: "grid" }, options.map((d) =>
-      h("div", { class: "card flat row spread" }, h("div", {}, h("b", {}, d.name), h("div", { class: "muted small" },
-        `${d.vendor} · ${d.connection_types.join(", ")}`, d.simulated ? " · simulatie (Demo)" : d.verified ? " · getest op hardware" : " · nog niet op hardware getest"),
-        h("div", { class: "small" }, d.capabilities.map((c) => c.label).join(", "))),
-      h("button", { class: "btn primary", onclick: () => { wiz.driver = d; d.driver_id === "homewizard.p1" ? homewizardFlow(body, setSteps) : stepConnection(); } }, "Kiezen")))),
-    h("button", { class: "btn", onclick: stepCategory }, "← Terug"));
+    const options = drivers.filter((d) => d.categories.includes(wiz.category) && d.available_in_mode).map((d) => ({ ...d, generic: d.driver_id.startsWith("generic.") }));
+    const brands = options.filter((d) => !d.generic), generic = options.filter((d) => d.generic);
+    body.replaceChildren(h("h3", {}, `${CAT_LABEL[wiz.category]}: merk en model`),
+      brands.length ? h("div", { class: "grid" }, brands.map(card)) : h("p", { class: "muted" }, "Voor dit soort apparaat is nog geen merkspecifieke koppeling beschikbaar."),
+      generic.length ? h("details", { class: "card flat", open: brands.length ? null : true }, h("summary", {}, h("b", {}, "Mijn apparaat staat er niet tussen")),
+        h("p", { class: "small" }, "Veel apparaten hebben een lokale aansluiting (Modbus, een web-API of MQTT). Daarmee kunt u waarden uitlezen als u in de handleiding van het apparaat de registers of velden opzoekt. Het EMS regelt zo'n apparaat niet: daarvoor is een koppeling nodig die op de officiële documentatie is gebouwd."),
+        h("div", { class: "grid" }, generic.map(card))) : null,
+      h("button", { class: "btn", onclick: stepCategory }, "← Terug"));
   };
   const stepConnection = () => {
     setSteps(2);
     const d = wiz.driver;
-    const name = h("input", { value: `${d.name}` });
-    const phase = h("select", {}, ["3P", "L1", "L2", "L3"].map((p) => h("option", { value: p }, p === "3P" ? "3-fase" : p)));
-    const inputs = {};
-    const fields = Object.entries(d.connection_schema || {}).filter(([, s]) => !s.readonly).map(([k, s]) => {
-      let input;
-      if (s.enum) input = h("select", {}, s.enum.map((v) => h("option", { value: v }, v)));
-      else if (s.type === "boolean") input = h("input", { type: "checkbox", checked: s.default ? true : null });
-      else if (s.type === "array") input = h("textarea", { rows: 7, class: "mono", spellcheck: "false",
-        placeholder: s.example ? JSON.stringify(s.example, null, 1) : "[]" });
-      else input = h("input", { type: s.type === "integer" ? "number" : "text", value: s.default ?? "" });
-      if (s.default !== undefined && s.enum) input.value = s.default;
-      inputs[k] = [input, s];
-      return h("label", { class: s.type === "boolean" ? "f check" : "f" }, s.label_nl || k, input,
-        s.help_nl ? h("span", { class: "muted small" }, s.help_nl) : null);
-    });
+    const form = deviceForm({ schema: schemaOf[wiz.category], driver: d, caps: d.capabilities.map((c) => c.id) });
     const result = h("div", {});
-    const collect = () => {
-      const conn = {};
-      for (const [k, [input, s]] of Object.entries(inputs)) {
-        if (s.type === "boolean") conn[k] = input.checked;
-        else if (s.type === "array") {
-          if (!input.value.trim()) continue;
-          try { conn[k] = JSON.parse(input.value); } catch (e) { throw new Error(`${s.label_nl || k}: ongeldige JSON (${e.message})`); }
-        }
-        else if (input.value !== "") conn[k] = s.type === "integer" ? Number(input.value) : input.value;
-      }
-      return { name: name.value, category: wiz.category, driver: d.driver_id, phase: phase.value, connection: conn };
-    };
+    const collect = () => ({ ...form.collect(), category: wiz.category, driver: d.driver_id });
     const test = h("button", { class: "btn primary", onclick: async () => {
       setSteps(3); test.disabled = true; result.replaceChildren(h("div", { class: "muted" }, "Verbinding testen…"));
       try {
         const r = await api("/devices/test", { method: "POST", body: collect() });
         result.replaceChildren(h("h3", {}, r.reachable ? "Testresultaat" : "Niet bereikbaar"), checksList(r),
+          !r.reachable ? h("p", { class: "small muted" }, "U kunt het apparaat opslaan als niet-verbonden; het EMS regelt het pas na een geslaagde test en inbedrijfstelling.") : null,
           h("div", { class: "row" }, h("button", { class: "btn primary", onclick: () => guard(async () => {
             const dev = await api("/devices", { method: "POST", body: collect() });
             location.hash = `#/devices/${dev.id}`;
@@ -106,12 +156,29 @@ async function addWizard(root, cats, preset) {
       } catch (e) { result.replaceChildren(h("div", { class: "notice bad inline" }, e.message)); }
       test.disabled = false;
     } }, "Verbinding testen");
-    body.replaceChildren(h("h3", {}, `${d.name}: verbinding`), h("div", { class: "form" }, h("label", { class: "f" }, "Naam", name),
-      h("label", { class: "f" }, "Fase", phase), ...fields), h("div", { class: "row", style: { marginTop: "14px" } },
+    body.replaceChildren(h("h3", {}, `${d.name}: gegevens`), form.el, h("div", { class: "row", style: { marginTop: "14px" } },
       h("button", { class: "btn", onclick: stepDriver }, "← Terug"), test), result);
   };
   if (preset === "homewizard") { wiz.category = "smart_meter"; wiz.driver = drivers.find((d) => d.driver_id === "homewizard.p1"); homewizardFlow(body, setSteps); }
   else stepCategory();
+}
+
+/** Edit an existing device: same form; the device id (and its history) stays the same. */
+async function editDevice(container, dev, onDone) {
+  const [drivers, schema] = await Promise.all([api("/drivers"), api(`/device-schemas/${dev.category}`)]);
+  const driver = drivers.find((d) => d.driver_id === dev.driver) || { name: dev.driver, connection_schema: {} };
+  const form = deviceForm({ schema, driver, caps: (dev.capabilities || []).map((c) => c.id), existing: dev });
+  const box = h("div", { class: "card" }, h("h3", {}, "Apparaat bewerken"),
+    h("p", { class: "small muted" }, "Naam, adres, fase en apparaatgegevens wijzigen. De historie blijft bewaard (zelfde apparaat-ID)."),
+    form.el, h("div", { class: "row", style: { marginTop: "12px" } },
+      h("button", { class: "btn primary", onclick: () => guard(async () => {
+        const v = form.collect();
+        await api(`/devices/${dev.id}`, { method: "PUT", body: { name: v.name, phase: v.phase, connection: v.connection, params: v.params } });
+        box.remove(); onDone();
+      }, "Opgeslagen") }, "Opslaan"),
+      h("button", { class: "btn", onclick: () => box.remove() }, "Annuleren")));
+  container.prepend(box);
+  box.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
 }
 
 // ------------------------------------------------------------ HomeWizard
@@ -187,6 +254,9 @@ async function detail(root, id) {
   const box = h("div", {});
   root.append(box);
   let dev, com;
+  const ML = await api("/metric-labels");
+  const label = (k) => (state.level === "expert" ? k : (ML[k]?.label || k));
+  const fmtVal = (k, v) => typeof v === "number" ? `${num(v, Math.abs(v) >= 100 ? 0 : 2)}${ML[k]?.unit ? ` ${ML[k].unit}` : ""}` : v === true ? "ja" : v === false ? "nee" : String(v);
   // Created once: live updates repaint the page and must not wipe what the installer typed.
   const typed = h("input", { "aria-label": "typ de apparaatnaam", autocomplete: "off" });
   const load = async () => {
@@ -220,13 +290,14 @@ async function detail(root, id) {
         h("div", { class: "muted small" }, `Meterstanden: afname ${num(v.grid_import_energy_kwh, 3)} kWh · teruglevering ${num(v.grid_export_energy_kwh, 3)} kWh`,
           dev.is_primary_grid_meter && gm?.age_s !== null && gm?.age_s !== undefined ? ` · laatste update ${num(gm.age_s, 1)} seconden geleden` : "")) :
         h("div", { class: "card" }, h("h3", {}, "Actuele waarden"), Object.keys(v).length ?
-          h("table", {}, h("tbody", {}, Object.entries(v).map(([k, val]) => h("tr", {}, h("td", { class: "muted" }, k), h("td", {}, typeof val === "number" ? num(val, 2) : String(val))))))
+          h("table", {}, h("tbody", {}, Object.entries(v).map(([k, val]) => h("tr", {}, h("th", { scope: "row", class: "muted" }, label(k)), h("td", {}, fmtVal(k, val))))))
           : h("div", { class: "muted" }, "Geen data")),
       commissioningCard(),
-      h("div", { class: "card" }, h("h3", {}, "Gezondheid en diagnose"),
+      h("div", { class: "card advanced-only" }, h("h3", {}, "Gezondheid en diagnose"),
         h("table", {}, h("tbody", {}, Object.entries({ ...(dev.health || {}), ...(dev.diagnostics || {}) })
           .filter(([, val]) => val !== null && typeof val !== "object").map(([k, val]) => h("tr", {}, h("td", { class: "muted" }, k), h("td", {}, String(val))))))),
       can("installer") ? h("div", { class: "card" }, h("h3", {}, "Beheer"), h("div", { class: "row" },
+        h("button", { class: "btn", onclick: () => editDevice(box, dev, load) }, "Bewerken"),
         h("button", { class: "btn", onclick: async () => {
           const r = await guard(() => api(`/devices/${id}/test`, { method: "POST" }));
           toast(r.reachable ? "Test geslaagd" : "Niet bereikbaar", !r.reachable); load();
@@ -256,7 +327,7 @@ async function detail(root, id) {
         h("span", { "aria-hidden": "true" }, st.done ? "✓ " : "○ "), st.label, st.detail ? h("span", { class: "muted" }, ` — ${st.detail}`) : null))),
       dev ? wouldVsDoes(dev) : null,
       com.control_capabilities.length ? h("details", {}, h("summary", { class: "small" }, "Actuele meetwaarden"), h("div", { class: "small" },
-        Object.entries(actual).map(([k, v]) => h("div", {}, `${k}: ${typeof v === "number" ? num(v, 1) : v}`)))) : null,
+        Object.entries(actual).map(([k, v]) => h("div", {}, `${label(k)}: ${fmtVal(k, v)}`)))) : null,
       com.last_test ? h("details", {}, h("summary", { class: "small" }, `Laatste verbindingstest: ${com.last_test.reachable ? "geslaagd" : "mislukt"}`), checksList(com.last_test)) : null,
       can("installer") ? h("div", { class: "grid", style: { marginTop: "10px" } },
         ["shadow", "limited", "full"].includes(com.level) && com.control_capabilities.length

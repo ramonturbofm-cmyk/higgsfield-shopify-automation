@@ -1,11 +1,13 @@
 ; Energy Manager — Windows installer (Inno Setup 6).
 ; Contents: the Windows app (Tauri) and the built-in EMS server (all-in-one, no Raspberry Pi
 ; needed). The app starts the server in the background (EnergyManagerService.exe).
-; Build (from energy-manager\):  iscc /DAppVersion=0.2.0 windows\installer.iss
+; Build (from energy-manager\):  iscc /DAppVersion=<versie> windows\installer.iss  (versie uit ems.__version__)
+; Downgrade protection: installing an older version over a newer one is refused (the newer
+; database cannot be read by an older program). Override only with /ALLOWDOWNGRADE=1.
 ; Expects: dist\app\Energy Manager.exe  and  dist\EnergyManagerServer\ (PyInstaller one-folder)
 
 #ifndef AppVersion
-  #define AppVersion "0.3.0"
+  #define AppVersion "0.4.0"
 #endif
 
 [Setup]
@@ -65,6 +67,43 @@ Filename: "{app}\Energy Manager.exe"; Description: "Energy Manager nu starten"; 
 Filename: "{app}\server\EnergyManagerService.exe"; Parameters: "--stop"; RunOnceId: "StopEMS"; Flags: runhidden waituntilterminated; Components: server
 
 [Code]
+const
+  UninstKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{6F0D2B7C-3E7A-4C55-9C7B-4D2E8E5A1F10}_is1';
+
+// Compare dotted versions numerically: -1 a<b, 0 equal, 1 a>b.
+function CompareVersions(A, B: String): Integer;
+var
+  PA, PB, NA, NB: Integer;
+begin
+  Result := 0;
+  while (Result = 0) and ((A <> '') or (B <> '')) do
+  begin
+    PA := Pos('.', A); PB := Pos('.', B);
+    if PA = 0 then begin NA := StrToIntDef(A, 0); A := ''; end
+    else begin NA := StrToIntDef(Copy(A, 1, PA - 1), 0); A := Copy(A, PA + 1, Length(A)); end;
+    if PB = 0 then begin NB := StrToIntDef(B, 0); B := ''; end
+    else begin NB := StrToIntDef(Copy(B, 1, PB - 1), 0); B := Copy(B, PB + 1, Length(B)); end;
+    if NA < NB then Result := -1 else if NA > NB then Result := 1;
+  end;
+end;
+
+function InitializeSetup(): Boolean;
+var
+  Installed: String;
+begin
+  Result := True;
+  if RegQueryStringValue(HKCU, UninstKey, 'DisplayVersion', Installed) and
+     (CompareVersions(Installed, '{#AppVersion}') > 0) and
+     (ExpandConstant('{param:ALLOWDOWNGRADE|0}') <> '1') then
+  begin
+    Log('Downgrade blocked: installed ' + Installed + ', this installer {#AppVersion}');
+    SuppressibleMsgBox('Er is al een nieuwere versie van Energy Manager geïnstalleerd (' + Installed +
+      '). Deze installer bevat versie {#AppVersion}. Een oudere versie kan de gegevens van de nieuwere versie niet ' +
+      'veilig gebruiken; de installatie wordt afgebroken.', mbError, MB_OK, IDOK);
+    Result := False;
+  end;
+end;
+
 // Stop a running built-in server before files are replaced (update), so it can release
 // devices and Windows does not keep the files locked.
 function PrepareToInstall(var NeedsRestart: Boolean): String;

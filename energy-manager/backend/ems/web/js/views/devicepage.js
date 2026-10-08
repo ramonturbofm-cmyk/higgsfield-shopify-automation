@@ -34,11 +34,12 @@ export async function devicePage(root, { title, categories, values, history, ext
     paint(state.live);
     refresh();
     if (history) {
-      const rows = await api(`/devices/${d.id}/history?hours=24`);
+      const rows = await api(`/devices/${d.id}/history?hours=24&points=288`);   // 5-min buckets, min/max kept
       const ts = rows.map((r) => new Date(r.ts * 1000).toISOString());
       histBox.replaceChildren(h("h3", { style: { marginTop: "16px" } }, history.title),
         lineChart({ times: ts, unit: history.unit, decimals: history.decimals ?? 1, height: 180, zero: history.zero,
-          series: history.series.map((s) => ({ ...s, values: rows.map((r) => s.get(r.values || {})) })) }));
+          series: history.series.map((s) => ({ ...s, values: rows.map((r) => s.get(r.values || {})),
+            min: rows.map((r) => s.get(r.min || {})), max: rows.map((r) => s.get(r.max || {})) })) }));
     }
   }
   if (extra) root.append(await extra());
