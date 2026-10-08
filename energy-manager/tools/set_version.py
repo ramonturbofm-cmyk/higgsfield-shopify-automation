@@ -21,43 +21,48 @@ SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 
 
 def source_version() -> str:
-    return re.search(r'__version__ = "([^"]+)"', INIT.read_text()).group(1)
+    return re.search(r'__version__ = "([^"]+)"', INIT.read_text(encoding="utf-8")).group(1)
+
+
+def _read(p: Path) -> str:
+    return p.read_text(encoding="utf-8")
 
 
 def found_versions() -> dict[str, str]:
     out = {"backend/ems/__init__.py": source_version()}
-    out["pyproject.toml"] = re.search(r'(?m)^version = "([^"]+)"', (ROOT / "pyproject.toml").read_text()).group(1)
+    out["pyproject.toml"] = re.search(r'(?m)^version = "([^"]+)"', (ROOT / "pyproject.toml").read_text(encoding="utf-8")).group(1)
     app = ROOT / "windows-app"
-    out["windows-app/package.json"] = json.loads((app / "package.json").read_text())["version"]
-    lock = json.loads((app / "package-lock.json").read_text())
+    out["windows-app/package.json"] = json.loads((app / "package.json").read_text(encoding="utf-8"))["version"]
+    lock = json.loads((app / "package-lock.json").read_text(encoding="utf-8"))
     out["windows-app/package-lock.json"] = lock["version"]
     out["windows-app/package-lock.json (root package)"] = lock["packages"][""]["version"]
-    out["src-tauri/tauri.conf.json"] = json.loads((app / "src-tauri" / "tauri.conf.json").read_text())["version"]
-    out["src-tauri/Cargo.toml"] = re.search(r'(?m)^version = "([^"]+)"', (app / "src-tauri" / "Cargo.toml").read_text()).group(1)
+    out["src-tauri/tauri.conf.json"] = json.loads((app / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8"))["version"]
+    out["src-tauri/Cargo.toml"] = re.search(r'(?m)^version = "([^"]+)"', _read(app / "src-tauri" / "Cargo.toml")).group(1)
     lockfile = app / "src-tauri" / "Cargo.lock"
     if lockfile.exists():
-        out["src-tauri/Cargo.lock"] = re.search(r'name = "energy-manager"\nversion = "([^"]+)"', lockfile.read_text()).group(1)
-    out["windows/installer.iss"] = re.search(r'#define AppVersion "([^"]+)"', (ROOT / "windows" / "installer.iss").read_text()).group(1)
+        out["src-tauri/Cargo.lock"] = re.search(r'name = "energy-manager"\nversion = "([^"]+)"', _read(lockfile)).group(1)
+    out["windows/installer.iss"] = re.search(r'#define AppVersion "([^"]+)"', _read(ROOT / "windows" / "installer.iss")).group(1)
     return out
 
 
 def set_version(v: str) -> None:
     if not SEMVER.match(v):
         raise SystemExit(f"geen geldige versie: {v}")
-    sub = lambda p, pat, rep: p.write_text(re.sub(pat, rep, p.read_text(), count=1))  # noqa: E731
+    def sub(p: Path, pat: str, rep: str) -> None:
+        p.write_text(re.sub(pat, rep, p.read_text(encoding="utf-8"), count=1), encoding="utf-8")
     sub(INIT, r'__version__ = "[^"]+"', f'__version__ = "{v}"')
     sub(ROOT / "pyproject.toml", r'(?m)^version = "[^"]+"', f'version = "{v}"')
     app = ROOT / "windows-app"
     for name in ("package.json", "src-tauri/tauri.conf.json"):
         p = app / name
-        d = json.loads(p.read_text())
+        d = json.loads(p.read_text(encoding="utf-8"))
         d["version"] = v
-        p.write_text(json.dumps(d, indent=2, ensure_ascii=False) + "\n")
+        p.write_text(json.dumps(d, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     p = app / "package-lock.json"
-    d = json.loads(p.read_text())
+    d = json.loads(p.read_text(encoding="utf-8"))
     d["version"] = v
     d["packages"][""]["version"] = v
-    p.write_text(json.dumps(d, indent=2, ensure_ascii=False) + "\n")
+    p.write_text(json.dumps(d, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     sub(app / "src-tauri" / "Cargo.toml", r'(?m)^version = "[^"]+"', f'version = "{v}"')
     lockfile = app / "src-tauri" / "Cargo.lock"
     if lockfile.exists():

@@ -44,8 +44,9 @@ with sync_playwright() as p:
     for w, hgt in ((1366, 768), (1920, 1080)):
         ctx = b.new_context(viewport={"width": w, "height": hgt})
         pg = ctx.new_page()
-        pg.on("pageerror", lambda e: errors.append(f"{w}x{hgt} pageerror: {e}"))
-        pg.on("console", lambda m: m.type == "error" and errors.append(f"{w}x{hgt} console: {m.text}"))
+        tag = f"{w}x{hgt}"
+        pg.on("pageerror", lambda e, tag=tag: errors.append(f"{tag} pageerror: {e}"))
+        pg.on("console", lambda m, tag=tag: m.type == "error" and errors.append(f"{tag} console: {m.text}"))
         login(pg)
         for level in ("simple", "expert"):
             pg.evaluate(f"localStorage.setItem('ems.level', '{level}')")
@@ -92,7 +93,8 @@ with sync_playwright() as p:
     reached = None
     for _ in range(40):
         pg.keyboard.press("Tab")
-        el = pg.evaluate("(() => { const a = document.activeElement; return a ? (a.getAttribute('href') || a.tagName) : null })()")
+        el = pg.evaluate("(() => { const a = document.activeElement; "
+                         "return a ? (a.getAttribute('href') || a.tagName) : null })()")
         if el == "#/planning":
             reached = el
             break

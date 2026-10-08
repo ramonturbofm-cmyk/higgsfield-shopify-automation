@@ -97,7 +97,7 @@ begin
      (ExpandConstant('{param:ALLOWDOWNGRADE|0}') <> '1') then
   begin
     Log('Downgrade blocked: installed ' + Installed + ', this installer {#AppVersion}');
-    SuppressibleMsgBox('Er is al een nieuwere versie van Energy Manager geïnstalleerd (' + Installed +
+    SuppressibleMsgBox('Er is al een nieuwere versie van Energy Manager geinstalleerd (' + Installed +
       '). Deze installer bevat versie {#AppVersion}. Een oudere versie kan de gegevens van de nieuwere versie niet ' +
       'veilig gebruiken; de installatie wordt afgebroken.', mbError, MB_OK, IDOK);
     Result := False;

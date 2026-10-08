@@ -321,6 +321,6 @@ async def test_p0_06_cookie_session_csrf_rotation_logout(tmp_path, monkeypatch):
 def test_p0_06_frontend_keeps_no_tokens():
     from pathlib import Path
     web = Path(__file__).resolve().parents[1] / "backend" / "ems" / "web" / "js"
-    src = "\n".join(p.read_text() for p in web.rglob("*.js"))
+    src = "\n".join(p.read_text(encoding="utf-8") for p in web.rglob("*.js"))
     assert "localStorage.setItem(\"ems.token\"" not in src and "ems.token" not in src
     assert "?token=" not in src and "Authorization" not in src

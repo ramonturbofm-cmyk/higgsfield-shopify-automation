@@ -31,5 +31,5 @@ def test_older_program_refuses_newer_database(tmp_path):
 
 
 def test_installer_blocks_downgrade():
-    iss = (ROOT / "windows" / "installer.iss").read_text()
+    iss = (ROOT / "windows" / "installer.iss").read_text(encoding="utf-8")
     assert "function InitializeSetup" in iss and "ALLOWDOWNGRADE" in iss and "DisplayVersion" in iss
