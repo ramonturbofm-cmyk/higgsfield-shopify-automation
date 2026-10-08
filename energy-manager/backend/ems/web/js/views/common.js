@@ -1,5 +1,5 @@
 // View helpers shared across pages.
-import { api, can, eur, guard, h, num, power, time } from "../lib.js";
+import { api, can, eur, guard, h, num, time } from "../lib.js";
 
 export const kpi = (label, value, sub) => h("div", { class: "card kpi" }, h("div", { class: "l" }, label),
   h("div", { class: "v" }, value), sub ? h("div", { class: "s" }, sub) : null);
@@ -106,20 +106,6 @@ export function overridesBox(list, deviceId) {
   if (!mine.length) return null;
   return h("div", { class: "grid" }, mine.map((o) => h("div", { class: "pill warn" },
     `Handmatig: ${o.description} ${o.expires ? `tot ${time(o.expires)}` : "(tot handmatig beëindigd)"} — ${o.user}`)));
-}
-
-export function slotSummary(slot) {
-  if (!slot) return [];
-  const parts = [];
-  if (Math.abs(slot.battery_w) > 100) parts.push(`Accu ${slot.battery_w > 0 ? "laden" : "ontladen"} ${power(Math.abs(slot.battery_w))}`);
-  if (slot.curtail_w > 100) parts.push(`PV begrensd ${power(slot.curtail_w)}`);
-  if (slot.hp_w !== null && slot.hp_reference_w !== null) {
-    const m = slot.hp_w > slot.hp_reference_w * 1.3 + 200 ? "boost" : slot.hp_reference_w > 300 && slot.hp_w < slot.hp_reference_w * 0.5 ? "eco" : "normaal";
-    parts.push(`Warmtepomp ${m}`);
-  }
-  for (const [id, w] of Object.entries(slot.ev_w || {})) if (w > 100) parts.push(`EV laden ${power(w)}`);
-  parts.push(slot.grid_w < -50 ? `Net ${power(-slot.grid_w)} export` : slot.grid_w > 50 ? `Net ${power(slot.grid_w)} import` : "Net 0 W");
-  return parts;
 }
 
 export const fmtPrice = (v) => v === null || v === undefined ? "—" : `€ ${num(v, 3)}/kWh`;

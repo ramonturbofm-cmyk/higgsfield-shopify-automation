@@ -20,8 +20,13 @@ function resultTable(res) {
 
 export async function render(root) {
   const s = await api("/settings");
-  const days = h("select", {}, [1, 7, 14, 30, 90, 365].map((d) => h("option", { value: d }, `${d} dag${d > 1 ? "en" : ""}`)));
+  const days = h("select", { "aria-label": "periode" }, [...[1, 7, 14, 30, 90, 365].map((d) => h("option", { value: d }, `laatste ${d} dag${d > 1 ? "en" : ""}`)),
+    h("option", { value: "custom" }, "eigen periode…")]);
   days.value = "7";
+  const from = h("input", { type: "date", "aria-label": "begindatum" });
+  const to = h("input", { type: "date", "aria-label": "einddatum" });
+  const custom = h("span", { class: "row", hidden: true }, h("label", { class: "f" }, "Van", from), h("label", { class: "f" }, "Tot en met", to));
+  days.addEventListener("change", () => { custom.hidden = days.value !== "custom"; });
   const fld = (label, sec, key, val, step = "0.01") => { const i = h("input", { type: "number", step, value: val }); i.dataset.sec = sec; i.dataset.key = key; i.dataset.orig = val; return h("label", { class: "f" }, label, i); };
   const fields = h("div", { class: "form" },
     fld("Minimaal prijsverschil (€/kWh)", "battery", "min_arbitrage_spread_eur", s.battery.min_arbitrage_spread_eur),
@@ -34,18 +39,23 @@ export async function render(root) {
   const run = h("button", { class: "btn primary", disabled: !can("operator"), onclick: () => guard(async () => {
     const overrides = {};
     fields.querySelectorAll("input").forEach((i) => { if (i.value !== i.dataset.orig) (overrides[i.dataset.sec] ||= {})[i.dataset.key] = Number(i.value); });
-    const { job_id } = await api("/backtest", { method: "POST", body: { days: Number(days.value), overrides } });
+    const period = days.value === "custom" ? { start: from.value, end: to.value } : { days: Number(days.value) };
+    if (days.value === "custom" && (!from.value || !to.value)) throw new Error("Kies een begin- en einddatum");
+    const { job_id } = await api("/backtest", { method: "POST", body: { ...period, overrides } });
     const j = await waitJob(job_id, out);
     if (j.status !== "done") { out.replaceChildren(h("div", { class: "notice bad inline" }, j.error)); return; }
     const r = j.result;
     out.replaceChildren(h("div", { class: `notice ${r.difference_eur < 0 ? "good" : "info"} inline` },
-      `Verschil: ${eur(r.difference_eur)} over ${r.days} dagen (${r.difference_eur < 0 ? "goedkoper" : "duurder of gelijk"}). Zonder EMS: ${eur(r.without_ems_eur)}.`),
-    resultTable(r), h("p", { class: "muted small" }, `Bron: ${r.source}. Methode: ${r.method}.`));
+      `Verschil: ${eur(r.difference_eur)} over ${r.days} dagen (${r.start} t/m ${r.end}; ${r.difference_eur < 0 ? "goedkoper" : "duurder of gelijk"}). Zonder EMS: ${eur(r.without_ems_eur)}.`),
+    r.coverage.coverage_pct < 90 ? h("div", { class: "notice warn inline" }, `Datadekking ${num(r.coverage.coverage_pct, 0)}%: ${r.coverage.days_used} van ${r.coverage.days_requested} dagen bruikbaar.`) : null,
+    resultTable(r),
+    h("p", { class: "muted small" }, `Bron: ${r.source}. Methode: ${r.method}. ${r.baseline}. Datadekking ${num(r.coverage.coverage_pct, 1)}% (${r.coverage.rule}). `,
+      `Vingerafdruk invoer: ${r.fingerprint} — dezelfde periode en instellingen geven exact dezelfde uitkomst.`));
   }) }, "Simuleren");
   root.append(h("h1", {}, "Backtest & Auto-Tune"),
     h("div", { class: "card" }, h("h3", {}, "Instelling testen tegen historische gegevens"),
       h("p", { class: "muted small" }, "Wijzig een of meer waarden en vergelijk met de huidige instelling. Er wordt niets aangepast."),
-      h("div", { class: "row" }, h("label", { class: "f" }, "Periode", days)), fields, h("div", { class: "row", style: { marginTop: "12px" } }, run), out),
+      h("div", { class: "row" }, h("label", { class: "f" }, "Periode", days), custom), fields, h("div", { class: "row", style: { marginTop: "12px" } }, run), out),
     h("div", { class: "card" }, h("div", { class: "row spread" }, h("h3", {}, "Auto-Tune"),
       h("button", { class: "btn", disabled: !can("operator"), onclick: () => guard(async () => {
         const { job_id } = await api("/autotune?days=14", { method: "POST" });

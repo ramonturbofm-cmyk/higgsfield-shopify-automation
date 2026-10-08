@@ -21,6 +21,7 @@ from ems.control.self_consumption import SelfConsumptionController
 from ems.control.zero_export import ZeroExportRegulator
 from ems.core.models import Capability, Command, CommandAction, Decision, DeviceCategory, Metric
 from ems.core.snapshot import SiteSnapshot
+from ems.optimizer.explain import hp_action
 from ems.optimizer.service import OptimizerService, export_limit_w, profile_settings
 
 HP_MIN_DWELL = timedelta(minutes=20)
@@ -216,12 +217,11 @@ class OptimizingController(Controller):
             ref = slot.get("hp_reference_w") or 0.0
             planned = slot["hp_w"]
             target_c = slot.get("indoor_c")
-            if planned > ref * 1.3 + 200:
-                mode, why = "boost", "goedkope stroom: woning wordt binnen de comfortgrenzen voorverwarmd"
-            elif ref > 300 and planned < ref * 0.5:
-                mode, why = "eco", "dure stroom: verwarming tijdelijk teruggeschaald (binnen minimumtemperatuur)"
-            else:
-                mode, why = "normal", "normale verwarming"
+            # The planner's explicit action for this slot (same rule as the plan shown in the UI).
+            mode = slot.get("hp_action") or hp_action(planned, ref)[0]
+            why = {"boost": "goedkope stroom: woning wordt binnen de comfortgrenzen voorverwarmd",
+                   "eco": "dure stroom: verwarming tijdelijk teruggeschaald (binnen minimumtemperatuur)"}.get(
+                       mode, "normale verwarming")
             prev = self._hp_mode.get(st.device_id)
             if prev and prev[0] != mode and snap.timestamp - prev[1] < HP_MIN_DWELL:
                 mode, why = prev[0], f"modus vastgehouden (minimaal {HP_MIN_DWELL.seconds // 60} min tussen wisselingen)"

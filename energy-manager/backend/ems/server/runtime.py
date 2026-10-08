@@ -48,6 +48,7 @@ from ems.forecasting.weather import DemoWeatherProvider, OpenMeteoProvider
 from ems.gridmeter.meter import GridMeterStatus
 from ems.nodes.power import windows_sleep_settings
 from ems.nodes.service import NodeService
+from ems.optimizer.explain import aggregate
 from ems.optimizer.service import OptimizerService
 from ems.prices.providers import DemoProvider, EnergyZeroProvider, EntsoeProvider, StaticProvider
 from ems.prices.service import PriceService
@@ -699,10 +700,22 @@ class EMSRuntime:
         score = round(100 * sum({"ok": 1, "warn": 0.5, "error": 0}[c["state"]] for c in checks) / max(1, len(checks)))
         return {"score": score, "checks": checks, "status": self.ems_status()}
 
-    def plan_view(self, hours: float = 36) -> dict:
+    def plan_view(self, hours: float | None = None, resolution: int | None = None) -> dict:
+        """Plan for the UI. ``hours`` defaults to the configured horizon; ``resolution`` (minutes)
+        aggregates on the server with correct energy sums and time-weighted averages."""
         plan = self.optimizer.plan
         now = self.clock.now()
-        data = {"optimizer": self.optimizer.status(), "slots": self.optimizer.upcoming(now, hours),
+        horizon = float(hours or self.config.optimizer.horizon_hours)
+        slots = self.optimizer.upcoming(now, horizon)
+        step = int(round(slots[0].get("duration_min") or 15)) if slots else 15   # actual optimizer interval
+        if resolution and resolution > step:
+            slots = aggregate(slots, resolution, self.config.site.timezone)
+        known = self.prices.last_known()
+        data = {"optimizer": self.optimizer.status(), "run_id": self.optimizer.status().get("run_id"),
+                "slots": slots, "horizon_hours": horizon, "configured_horizon_hours": self.config.optimizer.horizon_hours,
+                "step_minutes": step, "resolution_minutes": max(step, resolution or step),
+                "planned_until": slots[-1]["end"] if slots else None,
+                "prices_known_until": None if known is None else known.isoformat(),
                 "expected_cost": None, "baseline_cost": None, "expected_benefit": None, "inputs": {}}
         if plan is not None:
             data.update({"expected_cost": plan.expected_cost, "baseline_cost": plan.baseline_cost,

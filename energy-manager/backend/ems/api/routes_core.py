@@ -405,9 +405,12 @@ async def get_forecast(hours: float = Query(36, ge=1, le=72), _: Principal = Dep
 
 # --------------------------------------------------------------- optimizer
 @router.get("/optimizer/plan", tags=["optimizer"])
-async def get_plan(hours: float = Query(36, ge=1, le=72), _: Principal = Depends(viewer),
-                   rt: EMSRuntime = Depends(get_runtime)) -> dict:
-    return rt.plan_view(hours)
+async def get_plan(hours: float | None = Query(None, ge=1, le=72),
+                   resolution: int | None = Query(None, description="5, 15, 30 of 60 minuten"),
+                   _: Principal = Depends(viewer), rt: EMSRuntime = Depends(get_runtime)) -> dict:
+    if resolution is not None and resolution not in (5, 15, 30, 60):
+        raise HTTPException(422, "resolutie moet 5, 15, 30 of 60 minuten zijn")
+    return rt.plan_view(hours, resolution)
 
 
 @router.post("/optimizer/run", tags=["optimizer"])
@@ -416,7 +419,7 @@ async def run_optimizer(p: Principal = Depends(operator), rt: EMSRuntime = Depen
     if snap is None:
         raise HTTPException(409, "nog geen meetgegevens")
     await rt.optimizer.run(snap, rt.now(), f"handmatig door {p.username}")
-    return rt.plan_view(36)
+    return rt.plan_view()
 
 
 # ---------------------------------------------------------------- profiles

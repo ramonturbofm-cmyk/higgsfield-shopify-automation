@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
@@ -152,6 +152,8 @@ async def list_jobs(kind: str | None = None, _: Principal = Depends(viewer), rt:
 
 class BacktestIn(BaseModel):
     days: int = 7
+    start: date | None = None            # custom period (local dates, inclusive); overrides ``days``
+    end: date | None = None
     overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
@@ -161,11 +163,14 @@ async def start_backtest(body: BacktestIn, _: Principal = Depends(operator), rt:
         apply_overrides(rt.config, body.overrides)
     except Exception as exc:
         raise HTTPException(422, f"ongeldige instellingen: {exc}") from exc
-    if body.days not in (1, 7, 14, 30, 90, 365):
+    if body.start is None and body.days not in (1, 7, 14, 30, 90, 365):
         raise HTTPException(422, "periode moet 1, 7, 14, 30, 90 of 365 dagen zijn")
+    if body.start is not None and (body.end is None or body.end < body.start or (body.end - body.start).days > 365):
+        raise HTTPException(422, "ongeldige periode: einde ná begin, maximaal 366 dagen")
     cfg, db, mode, now = rt.config, rt.db, rt.config.runtime.mode, rt.now()
-    job_id = await _job(rt, "backtest", body.model_dump(),
-                        lambda progress: run_backtest(cfg, db, mode, body.days, body.overrides, now, progress))
+    job_id = await _job(rt, "backtest", body.model_dump(mode="json"),
+                        lambda progress: run_backtest(cfg, db, mode, body.days, body.overrides, now, progress,
+                                                      body.start, body.end))
     return {"job_id": job_id}
 
 

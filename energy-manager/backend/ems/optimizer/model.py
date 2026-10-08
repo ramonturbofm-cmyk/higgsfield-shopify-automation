@@ -23,11 +23,13 @@ import logging
 import statistics
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import numpy as np
 from scipy.optimize import Bounds, LinearConstraint, milp
 from scipy.sparse import coo_matrix
+
+from ems.optimizer.explain import hp_action, slot_reasons
 
 log = logging.getLogger(__name__)
 
@@ -338,8 +340,12 @@ def solve(inp: OptimizerInput) -> Plan:
     for t in range(T):
         g_i, g_e = x[gi[t]], x[ge[t]]
         energy_cost += (inp.import_price[t] * g_i - inp.export_price[t] * g_e) * kw
+        hp_w = round(x[hp_el[t]], 1) if hp else None
+        hp_ref = round(heat_pump_reference_w(hp, t), 1) if hp else None
+        action, action_code = hp_action(hp_w, hp_ref)
         row = {
             "start": inp.slots[t].isoformat(),
+            "end": (inp.slots[t] + timedelta(hours=dt)).isoformat(), "duration_min": round(dt * 60, 3),
             "import_price": round(inp.import_price[t], 5), "export_price": round(inp.export_price[t], 5),
             "price_estimated": bool(inp.price_estimated[t]) if inp.price_estimated else False,
             "pv_forecast_w": round(inp.pv_w[t], 1), "pv_w": round(x[pvu[t]], 1),
@@ -349,12 +355,18 @@ def solve(inp: OptimizerInput) -> Plan:
             "battery_grid_charge_w": round(x[bg[t]], 1) if b else 0.0,
             "soc_kwh": round(x[soc[t]], 3) if b else None,
             "soc_pct": round(100 * x[soc[t]] / b.capacity_kwh, 1) if b else None,
-            "hp_w": round(x[hp_el[t]], 1) if hp else None,
-            "hp_reference_w": round(heat_pump_reference_w(hp, t), 1) if hp else None,
+            # pv_forecast_w = PV that could be produced (forecast); pv_w = planned production after curtailment.
+            "hp_w": hp_w, "hp_reference_w": hp_ref, "hp_action": action, "hp_action_code": action_code,
             "indoor_c": round(x[tin[t]], 2) if hp else None,
             "ev_w": {e.device_id: round(x[p[t]], 1) + 0.0 for e, p, _, _ in ev_vars},
         }
         slots.append(row)
+    be = (lambda price: break_even_sell_price(price, b, WEAR_MULTIPLIER.get(inp.wear_mode, 1.0))) if b else None
+    for t in range(T):
+        slots[t]["reasons"] = slot_reasons(
+            slots, t, soc_min_kwh=b.min_kwh if b else None, soc_max_kwh=b.max_kwh if b else None, break_even=be,
+            max_import_w=inp.max_import_w,
+            export_limit_w=(inp.export_limit_w[t] if inp.export_limit_w else None), peak_limit_w=inp.peak_limit_w)
     wear_cost = wear * sum(x[bc[t]] + x[bd[t]] for t in range(T)) * kw / 2 if b else 0.0
     summary.update({"wear_cost_eur": round(wear_cost, 3),
                     "ev_shortfall_kwh": {e.device_id: round(x[s], 3) for e, _, _, s in ev_vars}})

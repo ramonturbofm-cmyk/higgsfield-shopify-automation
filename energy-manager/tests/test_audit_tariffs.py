@@ -171,3 +171,28 @@ def test_12_finance_baselines_reconcile_without_double_counting():
     assert f["costs"]["fixed_costs_eur"] == 1.0 and b["B3"] == f["costs"]["energy_cost_eur"]   # fixed costs apart
     assert "niet opgeteld" in f["indicators"]["note"]
     assert f == finance_summary(rows[:80], cfg, fixed_per_day=1.0, days=1.0)                    # reproducible
+
+
+# 12 (backtest part) ----------------------------------------------------------------------------
+def test_12_backtest_custom_period_reproducible_with_coverage():
+    from conftest import make_config
+
+    from ems.services.backtest import load_period, run_backtest
+
+    cfg = make_config(site={"timezone": "Europe/Amsterdam"})
+    now = datetime(2026, 11, 2, 12, tzinfo=UTC)
+    a = run_backtest(cfg, None, "demo", 7, {}, now, start=date(2026, 10, 24), end=date(2026, 10, 26))
+    b = run_backtest(cfg, None, "demo", 7, {}, now, start=date(2026, 10, 24), end=date(2026, 10, 26))
+    assert a["fingerprint"] == b["fingerprint"] and a["current"] == b["current"]       # reproducible
+    assert a["start"] == "2026-10-24" and a["end"] == "2026-10-26" and a["days"] == 3
+    assert "zelfconsumptie" in a["baseline"]
+    series, _, coverage = load_period(cfg, None, "demo", date(2026, 10, 24), date(2026, 10, 26))
+    assert [len(d.slots) for d in series] == [96, 100, 96]                               # DST day = 100 quarters
+    assert coverage["quarters_expected"] == 292 and coverage["days_requested"] == 3
+    other = run_backtest(cfg, None, "demo", 7, {"battery": {"min_arbitrage_spread_eur": 0.3}}, now,
+                         start=date(2026, 10, 24), end=date(2026, 10, 26))
+    assert other["fingerprint"] != a["fingerprint"]
+    with pytest.raises(ValueError, match="vóór vandaag"):
+        run_backtest(cfg, None, "demo", 7, {}, now, start=date(2026, 11, 1), end=date(2026, 11, 2))
+    with pytest.raises(ValueError, match="onvoldoende historie"):
+        run_backtest(cfg, None, "production", 7, {}, now, start=date(2026, 10, 1), end=date(2026, 10, 3))

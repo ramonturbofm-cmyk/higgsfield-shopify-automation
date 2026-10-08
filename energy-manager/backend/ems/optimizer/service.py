@@ -249,6 +249,7 @@ class OptimizerService:
             plan.inputs_summary["profile"] = self.config.strategy.profile.value
         self.plan, self.plan_created, self.plan_trigger = plan, now, trigger
         self.runs += 1
+        self.run_id = f"{now:%Y%m%dT%H%M%S}-{self.runs}"     # reasons and numbers all belong to this run
         log.info("optimizer run", extra={"status": plan.status, "trigger": trigger, "solve_s": plan.solve_time_s})
         return plan
 
@@ -275,12 +276,13 @@ class OptimizerService:
         if self.plan is None or not self.plan.ok:
             return []
         end = now + timedelta(hours=hours)
-        return [r for r in self.plan.slots if now - timedelta(minutes=SLOT_MIN) < datetime.fromisoformat(r["start"]) < end]
+        return [r for r in self.plan.slots if datetime.fromisoformat(r.get("end") or r["start"]) > now
+                and datetime.fromisoformat(r["start"]) < end]
 
     def status(self) -> dict:
         return {"status": None if self.plan is None else self.plan.status,
                 "created": None if self.plan_created is None else self.plan_created.isoformat(),
-                "trigger": self.plan_trigger, "runs": self.runs,
+                "trigger": self.plan_trigger, "runs": self.runs, "run_id": getattr(self, "run_id", None),
                 "message": None if self.plan is None else self.plan.message}
 
 
