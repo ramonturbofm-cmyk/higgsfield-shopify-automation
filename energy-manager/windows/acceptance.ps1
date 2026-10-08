@@ -87,7 +87,8 @@ Pass "optimizer active: $($plan.slots.Count) planned slots, status $($plan.statu
 
 # 5. WebSocket -------------------------------------------------------------------------------
 $ws = New-Object System.Net.WebSockets.ClientWebSocket
-$ws.ConnectAsync([Uri]"ws://127.0.0.1:8080/api/v1/ws?token=$script:Token", [Threading.CancellationToken]::None).Wait(15000) | Out-Null
+$ticket = (Api "/auth/ws-ticket" "POST").ticket   # single-use ticket: no session token in the URL
+$ws.ConnectAsync([Uri]"ws://127.0.0.1:8080/api/v1/ws?ticket=$ticket", [Threading.CancellationToken]::None).Wait(15000) | Out-Null
 $buf = New-Object byte[] 65536
 $got = $null
 for ($n = 0; $n -lt 20 -and -not $got; $n++) {

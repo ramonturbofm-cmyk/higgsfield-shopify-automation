@@ -11,14 +11,20 @@ for (const proto of [Element.prototype, DocumentFragment.prototype]) {
   }
 }
 
+// The session lives in an HttpOnly cookie set by the server; this script never sees or stores
+// a token. State-changing requests carry the CSRF token from the (readable) ems_csrf cookie.
 export const state = {
-  token: null, user: null, role: null, info: null, settings: null, tz: "Europe/Amsterdam",
-  live: null, level: "simple", listeners: new Set(),
+  user: null, role: null, info: null, settings: null, tz: "Europe/Amsterdam",
+  live: null, level: "simple", listeners: new Set(), online: true,
 };
 try {
-  state.token = localStorage.getItem("ems.token");
-  state.level = localStorage.getItem("ems.level") || "simple";
+  state.level = localStorage.getItem("ems.level") || "simple";   // UI preference only
 } catch { /* storage unavailable */ }
+
+function csrfToken() {
+  const m = document.cookie.match(/(?:^|;\s*)ems_csrf=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : "";
+}
 
 const ROLES = ["viewer", "operator", "admin", "installer"];
 export const can = (role) => state.role && ROLES.indexOf(state.role) >= ROLES.indexOf(role);
@@ -52,14 +58,35 @@ export class ApiError extends Error {
   constructor(status, detail) { super(detail); this.status = status; }
 }
 
-export async function api(path, { method = "GET", body, raw = false, form } = {}) {
+export const API_TIMEOUT_MS = 20000;
+
+function setOnline(ok) {
+  if (state.online === ok) return;
+  state.online = ok;
+  emit({ type: "online", data: ok });
+}
+
+export async function api(path, { method = "GET", body, raw = false, form, timeout = API_TIMEOUT_MS } = {}) {
   const headers = {};
-  if (state.token) headers.Authorization = `Bearer ${state.token}`;
+  if (!["GET", "HEAD"].includes(method)) headers["X-CSRF-Token"] = csrfToken();
   let payload;
   if (form) payload = form;
   else if (body !== undefined) { headers["Content-Type"] = "application/json"; payload = JSON.stringify(body); }
-  const res = await fetch(`/api/v1${path}`, { method, headers, body: payload });
-  if (res.status === 401 && !path.startsWith("/auth/")) { logout(); throw new ApiError(401, "Sessie verlopen"); }
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeout);
+  let res;
+  try {
+    res = await fetch(`/api/v1${path}`, { method, headers, body: payload, credentials: "same-origin", signal: ctrl.signal });
+  } catch (e) {
+    setOnline(false);
+    throw new ApiError(0, e.name === "AbortError"
+      ? `Geen antwoord van de EMS-server binnen ${Math.round(timeout / 1000)} s — controleer de verbinding`
+      : "EMS-server niet bereikbaar — controleer de verbinding");
+  } finally {
+    clearTimeout(timer);
+  }
+  setOnline(true);
+  if (res.status === 401 && !path.startsWith("/auth/")) { logout(false); throw new ApiError(401, "Sessie verlopen"); }
   if (!res.ok) {
     let detail = res.statusText;
     try { const j = await res.json(); detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail); }
@@ -71,25 +98,30 @@ export async function api(path, { method = "GET", body, raw = false, form } = {}
   return ct.includes("application/json") ? res.json() : res.text();
 }
 
-export function logout() {
-  state.token = null; state.user = null; state.role = null;
-  try { localStorage.removeItem("ems.token"); } catch { /* ignore */ }
+export async function logout(callServer = true) {
+  if (callServer) { try { await api("/auth/logout", { method: "POST" }); } catch { /* already gone */ } }
+  state.user = null; state.role = null;
+  disconnectWs();
   location.hash = "#/login";
 }
 
-export function saveToken(token) {
-  state.token = token;
-  try { localStorage.setItem("ems.token", token); } catch { /* ignore */ }
+export function setSession(me) {
+  state.user = me.username; state.role = me.role;
 }
 
 // ------------------------------------------------------------------ websocket
 let ws = null, wsRetry = 1000, wsWanted = false;
 export const wsStatus = { connected: false };
-export function connectWs() {
+export async function connectWs() {
   wsWanted = true;
-  if (ws || !state.token) return;
+  if (ws || !state.user) return;
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  ws = new WebSocket(`${proto}://${location.host}/api/v1/ws?token=${encodeURIComponent(state.token)}`);
+  let ticket;
+  try { ticket = (await api("/auth/ws-ticket", { method: "POST" })).ticket; }
+  catch { if (wsWanted) setTimeout(connectWs, wsRetry); wsRetry = Math.min(30000, wsRetry * 2); return; }
+  if (ws) return;
+  // Single-use 30-second ticket: no session token in the URL.
+  ws = new WebSocket(`${proto}://${location.host}/api/v1/ws?ticket=${encodeURIComponent(ticket)}`);
   ws.onopen = () => { wsRetry = 1000; wsStatus.connected = true; emit({ type: "ws", data: true }); };
   ws.onmessage = (ev) => {
     let msg; try { msg = JSON.parse(ev.data); } catch { return; }
@@ -98,7 +130,7 @@ export function connectWs() {
   };
   ws.onclose = (ev) => {
     ws = null; wsStatus.connected = false; emit({ type: "ws", data: false });
-    if (ev.code === 4401) { logout(); return; }
+    if (ev.code === 4401 && !state.user) { logout(false); return; }
     if (wsWanted) setTimeout(connectWs, wsRetry);
     wsRetry = Math.min(30000, wsRetry * 2);
   };

@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from ems import __version__
-from ems.api.deps import admin, get_runtime, operator, viewer
+from ems.api.deps import admin, clear_session_cookies, get_runtime, operator, set_session_cookies, viewer
 from ems.core.config import ConfigError, StrategyProfile, dump_config, settings_schema
 from ems.core.models import Command, CommandAction
 from ems.prices.providers import parse_manual_prices
@@ -73,17 +73,19 @@ class Credentials(BaseModel):
 
 
 @router.post("/auth/setup", tags=["auth"])
-async def setup(body: Credentials, rt: EMSRuntime = Depends(get_runtime)) -> dict:
+async def setup(body: Credentials, request: Request, response: Response,
+                rt: EMSRuntime = Depends(get_runtime)) -> dict:
     if await asyncio.to_thread(rt.db.count_users) > 0:
         raise HTTPException(409, "er bestaat al een gebruiker; log in")
     if len(body.password) < 8:
         raise HTTPException(422, "wachtwoord moet minimaal 8 tekens hebben")
     await asyncio.to_thread(rt.db.create_user, body.username, hash_password(body.password), "installer")
-    return {"token": rt.tokens.issue(body.username, "installer"), "username": body.username, "role": "installer"}
+    return _session(request, response, rt, body.username, "installer")
 
 
 @router.post("/auth/login", tags=["auth"])
-async def login(body: Credentials, request: Request, rt: EMSRuntime = Depends(get_runtime)) -> dict:
+async def login(body: Credentials, request: Request, response: Response,
+                rt: EMSRuntime = Depends(get_runtime)) -> dict:
     limiter = request.app.state.login_limiter
     client = request.client.host if request.client else "?"
     if not limiter.allowed(client):
@@ -95,8 +97,28 @@ async def login(body: Credentials, request: Request, rt: EMSRuntime = Depends(ge
         limiter.failed(client)
         raise HTTPException(401, "onjuiste gebruikersnaam of wachtwoord")
     limiter.succeeded(client)
-    return {"token": rt.tokens.issue(user["username"], user["role"]), "username": user["username"],
-            "role": user["role"]}
+    return _session(request, response, rt, user["username"], user["role"])
+
+
+def _session(request: Request, response: Response, rt: EMSRuntime, username: str, role: str) -> dict:
+    """Browser: HttpOnly session cookie + CSRF cookie. The token in the body is for scripts and
+    integrations that use the Authorization header; the web interface never stores it."""
+    token = rt.tokens.issue(username, role)
+    csrf = set_session_cookies(request, response, token)
+    return {"token": token, "username": username, "role": role, "csrf": csrf}
+
+
+@router.post("/auth/logout", tags=["auth"])
+async def logout(response: Response, p: Principal = Depends(viewer), rt: EMSRuntime = Depends(get_runtime)) -> dict:
+    rt.sessions.revoke(p)
+    clear_session_cookies(response)
+    return {"ok": True}
+
+
+@router.post("/auth/ws-ticket", tags=["auth"])
+async def ws_ticket(p: Principal = Depends(viewer), rt: EMSRuntime = Depends(get_runtime)) -> dict:
+    """Single-use ticket (30 s) to open the WebSocket; keeps session tokens out of URLs."""
+    return {"ticket": rt.sessions.ticket(p)}
 
 
 @router.get("/auth/me", tags=["auth"])

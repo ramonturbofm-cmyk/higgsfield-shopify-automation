@@ -51,7 +51,7 @@ from ems.nodes.service import NodeService
 from ems.optimizer.service import OptimizerService
 from ems.prices.providers import DemoProvider, EnergyZeroProvider, EntsoeProvider, StaticProvider
 from ems.prices.service import PriceService
-from ems.security.auth import TokenIssuer, hash_password
+from ems.security.auth import SessionRegistry, TokenIssuer, hash_password
 from ems.security.secrets import SecretStore
 from ems.server.demo import DEMO_CONFIG, PRODUCTION_DEFAULT
 from ems.server.history import HistoryRecorder
@@ -133,6 +133,7 @@ class EMSRuntime:
             jwt_secret = secrets.token_urlsafe(48)
             self.secrets.set("jwt_secret", jwt_secret)
         self.tokens = TokenIssuer(jwt_secret)
+        self.sessions = SessionRegistry()
         self.notifications = NotificationService(self.db, self.bus, self.config.notifications.webhook_url)
         self.automations = AutomationEngine(self.db, self._run_automation_action)
         self.nodes = NodeService(self)

@@ -19,7 +19,9 @@ from dataclasses import dataclass
 import jwt
 
 ROLES = ("viewer", "operator", "admin", "installer")
-ACCESS_TOKEN_TTL_S = 12 * 3600
+ACCESS_TOKEN_TTL_S = 8 * 3600        # browser session lifetime (sliding, see SESSION_ROTATE_S)
+SESSION_ROTATE_S = 15 * 60           # a session cookie older than this is replaced by a fresh one
+WS_TICKET_TTL_S = 30                 # single-use WebSocket ticket
 _SCRYPT = {"n": 2**14, "r": 8, "p": 1}
 
 
@@ -57,6 +59,9 @@ class Principal:
     username: str
     role: str
     kind: str = "user"   # user | api_token
+    session_id: str | None = None
+    issued_at: int | None = None
+    expires_at: int | None = None
 
     def can(self, required: str) -> bool:
         return role_at_least(self.role, required)
@@ -70,8 +75,8 @@ class TokenIssuer:
 
     def issue(self, username: str, role: str, ttl_s: int = ACCESS_TOKEN_TTL_S) -> str:
         now = int(time.time())
-        return jwt.encode({"sub": username, "role": role, "iat": now, "exp": now + ttl_s}, self.secret,
-                          algorithm="HS256")
+        return jwt.encode({"sub": username, "role": role, "iat": now, "exp": now + ttl_s,
+                           "jti": secrets.token_hex(12)}, self.secret, algorithm="HS256")
 
     def verify(self, token: str) -> Principal | None:
         try:
@@ -81,7 +86,43 @@ class TokenIssuer:
         role = claims.get("role")
         if role not in ROLES:
             return None
-        return Principal(claims["sub"], role)
+        return Principal(claims["sub"], role, session_id=claims.get("jti"), issued_at=claims.get("iat"),
+                         expires_at=claims.get("exp"))
+
+
+class SessionRegistry:
+    """Logged-out sessions (until they expire) and single-use WebSocket tickets, in memory.
+
+    After a server restart revoked sessions are forgotten; they still expire after
+    ``ACCESS_TOKEN_TTL_S``. WebSocket tickets keep tokens out of URLs and logs."""
+
+    def __init__(self) -> None:
+        self._revoked: dict[str, float] = {}
+        self._tickets: dict[str, tuple[Principal, float]] = {}
+
+    def revoke(self, p: Principal) -> None:
+        if p.session_id:
+            self._revoked[p.session_id] = float(p.expires_at or time.time() + ACCESS_TOKEN_TTL_S)
+
+    def revoked(self, p: Principal) -> bool:
+        now = time.time()
+        for k in [k for k, exp in self._revoked.items() if exp < now]:
+            del self._revoked[k]
+        return bool(p.session_id and p.session_id in self._revoked)
+
+    def ticket(self, p: Principal) -> str:
+        now = time.monotonic()
+        for k in [k for k, (_, exp) in self._tickets.items() if exp < now]:
+            del self._tickets[k]
+        t = secrets.token_urlsafe(24)
+        self._tickets[t] = (p, now + WS_TICKET_TTL_S)
+        return t
+
+    def redeem(self, ticket: str) -> Principal | None:
+        entry = self._tickets.pop(ticket, None)
+        if entry is None or entry[1] < time.monotonic():
+            return None
+        return entry[0]
 
 
 class LoginRateLimiter:

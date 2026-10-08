@@ -278,3 +278,49 @@ def test_confirmation_tracker_states():
     t.record(hp, hp, "sent", now)
     t.evaluate({"hp": {}}, now)
     assert t.for_device("hp")[0]["status"] == "no_feedback"
+
+
+# P0-06 ------------------------------------------------------------------------------------------
+async def test_p0_06_cookie_session_csrf_rotation_logout(tmp_path, monkeypatch):
+    rt = EMSRuntime(tmp_path / "auth", mode="demo", env={})
+    await rt.start(loops=False)
+    app = create_app(rt, start_runtime=False)
+    c = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+    try:
+        r = await c.post("/api/v1/auth/login", json={"username": "demo", "password": "demo"})
+        sc = r.headers.get_list("set-cookie")
+        session = next(x for x in sc if x.startswith("ems_session="))
+        assert "HttpOnly" in session and "samesite=strict" in session.lower()
+        csrf = r.json()["csrf"]
+        # Cookie alone works for reads ...
+        assert (await c.get("/api/v1/auth/me")).status_code == 200
+        # ... but a state change without the CSRF header is refused (cross-site request).
+        assert (await c.put("/api/v1/settings", json={"site": {"name": "x"}})).status_code == 403
+        r = await c.put("/api/v1/settings", json={"site": {"name": "x"}}, headers={"X-CSRF-Token": csrf})
+        assert r.status_code == 200
+        # Sliding rotation: an old session gets a fresh cookie.
+        import ems.api.deps as deps
+        monkeypatch.setattr(deps, "SESSION_ROTATE_S", -1)
+        r = await c.get("/api/v1/auth/me")
+        assert any(x.startswith("ems_session=") for x in r.headers.get_list("set-cookie"))
+        monkeypatch.setattr(deps, "SESSION_ROTATE_S", 10**6)
+        # Logout revokes the session server-side and clears the cookies.
+        old = c.cookies.get("ems_session")
+        assert (await c.post("/api/v1/auth/logout", headers={"X-CSRF-Token": csrf})).status_code == 200
+        assert (await c.get("/api/v1/auth/me")).status_code == 401
+        anon = httpx.AsyncClient(transport=c._transport, base_url="http://test")
+        assert (await anon.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {old}"})).status_code == 401
+        # Downloads no longer accept ?token= in the URL.
+        assert (await anon.get(f"/api/v1/history/export?token={old}")).status_code == 401
+        await anon.aclose()
+    finally:
+        await c.aclose()
+        await rt.stop()
+
+
+def test_p0_06_frontend_keeps_no_tokens():
+    from pathlib import Path
+    web = Path(__file__).resolve().parents[1] / "backend" / "ems" / "web" / "js"
+    src = "\n".join(p.read_text() for p in web.rglob("*.js"))
+    assert "localStorage.setItem(\"ems.token\"" not in src and "ems.token" not in src
+    assert "?token=" not in src and "Authorization" not in src

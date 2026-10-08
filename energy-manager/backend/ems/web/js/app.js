@@ -1,4 +1,4 @@
-import { api, can, connectWs, disconnectWs, guard, h, logout, on, saveToken, state, wsStatus } from "./lib.js";
+import { api, can, connectWs, guard, h, logout, on, setSession, state, wsStatus } from "./lib.js";
 
 const NAV = [
   ["dashboard", "Dashboard", "⚡"], ["installation", "Mijn installatie", "🏠"], ["energy", "Energie", "📈"], ["planning", "Planning", "🗓"],
@@ -73,7 +73,9 @@ function renderTopbar(title) {
     const cls = { AUTOMATIC: "good", SHADOW_MODE: "warn", MANUAL_OVERRIDE: "warn", DEGRADED: "warn", SAFE_MODE: "bad", ERROR: "bad" }[st.state] || "";
     pills.push(h("a", { class: `pill ${cls}`, href: "#/installation", title: st.reason || "" }, h("span", { class: "dot" }), `EMS: ${st.label}`));
   } else if (live?.failsafe?.active) pills.push(h("span", { class: "pill bad", title: live.failsafe.reason }, "Fallback actief"));
-  pills.push(h("span", { class: `pill ${wsStatus.connected ? "good" : ""}`, title: "Live-verbinding (WebSocket)" },
+  if (!state.online) pills.push(h("span", { class: "pill bad", role: "status", title: "De EMS-server antwoordt niet" },
+    h("span", { class: "dot" }), "Server offline"));
+  else pills.push(h("span", { class: `pill ${wsStatus.connected ? "good" : ""}`, title: "Live-verbinding (WebSocket)" },
     h("span", { class: "dot" }), wsStatus.connected ? "live" : "verbinden…"));
   bar.replaceChildren(
     h("button", { class: "btn sm hamb", "aria-label": "Menu", onclick: () => document.getElementById("sidebar").classList.toggle("open") }, "☰"),
@@ -82,7 +84,7 @@ function renderTopbar(title) {
     h("button", { class: "btn sm", title: "Thema: automatisch / licht / donker", onclick: cycleTheme },
       { auto: "◐ Auto", light: "☀ Licht", dark: "☾ Donker" }[theme]),
     state.user ? h("span", { class: "pill", title: `rol: ${state.role}` }, state.user) : null,
-    state.user ? h("button", { class: "btn sm", onclick: () => { disconnectWs(); logout(); } }, "Uitloggen") : null,
+    state.user ? h("button", { class: "btn sm", onclick: () => logout() }, "Uitloggen") : null,
     APP_HOME && /^(tauri:|https?:\/\/tauri\.localhost)/.test(APP_HOME) ? h("a", { class: "btn sm", href: `${APP_HOME}?choose=1` }, "Andere server") : null,
   );
 }
@@ -112,7 +114,7 @@ function loginView(root, setup) {
     e.preventDefault(); msg.textContent = "";
     try {
       const r = await api(setup ? "/auth/setup" : "/auth/login", { method: "POST", body: { username: user.value, password: pass.value } });
-      saveToken(r.token); location.hash = "#/dashboard"; boot();
+      setSession(r); location.hash = "#/dashboard"; boot();
     } catch (err) { msg.textContent = err.message; }
   } },
   h("div", { class: "brand" }, h("img", { src: "/static/icon.svg", alt: "" }), "Energy Manager"),
@@ -133,8 +135,8 @@ async function route() {
   if (cleanup) { try { cleanup(); } catch { /* ignore */ } cleanup = null; }
   const [, page = "dashboard", ...rest] = (location.hash || "#/dashboard").split("/");
   if (!state.info) state.info = await api("/system/info");
-  if (page === "setup" || (state.info.setup_required && !state.token)) return loginView(root, true);
-  if (page === "login" || !state.token) return loginView(root, false);
+  if (page === "setup" || (state.info.setup_required && !state.user)) return loginView(root, true);
+  if (page === "login" || !state.user) return loginView(root, false);
   const view = VIEWS[page] ? page : "dashboard";
   renderSidebar(view);
   renderTopbar(TITLES[view]);
@@ -156,21 +158,18 @@ async function boot() {
     document.getElementById("view").replaceChildren(h("div", { class: "notice bad inline" }, `Server niet bereikbaar: ${e.message}`));
     return;
   }
-  if (state.token) {
-    try {
-      const me = await api("/auth/me");
-      state.user = me.username; state.role = me.role;
-      state.settings = await api("/settings");
-      state.tz = state.settings.site.timezone;
-      state.live = await api("/energy/live");
-      connectWs();
-    } catch { state.token = null; }
-  }
+  try {
+    setSession(await api("/auth/me"));         // valid session cookie?
+    state.settings = await api("/settings");
+    state.tz = state.settings.site.timezone;
+    state.live = await api("/energy/live");
+    connectWs();
+  } catch { state.user = null; state.role = null; }
   route();
 }
 
 on((msg) => {
-  if (msg.type === "live" || msg.type === "ws") { renderTopbar(); renderBanner(); }
+  if (msg.type === "live" || msg.type === "ws" || msg.type === "online") { renderTopbar(); renderBanner(); }
   if (msg.type === "notification" && ["warning", "critical"].includes(msg.data.level)) {
     import("./lib.js").then(({ toast }) => toast(msg.data.message, msg.data.level === "critical"));
   }

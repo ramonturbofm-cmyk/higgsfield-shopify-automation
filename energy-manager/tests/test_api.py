@@ -257,8 +257,10 @@ def test_websocket_live_updates(tmp_path):
     app = create_app(rt, loops=False)
     with TestClient(app) as client:
         client.portal.call(rt.tick_once)
-        token = client.post("/api/v1/auth/login", json={"username": "demo", "password": "demo"}).json()["token"]
-        with client.websocket_connect(f"/api/v1/ws?token={token}") as ws:
+        r = client.post("/api/v1/auth/login", json={"username": "demo", "password": "demo"})
+        csrf = r.json()["csrf"]
+        ticket = client.post("/api/v1/auth/ws-ticket", headers={"X-CSRF-Token": csrf}).json()["ticket"]
+        with client.websocket_connect(f"/api/v1/ws?ticket={ticket}") as ws:
             assert ws.receive_json()["type"] == "hello"
             first = ws.receive_json()
             assert first["type"] == "live" and first["data"]["flows"] is not None
@@ -268,9 +270,13 @@ def test_websocket_live_updates(tmp_path):
                 msg = ws.receive_json()
             assert msg["data"]["timestamp"] > first["data"]["timestamp"]
         from starlette.websockets import WebSocketDisconnect
-        with pytest.raises(WebSocketDisconnect):
-            with client.websocket_connect("/api/v1/ws?token=wrong") as ws:
-                ws.receive_json()
+        token = r.json()["token"]
+        for url in (f"/api/v1/ws?ticket={ticket}",      # tickets are single-use
+                    f"/api/v1/ws?token={token}",        # tokens are never accepted in the URL
+                    "/api/v1/ws?ticket=wrong"):
+            with pytest.raises(WebSocketDisconnect):
+                with client.websocket_connect(url) as ws:
+                    ws.receive_json()
 
 
 async def test_production_mode_has_no_fake_data(tmp_path):

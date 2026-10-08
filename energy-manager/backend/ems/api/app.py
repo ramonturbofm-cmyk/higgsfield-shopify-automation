@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 from ems import __version__
 from ems.api import routes_core, routes_devices, routes_more, routes_nodes
-from ems.api.deps import resolve_token
+from ems.api.deps import CSRF_COOKIE, resolve_token, set_session_cookies
 from ems.core.config import ConfigError
 from ems.security.auth import LoginRateLimiter
 from ems.server.runtime import EMSRuntime
@@ -45,18 +45,22 @@ def create_app(runtime: EMSRuntime, *, start_runtime: bool = True, loops: bool =
 
     app = FastAPI(title="Energy Manager API", version=__version__, lifespan=lifespan,
                   docs_url="/api/docs", redoc_url=None, openapi_url="/api/openapi.json",
-                  description="Lokale API van het Energy Management System. Authenticatie: Bearer-token "
-                              "(POST /api/v1/auth/login) of API-token (ems_...).")
+                  description="Lokale API van het Energy Management System. Authenticatie: browsersessie "
+                              "(HttpOnly-cookie + X-CSRF-Token), of Authorization: Bearer met het token uit "
+                              "POST /api/v1/auth/login of een API-token (ems_...).")
     app.state.runtime = runtime
     app.state.login_limiter = LoginRateLimiter()
     app.add_middleware(CORSMiddleware, allow_origins=TAURI_ORIGINS, allow_methods=["GET", "POST", "PUT", "DELETE"],
-                       allow_headers=["Authorization", "Content-Type"],
+                       allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
                        # The app page (tauri.localhost) loads a LAN server: Private Network Access preflight.
                        allow_private_network=True)
 
     @app.middleware("http")
     async def security_headers(request, call_next):
         resp = await call_next(request)
+        rotated = getattr(request.state, "rotate_session", None)
+        if rotated:   # sliding browser session: replace the cookie, keep the CSRF token
+            set_session_cookies(request, resp, rotated, request.cookies.get(CSRF_COOKIE))
         resp.headers.setdefault("X-Content-Type-Options", "nosniff")
         resp.headers.setdefault("Referrer-Policy", "no-referrer")
         if not request.url.path.startswith("/api/docs"):
@@ -94,8 +98,16 @@ def create_app(runtime: EMSRuntime, *, start_runtime: bool = True, loops: bool =
 
     @app.websocket("/api/v1/ws")
     async def ws(websocket: WebSocket):
-        token = websocket.query_params.get("token", "")
-        principal = await resolve_token(runtime, token) if token else None
+        # Browser: single-use ticket from POST /auth/ws-ticket. Scripts: Authorization header.
+        # Session tokens are never accepted in the URL.
+        principal = None
+        ticket = websocket.query_params.get("ticket")
+        if ticket:
+            principal = runtime.sessions.redeem(ticket)
+        else:
+            auth = websocket.headers.get("authorization", "")
+            if auth.startswith("Bearer "):
+                principal = await resolve_token(runtime, auth[7:])
         if principal is None:
             await websocket.close(code=4401)
             return
