@@ -66,7 +66,7 @@ function setOnline(ok) {
   emit({ type: "online", data: ok });
 }
 
-export async function api(path, { method = "GET", body, raw = false, form, timeout = API_TIMEOUT_MS } = {}) {
+export async function api(path, { method = "GET", body, raw = false, form, timeout = globalThis.__EMS_TEST_TIMEOUT || API_TIMEOUT_MS } = {}) {
   const headers = {};
   if (!["GET", "HEAD"].includes(method)) headers["X-CSRF-Token"] = csrfToken();
   let payload;

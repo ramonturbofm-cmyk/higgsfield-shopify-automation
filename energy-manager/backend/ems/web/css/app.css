@@ -153,3 +153,5 @@ body[data-level="simple"] .expert-only, body[data-level="simple"] .advanced-only
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
 tr.now td { background: var(--warn-bg); }
 .card.kpi.stale .v { opacity: .55; text-decoration: line-through dotted; }
+.card.kpi .l.row { flex-wrap: nowrap; gap: 6px; align-items: center; }
+.card.kpi .l.row .pill { padding: 1px 6px; white-space: nowrap; }

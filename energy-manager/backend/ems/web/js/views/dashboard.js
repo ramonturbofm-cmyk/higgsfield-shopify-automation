@@ -145,7 +145,10 @@ export async function render(root) {
         h("td", { class: "small" }, d.control_state ? controlStatePill(d.control_state) : d.control_level))))));
   };
   paint(state.live);
-  const loadDecisions = async () => decBox.replaceChildren(decisionList(await api("/decisions?limit=6")));
+  const loadDecisions = async () => {
+    try { decBox.replaceChildren(decisionList(await api("/decisions?limit=6"))); }
+    catch (e) { decBox.replaceChildren(h("div", { class: "notice warn inline", role: "status" }, `Beslissingen niet geladen: ${e.message}`)); }
+  };
   loadDecisions();
   const off = on((msg) => {
     if (msg.type === "live") paint(msg.data);
