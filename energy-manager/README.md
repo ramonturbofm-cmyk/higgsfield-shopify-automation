@@ -16,7 +16,7 @@ het EMS blijft werken als de app dicht is.
 * **Planning 24–36 uur** via een rolling-horizon optimizer (MILP, elke 5 min): wanneer laden/ontladen,
   PV afregelen, warmtepomp voorverwarmen, auto laden — met verwachte kosten en voordeel t.o.v. "zonder EMS".
 * **Tariefengine** (dynamisch/vast/dal-piek, opslagen, energiebelasting, btw, salderen) en prijsbronnen
-  (ENTSO-E, handmatig) met cache.
+  (EnergyZero zonder token, ENTSO-E, handmatig) met cache.
 * **Veiligheid eerst**: fail-safe bij wegvallende netmeting, watchdog, fasebewaking, piekbegrenzing,
   zero-export; apparaten vallen altijd terug op hun eigen regeling.
 * **Inbedrijfstelling per apparaat**: verbindingstest → alleen lezen → schaduwmodus ("EMS zou…") →

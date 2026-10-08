@@ -46,7 +46,7 @@ from ems.forecasting.service import ForecastService
 from ems.forecasting.weather import DemoWeatherProvider, OpenMeteoProvider
 from ems.gridmeter.meter import GridMeterStatus
 from ems.optimizer.service import OptimizerService
-from ems.prices.providers import DemoProvider, EntsoeProvider, StaticProvider
+from ems.prices.providers import DemoProvider, EnergyZeroProvider, EntsoeProvider, StaticProvider
 from ems.prices.service import PriceService
 from ems.security.auth import TokenIssuer, hash_password
 from ems.security.secrets import SecretStore
@@ -179,6 +179,8 @@ class EMSRuntime:
                     if token.startswith("secret:"):
                         token = self.secrets.get(token.removeprefix("secret:")) or ""
                     provider = EntsoeProvider(token, cfg.prices.bidding_zone)
+                case "energyzero":
+                    provider = EnergyZeroProvider(cfg.prices.energyzero_interval)
                 case "manual":
                     provider = StaticProvider()
                 case "demo":

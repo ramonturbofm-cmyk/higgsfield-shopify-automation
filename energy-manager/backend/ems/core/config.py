@@ -254,9 +254,13 @@ class TariffConfig(_Base):
 
 
 class PriceConfig(_Base):
-    provider: Literal["none", "entsoe", "manual", "demo"] = setting(
+    provider: Literal["none", "energyzero", "entsoe", "manual", "demo"] = setting(
         "none", label="Prijsbron",
-        help="ENTSO-E (gratis API-token nodig), handmatig ingevoerde prijzen, of de demo-prijzen.")
+        help="EnergyZero (Nederland, geen token nodig), ENTSO-E (gratis API-token nodig), "
+             "handmatig ingevoerde prijzen, of de demo-prijzen.")
+    energyzero_interval: Literal["quarter", "hour"] = setting(
+        "quarter", label="EnergyZero: prijzen per",
+        help="Kwartierprijzen (nauwkeuriger, sinds de 15-minuten-markt) of uurprijzen.")
     entsoe_token: str = setting("", label="ENTSO-E API-token", level="simple",
                                 help="Alleen nodig bij prijsbron ENTSO-E. Wordt versleuteld opgeslagen.")
     bidding_zone: str = setting("10YNL----------L", label="Biedzone (EIC)", level="expert")

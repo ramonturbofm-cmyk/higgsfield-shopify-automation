@@ -8,7 +8,7 @@ const ENUM_LABEL = { lowest_cost: "Laagste kosten", maximum_profit: "Maximale op
   zero_export: "Geen teruglevering", battery_saver: "Batterij sparen", peak_shaving: "Piekbegrenzing", comfort: "Comfort", eco: "Eco",
   backup_priority: "Noodstroom eerst", custom: "Aangepast", balanced: "Gebalanceerd", profit: "Winst", aggressive: "Agressief",
   unlimited: "Onbeperkt", smart: "Smart Export", zero: "Zero Export", dynamic: "Dynamisch", fixed: "Vast", variable: "Variabel",
-  production: "Productie", demo: "Demo", none: "Geen", entsoe: "ENTSO-E", manual: "Handmatig", open_meteo: "Open-Meteo" };
+  production: "Productie", demo: "Demo", none: "Geen", energyzero: "EnergyZero (Nederland, geen token nodig)", quarter: "Kwartier (15 min)", hour: "Uur", entsoe: "ENTSO-E (token nodig)", manual: "Handmatig", open_meteo: "Open-Meteo" };
 
 function resolve(schema, prop) {
   if (prop.$ref) return schema.$defs[prop.$ref.split("/").pop()];
@@ -106,7 +106,7 @@ export async function render(root, [tab = "general"]) {
         h("li", {}, "Stuur een e-mail naar transparency@entsoe.eu met als onderwerp “Restful API access” en in de tekst het e-mailadres van uw account."),
         h("li", {}, "Na goedkeuring (meestal binnen enkele werkdagen): log in → My Account Settings → Generate a new token."),
         h("li", {}, "Kopieer het token hierboven, kies prijsbron ENTSO-E en klik op Opslaan.")),
-      h("p", { class: "muted" }, "Zolang u geen token hebt, kunt u prijsbron „Handmatig” kiezen en prijzen hieronder invoeren, of een vast/variabel contract instellen bij Energiecontract."));
+      h("p", { class: "muted" }, "Makkelijker: kies prijsbron „EnergyZero” — dezelfde Nederlandse marktprijzen, zonder account of token."));
     root.append(h("div", { class: "grid cols-2" }, card("prices", howto), card("forecast"), h("div", { class: "card" }, h("h3", {}, "Prijzen handmatig invoeren"),
       h("p", { class: "muted small" }, "Eén regel per uur: tijdstip met tijdzone;marktprijs in €/kWh (excl. btw)."), csv,
       h("div", { class: "row", style: { marginTop: "10px" } }, h("button", { class: "btn", disabled: ro || null, onclick: () => guard(async () => {

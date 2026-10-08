@@ -317,3 +317,11 @@ async def test_entsoe_token_is_stored_encrypted(env):
     assert rt.secrets.get("prices.entsoe_token") == "abc-123-token"
     await c.put("/api/v1/settings", json={"prices": {"provider": "manual", "entsoe_token": ""}})
     assert rt.secrets.get("prices.entsoe_token") is None
+
+
+async def test_energyzero_selectable_without_token(env):
+    rt, c = env
+    r = await c.put("/api/v1/settings", json={"prices": {"provider": "energyzero", "energyzero_interval": "hour"}})
+    assert r.status_code == 200, r.text
+    assert type(rt.prices.provider).__name__ == "EnergyZeroProvider" and rt.prices.provider.resolution == 60
+    assert "token" not in (rt.prices.last_error or "")   # (a fetch error without network is fine here)
