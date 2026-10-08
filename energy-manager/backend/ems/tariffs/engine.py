@@ -19,6 +19,7 @@ from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
 from ems.core.config import ContractType, TariffConfig
+from ems.tariffs.taxes import energy_tax_rate
 
 SpotLookup = Callable[[datetime], float | None]
 
@@ -84,11 +85,11 @@ class TariffEngine:
         elif spot is None:
             imp, imp_parts, source = None, {}, "missing"
         else:
-            excl = spot + t.import_markup_eur_kwh + t.energy_tax_eur_kwh + t.import_other_eur_kwh \
-                + t.transaction_fee_eur_kwh
+            tax = self.energy_tax(ts)
+            excl = spot + t.import_markup_eur_kwh + tax + t.import_other_eur_kwh + t.transaction_fee_eur_kwh
             imp = excl * vat
             imp_parts = {"marktprijs": spot, "inkoopopslag": t.import_markup_eur_kwh,
-                         "energiebelasting": t.energy_tax_eur_kwh, "overig": t.import_other_eur_kwh,
+                         "energiebelasting": tax, "overig": t.import_other_eur_kwh,
                          "transactiekosten": t.transaction_fee_eur_kwh, "btw": excl * (vat - 1)}
             source = "dynamic"
 
@@ -109,6 +110,15 @@ class TariffEngine:
         return PriceBreakdown(ts.isoformat(), r(spot), r(imp), r(exp),
                               {k: round(v, 6) for k, v in imp_parts.items()},
                               {k: round(v, 6) for k, v in exp_parts.items()}, source)
+
+    def energy_tax(self, ts: datetime) -> float:
+        """EUR/kWh excl. VAT valid at ``ts`` (versioned table per year, or the manual value)."""
+        t = self.tariff
+        if t.energy_tax_mode == "table":
+            rate = energy_tax_rate(t.tax_country, ts.astimezone(self.tz).date())
+            if rate is not None:
+                return rate.energy_tax_eur_kwh
+        return t.energy_tax_eur_kwh
 
     def get_import_price(self, ts: datetime) -> float | None:
         return self.breakdown(ts).import_price

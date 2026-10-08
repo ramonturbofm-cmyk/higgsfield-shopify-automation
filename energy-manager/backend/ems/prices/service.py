@@ -12,7 +12,8 @@ import logging
 import statistics
 from bisect import bisect_right
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from ems.database import Database
 from ems.prices.providers import PricePoint, PriceProvider
@@ -28,8 +29,23 @@ class PriceSeriesPoint:
     estimated: bool
 
 
+def local_day_slots(day: date, tz: ZoneInfo, minutes: int = 15) -> list[datetime]:
+    """UTC start times of every interval of a *local* day: 92 / 96 / 100 quarter-hours on
+    the 23 / 24 / 25-hour days around daylight-saving changes."""
+    start = datetime(day.year, day.month, day.day, tzinfo=tz).astimezone(UTC)
+    nxt = day + timedelta(days=1)
+    end = datetime(nxt.year, nxt.month, nxt.day, tzinfo=tz).astimezone(UTC)
+    out, t = [], start
+    while t < end:
+        out.append(t)
+        t += timedelta(minutes=minutes)
+    return out
+
+
 class PriceService:
-    def __init__(self, db: Database | None, area: str, provider: PriceProvider | None) -> None:
+    def __init__(self, db: Database | None, area: str, provider: PriceProvider | None,
+                 timezone: str = "Europe/Amsterdam") -> None:
+        self.tz = ZoneInfo(timezone)
         self.db = db
         self.area = area
         self.provider = provider
@@ -119,8 +135,21 @@ class PriceService:
             t += timedelta(minutes=step_min)
         return out
 
-    def status(self) -> dict:
-        return {"provider": None if self.provider is None else self.provider.name, "area": self.area,
+    def coverage(self, day: date, minutes: int = 15) -> dict:
+        """Which intervals of a local day have a known price (detects missing quarter-hours)."""
+        slots = local_day_slots(day, self.tz, minutes)
+        missing = [t for t in slots if self.spot(t) is None]
+        return {"date": day.isoformat(), "intervals": len(slots), "hours": len(slots) * minutes / 60,
+                "known": len(slots) - len(missing), "complete": not missing,
+                "missing": [t.astimezone(self.tz).strftime("%H:%M") for t in missing[:20]],
+                "missing_count": len(missing)}
+
+    def status(self, now: datetime | None = None) -> dict:
+        cov = {}
+        if now is not None and self._cache:
+            today = now.astimezone(self.tz).date()
+            cov = {"today": self.coverage(today), "tomorrow": self.coverage(today + timedelta(days=1))}
+        return {"coverage": cov, "provider": None if self.provider is None else self.provider.name, "area": self.area,
                 "last_fetch": None if self.last_fetch is None else self.last_fetch.isoformat(),
                 "last_error": self.last_error, "known_until": None if not self._cache else self.last_known().isoformat(),
                 "cached_points": len(self._cache)}

@@ -41,6 +41,9 @@ class SiteSnapshot:
     missing: list[str] = field(default_factory=list)
     grid: GridMeter = field(default_factory=lambda: GridMeter(None))
     features: dict = field(default_factory=dict)
+    # Data quality per quantity: GOOD | ESTIMATED | CALCULATED | FORECAST | STALE | INVALID | MISSING | UNKNOWN
+    quality: dict[str, str] = field(default_factory=dict)
+    balance: dict = field(default_factory=dict)
 
     def states(self, *categories: DeviceCategory) -> list[DeviceState]:
         return [s for s in self.devices.values() if s.category in categories]
@@ -60,6 +63,8 @@ class SiteSnapshot:
             "house_load_w": self.house_load_w,
             "grid_device_id": self.grid_device_id,
             "features": self.features,
+            "quality": self.quality,
+            "balance": self.balance,
             "indoor_temp_c": self.indoor_temp_c,
             "outdoor_temp_c": self.outdoor_temp_c,
             "devices": {k: {"status": v.status, "error": v.error} for k, v in self.devices.items()},
@@ -139,8 +144,55 @@ def build_snapshot(config: EMSConfig, states: dict[str, DeviceState], now: datet
 
     # House load = everything not separately measured.
     if snap.grid_valid:
-        snap.house_load_w = max(
-            0.0,
-            snap.grid_power_w + snap.pv_power_w - snap.battery_power_w - snap.hp_power_w - snap.ev_power_w,
-        )
+        raw = snap.grid_power_w + snap.pv_power_w - snap.battery_power_w - snap.hp_power_w - snap.ev_power_w
+        snap.house_load_w = max(0.0, raw)
+        snap.balance = energy_balance(snap, raw)
+    snap.quality = data_quality(snap)
     return snap
+
+
+def _quality_of(states: list[DeviceState], metric: Metric) -> str:
+    if not states:
+        return "UNKNOWN"
+    worst = "GOOD"
+    for s in states:
+        if s.status.value == "stale":
+            worst = "STALE"
+        elif not s.usable or s.get(metric) is None:
+            return "MISSING"
+    return worst
+
+
+def data_quality(snap: SiteSnapshot) -> dict[str, str]:
+    q: dict[str, str] = {}
+    if snap.grid_device_id is None:
+        q["grid"] = "UNKNOWN"
+    else:
+        st = snap.devices.get(snap.grid_device_id)
+        q["grid"] = ("GOOD" if snap.grid_valid else "STALE" if st is not None and st.status.value == "stale"
+                     else "INVALID" if st is not None and st.usable else "MISSING")
+    q["pv"] = _quality_of(snap.states(*PV_CATEGORIES), Metric.PV_POWER_W)
+    batteries = [s for s in snap.states(*BATTERY_CATEGORIES)
+                 if s.category == DeviceCategory.BATTERY or Metric.BATTERY_POWER_W in s.values]
+    q["battery"] = _quality_of(batteries, Metric.BATTERY_POWER_W)
+    q["soc"] = "UNKNOWN" if not batteries else ("GOOD" if snap.battery_soc_pct is not None else "MISSING")
+    q["heat_pump"] = _quality_of(snap.states(DeviceCategory.HEAT_PUMP, DeviceCategory.HEAT_PUMP_BOILER),
+                                 Metric.HP_POWER_W)
+    q["ev"] = _quality_of(snap.states(DeviceCategory.EV_CHARGER), Metric.EV_POWER_W)
+    q["house"] = "CALCULATED" if snap.grid_valid and "MISSING" not in (q["pv"], q["battery"]) else \
+        ("ESTIMATED" if snap.grid_valid else "MISSING")
+    return q
+
+
+def energy_balance(snap: SiteSnapshot, raw_house_w: float) -> dict:
+    """grid + PV = battery + heat pump + EV + house. The house is the remainder, so a clearly
+    negative remainder means the measurements cannot all be right."""
+    tolerance = max(300.0, 0.1 * (abs(snap.grid_power_w or 0) + snap.pv_power_w + abs(snap.battery_power_w)))
+    ok = raw_house_w >= -tolerance
+    hints = []
+    if not ok:
+        hints = ["tekenconventie van een meter of apparaat omgedraaid (import/export of laden/ontladen)",
+                 "PV of batterij dubbel gemeten (bijv. ook al zichtbaar in een submeter)",
+                 "verkeerde meetbron gekoppeld als primaire netmeter",
+                 "een apparaat ontbreekt of levert verouderde waarden"]
+    return {"ok": ok, "residual_w": round(raw_house_w, 1), "tolerance_w": round(tolerance, 1), "hints": hints}

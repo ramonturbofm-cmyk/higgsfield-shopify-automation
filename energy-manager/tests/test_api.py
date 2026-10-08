@@ -325,3 +325,28 @@ async def test_energyzero_selectable_without_token(env):
     assert r.status_code == 200, r.text
     assert type(rt.prices.provider).__name__ == "EnergyZeroProvider" and rt.prices.provider.resolution == 60
     assert "token" not in (rt.prices.last_error or "")   # (a fetch error without network is fine here)
+
+
+async def test_health_installation_status_and_quality(env):
+    rt, c = env
+    for _ in range(2):
+        await rt.tick_once()
+    live = (await c.get("/api/v1/energy/live")).json()
+    assert live["quality"]["grid"] == "GOOD" and live["quality"]["house"] == "CALCULATED"
+    assert live["balance"]["ok"] is True
+    assert live["ems_status"]["state"] in ("AUTOMATIC", "DEGRADED", "SHADOW_MODE")
+    h = (await c.get("/api/v1/health")).json()
+    assert 0 <= h["score"] <= 100 and any(c_["key"] == "grid_meter" and c_["state"] == "ok" for c_ in h["checks"])
+    inst = (await c.get("/api/v1/installation")).json()
+    keys = {i["key"]: i for i in inst["items"]}
+    assert keys["grid_meter"]["state"] == "ONLINE" and keys["battery"]["state"] == "ONLINE"
+    r = await c.post("/api/v1/overrides", json={"device": "battery", "action": "battery_standby", "duration_min": 30})
+    assert r.status_code == 200
+    await rt.tick_once()
+    live = (await c.get("/api/v1/energy/live")).json()
+    assert live["ems_status"]["state"] == "MANUAL_OVERRIDE"
+    assert live["now"]["what"] and live["now"]["why"] and live["now"]["limits"]
+    s = (await c.get("/api/v1/settlement/compare?period=7d")).json()
+    assert [x["rules"] for x in s["scenarios"]] == ["NL-2026", "NL-2027"]
+    taxes = (await c.get("/api/v1/tariff/taxes")).json()
+    assert any(t["year"] == 2025 for t in taxes["table"])

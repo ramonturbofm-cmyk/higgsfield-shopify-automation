@@ -196,7 +196,7 @@ class EMSRuntime:
                         provider = DemoProvider(self.site.env)
         except ValueError as exc:
             provider_error = str(exc)
-        self.prices = PriceService(self.db, cfg.prices.bidding_zone, provider)
+        self.prices = PriceService(self.db, cfg.prices.bidding_zone, provider, cfg.site.timezone)
         self.prices.last_error = provider_error
         self.tariff = TariffEngine(cfg.tariff, self.prices.spot, cfg.site.timezone)
         weather = None
@@ -490,7 +490,204 @@ class EMSRuntime:
         slot = self.optimizer.current_slot(now)
         if slot:
             out["plan_slot"] = slot
+        out["quality"] = snap.quality
+        out["balance"] = snap.balance
+        out["ems_status"] = self.ems_status()
+        out["now"] = self.now_explanation()
         return out
+
+    # ------------------------------------------------------- status / health
+    def ems_status(self) -> dict:
+        """AUTOMATIC | SHADOW_MODE | MANUAL_OVERRIDE | DEGRADED | SAFE_MODE | ERROR, with the reason."""
+        eng = self.engine
+        if self.watchdog_tripped:
+            return {"state": "ERROR", "label": "Storing", "reason": "regelcyclus vastgelopen"}
+        if eng.failsafe_active:
+            return {"state": "SAFE_MODE", "label": "Veilige modus", "reason": eng.failsafe_reason}
+        manual = [o for o in eng.overrides.active() if o.source == "override"]
+        if manual:
+            return {"state": "MANUAL_OVERRIDE", "label": "Handmatige bediening",
+                    "reason": ", ".join(o.command.describe_nl() for o in manual)}
+        controllable = [d for d in self.config.devices if d.enabled and self.devices.devices.get(d.id)
+                        and self.devices.devices[d.id].driver is not None
+                        and any(c.value.startswith("control_") for c in self.devices.devices[d.id].driver.capabilities())]
+        if controllable and all(d.control_level in ("shadow", "read_only", "connection_test") for d in controllable) \
+                and any(d.control_level == "shadow" for d in controllable):
+            return {"state": "SHADOW_MODE", "label": "Schaduwmodus", "reason": "het EMS rekent mee maar stuurt niets aan"}
+        problems = []
+        snap = eng.last_snapshot
+        if eng.grid_selection.status == GridMeterStatus.NO_PRIMARY_GRID_METER:
+            problems.append("geen primaire netmeter")
+        elif snap is not None and not snap.grid_valid:
+            problems.append("netmeting niet actueel")
+        if not self.nodes.identity.is_controller:
+            return {"state": "DEGRADED" if problems else "AUTOMATIC", "label": "Gateway",
+                    "reason": "deze node levert apparaten aan een andere controller"}
+        if self.optimizer.plan is None or not self.optimizer.plan.ok:
+            problems.append("geen optimale planning (terugval op zelfconsumptie)")
+        offline = [d for d, st in (snap.devices.items() if snap else []) if st.status.value == "offline"]
+        if offline:
+            problems.append(f"offline: {', '.join(offline)}")
+        if problems:
+            return {"state": "DEGRADED", "label": "Beperkt", "reason": "; ".join(problems)}
+        return {"state": "AUTOMATIC", "label": "Automatisch", "reason": "optimizer regelt volgens planning"}
+
+    def now_explanation(self) -> dict | None:
+        """WAT doet het EMS nu, WAAROM, TOT WANNEER, VERWACHT VOORDEEL, WELKE GRENZEN."""
+        decisions = self.engine.last_decisions
+        if not decisions:
+            return None
+        order = {"battery": 0, "ev_charger": 1, "heat_pump": 2, "pv_inverter": 3}
+        def rank(item):
+            dev_id, _ = item
+            try:
+                return order.get(self.config.device(dev_id).category.value, 9)
+            except KeyError:
+                return 9
+        dev_id, d = sorted(decisions.items(), key=rank)[0]
+        until = None
+        now = self.clock.now()
+        slots = self.optimizer.upcoming(now, 36)
+        if slots and d.get("action") in ("battery_charge", "battery_discharge", "battery_standby", "battery_auto"):
+            sign = lambda w: 0 if abs(w or 0) < 200 else (1 if w > 0 else -1)  # noqa: E731
+            cur = sign(slots[0].get("battery_w"))
+            for row in slots[1:]:
+                if sign(row.get("battery_w")) != cur:
+                    until = row["start"]
+                    break
+        try:
+            name = self.config.device(dev_id).name
+        except KeyError:
+            name = dev_id
+        limits = [f"SOC {self.config.battery.min_soc:.0f}–{self.config.battery.max_soc:.0f}% "
+                  f"(reserve {self.config.battery.reserve_soc:.0f}%)",
+                  f"aansluiting {self.engine.grid_guard.limit_w / 1000:.1f} kW"]
+        plan = self.optimizer.plan
+        benefit = d.get("expected_benefit")
+        if benefit is None and plan is not None and plan.ok and plan.baseline_cost is not None:
+            benefit = round(plan.baseline_cost - plan.expected_cost, 2)
+        return {"device": dev_id, "device_name": name, "what": d.get("summary"), "outcome": d.get("outcome"),
+                "why": d.get("reasons") or [], "until": until, "expected_benefit_eur": benefit, "limits": limits,
+                "since": d.get("ts")}
+
+    def config_warnings(self) -> list[dict]:
+        """Plausibility checks on top of the hard validation (which already blocks e.g. min SOC > max SOC)."""
+        cfg, out = self.config, []
+        conn = cfg.grid.connection_kw
+        if cfg.grid.max_import_kw and cfg.grid.max_import_kw > conn * 1.001:
+            out.append({"level": "warning", "field": "grid.max_import_kw",
+                        "message": f"Maximale afname {cfg.grid.max_import_kw:.1f} kW is hoger dan de aansluiting "
+                                   f"{cfg.grid.phases}×{cfg.grid.ampere_per_phase:.0f} A ({conn:.1f} kW)."})
+        zero = cfg.strategy.export_mode.value == "zero" or cfg.strategy.profile.value == "zero_export"
+        if zero and self.engine.grid_selection.device_id is None:
+            out.append({"level": "error", "field": "strategy.export_mode",
+                        "message": "Nul-teruglevering vraagt een primaire netmeter; deze functie is niet actief."})
+        for d in cfg.devices:
+            md = self.devices.devices.get(d.id)
+            if d.category.value == "battery" and not d.params.get("capacity_kwh") and \
+                    not (d.params.get("sim") or {}).get("capacity_kwh"):
+                out.append({"level": "warning", "field": f"devices.{d.id}.params.capacity_kwh",
+                            "message": f"{d.name}: capaciteit (kWh) ontbreekt — de optimizer kan de batterij niet plannen."})
+            if md and md.driver is None and d.enabled:
+                out.append({"level": "error", "field": f"devices.{d.id}.driver", "message": f"{d.name}: {md.error}"})
+        if cfg.prices.provider == "none" and cfg.tariff.contract_type.value == "dynamic":
+            out.append({"level": "warning", "field": "prices.provider",
+                        "message": "Dynamisch contract zonder prijsbron: kies bijvoorbeeld EnergyZero."})
+        return out
+
+    def installation(self) -> dict:
+        snap = self.engine.last_snapshot
+        cfg = self.config
+
+        def state_of(cats: tuple[str, ...]) -> tuple[str, list[str]]:
+            devs = [d for d in cfg.devices if d.category.value in cats and d.enabled]
+            if not devs:
+                return "NOT_CONFIGURED", []
+            states = [snap.devices[d.id].status.value if snap and d.id in snap.devices else "unknown" for d in devs]
+            st = "ONLINE" if all(s == "online" for s in states) else ("ERROR" if all(s == "offline" for s in states)
+                                                                      else "CONFIGURED")
+            return st, [d.name for d in devs]
+
+        sel = self.engine.grid_selection
+        t = cfg.tariff
+        items = [
+            {"key": "site", "label": "Locatie", "state": "CONFIGURED", "detail": f"{cfg.site.name} ({cfg.site.timezone})"},
+            {"key": "grid", "label": "Netaansluiting", "state": "CONFIGURED",
+             "detail": f"{cfg.grid.phases}×{cfg.grid.ampere_per_phase:.0f} A ({cfg.grid.connection_kw:.1f} kW)"},
+            {"key": "grid_meter", "label": "Primaire netmeter",
+             "state": "NOT_CONFIGURED" if sel.device_id is None else ("ONLINE" if snap and snap.grid_valid else "ERROR"),
+             "detail": sel.reason if sel.device_id is None else self._device_name(sel.device_id)},
+        ]
+        for key, label, cats in (("pv", "Zonnepanelen", ("pv_inverter", "hybrid_inverter")),
+                                 ("battery", "Batterij", ("battery",)), ("heat_pump", "Warmtepomp",
+                                                                         ("heat_pump", "heat_pump_boiler")),
+                                 ("ev", "Laadpaal / EV", ("ev_charger",))):
+            st, names = state_of(cats)
+            items.append({"key": key, "label": label, "state": st, "detail": ", ".join(names) or "niet ingesteld"})
+        contract = "CONFIGURED" if (t.contract_type.value != "dynamic" or cfg.prices.provider != "none") else "NOT_CONFIGURED"
+        items.append({"key": "contract", "label": "Energiecontract", "state": contract,
+                      "detail": f"{t.contract_name} — {t.contract_type.value}, prijsbron {cfg.prices.provider}"})
+        items.append({"key": "nodes", "label": "Nodes", "state": "ONLINE" if all(
+            link.online for link in self.nodes.links.values()) else "ERROR",
+            "detail": f"{self.nodes.identity.name} ({self.nodes.identity.platform})"
+                      + (f" + {len(self.nodes.links)} gekoppeld" if self.nodes.links else "")})
+        items.append({"key": "strategy", "label": "EMS-strategie", "state": "CONFIGURED",
+                      "detail": cfg.strategy.profile.value if hasattr(cfg.strategy.profile, "value")
+                      else str(cfg.strategy.profile)})
+        return {"items": items, "status": self.ems_status(), "warnings": self.config_warnings()}
+
+    def health(self) -> dict:
+        snap = self.engine.last_snapshot
+        now = self.clock.now()
+        checks: list[dict] = []
+
+        def add(key, label, state, detail=""):
+            checks.append({"key": key, "label": label, "state": state, "detail": detail})
+
+        sel = self.engine.grid_selection
+        if sel.device_id is None:
+            add("grid_meter", "Netmeter", "warn", sel.reason)
+        else:
+            add("grid_meter", "Netmeter", "ok" if snap and snap.grid_valid else "error",
+                "" if snap and snap.grid_valid else "geen actuele netmeting")
+        pst = self.prices.status(now)
+        if pst["provider"] is None:
+            add("prices", "Prijzen", "warn", "geen prijsbron ingesteld")
+        else:
+            today = pst.get("coverage", {}).get("today")
+            add("prices", "Prijzen", "error" if pst["last_error"] and not today else
+                ("ok" if today and today["complete"] else "warn"),
+                pst["last_error"] or ("" if today and today["complete"] else "niet alle kwartierprijzen van vandaag bekend"))
+        if snap is not None:
+            for key, label in (("battery", "Batterij"), ("pv", "Zonnepanelen"), ("heat_pump", "Warmtepomp"),
+                               ("ev", "Laadpaal")):
+                q = snap.quality.get(key, "UNKNOWN")
+                if q != "UNKNOWN":
+                    add(key, label, "ok" if q == "GOOD" else "warn" if q in ("STALE", "ESTIMATED") else "error",
+                        "" if q == "GOOD" else f"gegevens: {q}")
+            if snap.balance and not snap.balance.get("ok", True):
+                add("balance", "Energiebalans", "warn",
+                    f"meetwaarden tellen niet op (rest {snap.balance['residual_w']:.0f} W)")
+        if self.nodes.identity.is_controller:
+            st = self.optimizer.status()
+            add("optimizer", "Optimizer", "ok" if st["status"] == "optimal" else "warn", st.get("message") or "")
+        fc = self.forecast.status()
+        if fc["weather_provider"] is None:
+            add("forecast", "Prognose", "warn", "geen weerbron: standaardprofielen")
+        else:
+            add("forecast", "Prognose", "warn" if fc["last_error"] else "ok", fc["last_error"] or "")
+        add("time", "Tijd", "ok" if now.year >= 2025 else "error", "" if now.year >= 2025 else "systeemklok onjuist")
+        for link in self.nodes.links.values():
+            add(f"node:{link.node_id}", f"Node {link.name}", "ok" if link.online and link.lease_ok else
+                ("warn" if link.online else "error"), link.lease_error or link.error or "")
+        for dev_id, md in self.devices.devices.items():
+            cfg = md.config
+            if cfg.enabled and md.driver is not None and cfg.control_level in ("shadow", "read_only") and any(
+                    c.value.startswith("control_") for c in md.driver.capabilities()):
+                add(f"control:{dev_id}", f"Regeling {cfg.name}", "warn",
+                    "schaduwmodus" if cfg.control_level == "shadow" else "alleen lezen")
+        score = round(100 * sum({"ok": 1, "warn": 0.5, "error": 0}[c["state"]] for c in checks) / max(1, len(checks)))
+        return {"score": score, "checks": checks, "status": self.ems_status()}
 
     def plan_view(self, hours: float = 36) -> dict:
         plan = self.optimizer.plan
@@ -637,7 +834,8 @@ class EMSRuntime:
                                                                     "backend": self.db_url.split(":")[0]},
             "grid_meter": self.engine.grid_selection.to_dict(),
             "features": {} if snap is None else snap.features,
-            "prices": self.prices.status(), "forecast": self.forecast.status(), "optimizer": self.optimizer.status(),
+            "prices": self.prices.status(self.clock.now()), "forecast": self.forecast.status(),
+            "optimizer": self.optimizer.status(),
             "devices": {i: {"name": self._device_name(i), **self.devices.health(i, self.clock.now())}
                         for i in self.devices.devices},
             "last_tick": None if snap is None else snap.timestamp.isoformat(),

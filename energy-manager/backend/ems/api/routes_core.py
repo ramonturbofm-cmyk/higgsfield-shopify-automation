@@ -25,6 +25,8 @@ from ems.security.auth import ROLES, Principal, hash_api_token, hash_password, n
 from ems.server.history import day_bounds
 from ems.server.runtime import EMSRuntime
 from ems.services.finance import finance_summary
+from ems.services.settlement import compare, rules_for
+from ems.tariffs.taxes import TAX_TABLE
 
 router = APIRouter(prefix="/api/v1")
 
@@ -308,7 +310,7 @@ async def get_prices(hours: float = Query(36, ge=1, le=168), past_hours: float =
         b = rt.tariff.breakdown_with_spot(p.start, p.spot)
         out.append({"start": p.start.isoformat(), "spot": p.spot, "import": b.import_price,
                     "export": b.export_price, "estimated": p.estimated})
-    return {"status": rt.prices.status(), "points": out, "now": now.isoformat()}
+    return {"status": rt.prices.status(now), "points": out, "now": now.isoformat()}
 
 
 @router.post("/prices/refresh", tags=["prices"])
@@ -539,6 +541,39 @@ async def finance(period: str = Query("today", pattern=r"^(today|month|year|\d{1
         out["battery_trading"]["equivalent_full_cycles"] = round(
             (e["battery_charge_kwh"] + e["battery_discharge_kwh"]) / 2 / sum(caps), 2)
     return {"period": period, "start": start.isoformat(), "end": end.isoformat(), **out}
+
+
+@router.get("/health", tags=["system"])
+async def health(_: Principal = Depends(viewer), rt: EMSRuntime = Depends(get_runtime)) -> dict:
+    return await asyncio.to_thread(rt.health)
+
+
+@router.get("/installation", tags=["system"])
+async def installation(_: Principal = Depends(viewer), rt: EMSRuntime = Depends(get_runtime)) -> dict:
+    """"Mijn installatie": every part of the site with ONLINE / CONFIGURED / NOT_CONFIGURED / ERROR."""
+    return await asyncio.to_thread(rt.installation)
+
+
+@router.get("/settlement/compare", tags=["finance"])
+async def settlement_compare(period: str = Query("30d", pattern=r"^(month|year|\d{1,3}d)$"),
+                             _: Principal = Depends(viewer), rt: EMSRuntime = Depends(get_runtime)) -> dict:
+    """Same measured history under different settlement rules (e.g. NL 2026 with netting vs 2027 without)."""
+    tz = ZoneInfo(rt.config.site.timezone)
+    start, end = day_bounds(rt.now(), tz, period)
+    rows = await asyncio.to_thread(rt.db.slots_between, rt.config.site.id, start.timestamp(), end.timestamp())
+    days = max(1e-6, (min(end, rt.now()) - start).total_seconds() / 86400)
+    out = compare(rows, rt.config.tariff, rt.config.site.timezone, rt.tariff.fixed_costs_per_day(), days)
+    current = rules_for(rt.config.tariff.tax_country, rt.now().astimezone(tz).date())
+    return {"period": period, "start": start.isoformat(), "end": end.isoformat(),
+            "current_rules": current.id if current else None, **out}
+
+
+@router.get("/tariff/taxes", tags=["tariff"])
+async def tax_table(_: Principal = Depends(viewer), rt: EMSRuntime = Depends(get_runtime)) -> dict:
+    return {"mode": rt.config.tariff.energy_tax_mode, "country": rt.config.tariff.tax_country,
+            "current": rt.tariff.energy_tax(rt.now()),
+            "table": [{"country": r.country, "year": r.year, "energy_tax_eur_kwh": r.energy_tax_eur_kwh,
+                       "source": r.source, "verify": r.verify} for r in TAX_TABLE.values()]}
 
 
 def safe_filename(text: str) -> str:

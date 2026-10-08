@@ -166,6 +166,7 @@ class StrategyProfile(StrEnum):
     LOWEST_COST = "lowest_cost"
     MAXIMUM_PROFIT = "maximum_profit"
     MAXIMUM_SELF_CONSUMPTION = "maximum_self_consumption"
+    BALANCED = "balanced"
     ZERO_EXPORT = "zero_export"
     BATTERY_SAVER = "battery_saver"
     PEAK_SHAVING = "peak_shaving"
@@ -230,6 +231,11 @@ class TariffConfig(_Base):
     # Import (afname)
     import_markup_eur_kwh: float = setting(0.02, label="Inkoopopslag", unit="EUR/kWh",
                                            help="Opslag van de leverancier bovenop de marktprijs (excl. btw).")
+    energy_tax_mode: Literal["table", "manual"] = setting(
+        "manual", label="Energiebelasting bepalen", level="advanced",
+        help="'table': per jaar uit de belastingtabel van het land (historie rekent met het tarief van dat jaar). "
+             "'manual': het tarief hieronder.")
+    tax_country: str = setting("NL", label="Land voor belastingtabel", level="expert")
     energy_tax_eur_kwh: float = setting(0.0, label="Energiebelasting", unit="EUR/kWh",
                                         help="Excl. btw. Vul het actuele tarief van uw contract in.")
     import_other_eur_kwh: float = setting(0.0, label="Overige kosten per kWh", unit="EUR/kWh", level="advanced")
