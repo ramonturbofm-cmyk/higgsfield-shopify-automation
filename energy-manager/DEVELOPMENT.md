@@ -60,7 +60,7 @@ Teststatus per onderdeel:
 | Onderdeel | Status | Test |
 |---|---|---|
 | Tariefengine (dynamisch/vast/variabel, salderen, opslagen, energiebelasting, btw) | `[x]` | UNIT |
-| Prijsbronnen: EnergyZero (NL, kwartier/uur, geen token), ENTSO-E (A44, token), handmatig, demo; cache in DB; schatting als prijzen ontbreken | `[~]` | UNIT (EnergyZero-formaat zoals in python-energyzero 5.1.0; ENTSO-E-parser met voorbeeld-XML). EnergyZero niet live getest: het domein is geblokkeerd in de ontwikkelomgeving |
+| Prijsbronnen: EnergyZero (NL, kwartier/uur, geen token), ENTSO-E (A44, token), handmatig, demo; cache in DB; schatting als prijzen ontbreken | `[~]` | UNIT (EnergyZero-formaat zoals in python-energyzero 5.1.0; ENTSO-E-parser met voorbeeld-XML). EnergyZero live gecontroleerd in CI (kwartier- en uurprijzen voor vandaag en morgen) |
 | Weer/PV-prognose (Open-Meteo), kalibratie op historie; verbruiksprofiel uit historie | `[x]` | UNIT, SIMULATOR |
 | Rolling-horizon MILP-optimizer (HiGHS), 36 h × 15 min, < 0,5 s | `[x]` | UNIT, SIMULATOR, E2E-scenario's 12:00 en 19:00 |
 | Batterijprofielen Battery Saver / Balanced / Profit / Aggressive, slijtagekosten, max. cycli | `[x]` | UNIT |
