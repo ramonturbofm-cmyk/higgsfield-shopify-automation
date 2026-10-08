@@ -26,6 +26,24 @@ jobs:
       - run: ruff check backend tests
       - run: python -m pytest -q --timeout 300 -p no:warnings
       - run: ems selftest
+      - name: Live check of the EnergyZero price source (external service; informative)
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import asyncio
+          from datetime import UTC, datetime, timedelta
+          from ems.prices.providers import EnergyZeroProvider
+          async def main():
+              now = datetime.now(UTC)
+              for interval in ("quarter", "hour"):
+                  prov = EnergyZeroProvider(interval)
+                  pts = await prov.fetch(now - timedelta(hours=12), now + timedelta(hours=36))
+                  print(interval, "points:", len(pts), "endpoint:", prov._endpoint)
+                  for p in pts[:3] + pts[-2:]:
+                      print("  ", p.start.isoformat(), p.price_eur_kwh, "EUR/kWh", p.resolution_min, "min")
+                  assert pts, "no prices"
+          asyncio.run(main())
+          PY
 
   docker:
     runs-on: ubuntu-latest
