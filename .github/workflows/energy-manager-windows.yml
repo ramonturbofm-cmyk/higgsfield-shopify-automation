@@ -14,6 +14,8 @@ jobs:
   windows:
     runs-on: windows-latest
     timeout-minutes: 60
+    permissions:
+      contents: write   # publish the download link (release asset)
     defaults:
       run:
         shell: pwsh
@@ -95,3 +97,26 @@ jobs:
           path: |
             energy-manager/dist/EnergyManagerSetup-*.exe
           if-no-files-found: error
+
+      # Direct download link that always points to the newest build:
+      # https://github.com/<owner>/<repo>/releases/download/energy-manager-windows/EnergyManagerSetup.exe
+      - name: Publish download link (rolling pre-release)
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/claude/energy-manager-phase1')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $exe = Get-ChildItem dist\EnergyManagerSetup-*.exe | Select-Object -First 1
+          Copy-Item $exe.FullName dist\EnergyManagerSetup.exe -Force
+          $tag = "energy-manager-windows"
+          $notes = "Nieuwste Windows-installer van Energy Manager (app + ingebouwde EMS-server, geen Raspberry Pi nodig).`n`n" +
+                   "Download **EnergyManagerSetup.exe** hieronder en start het. Windows meldt mogelijk 'Onbekende uitgever' " +
+                   "(nog niet ondertekend): Meer informatie -> Toch uitvoeren.`n`nGebouwd uit commit $env:GITHUB_SHA ($(Get-Date -Format 'yyyy-MM-dd HH:mm') UTC)."
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --prerelease --title "Energy Manager voor Windows (nieuwste versie)" --notes $notes --target $env:GITHUB_SHA
+          } else {
+            gh release edit $tag --notes $notes
+          }
+          if ($LASTEXITCODE -ne 0) { throw "release create/edit failed" }
+          gh release upload $tag dist\EnergyManagerSetup.exe --clobber
+          if ($LASTEXITCODE -ne 0) { throw "upload failed" }
