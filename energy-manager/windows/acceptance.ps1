@@ -33,9 +33,9 @@ function PortClosed([int]$seconds = 60) {
   return $false
 }
 function Api($path, $method = "GET", $body = $null) {
-  $args = @{ Uri = "$Base/api/v1$path"; Method = $method; Headers = @{ Authorization = "Bearer $script:Token" }; TimeoutSec = 30 }
-  if ($body -ne $null) { $args.Body = ($body | ConvertTo-Json -Depth 6); $args.ContentType = "application/json" }
-  return Invoke-RestMethod @args
+  $req = @{ Uri = "$Base/api/v1$path"; Method = $method; Headers = @{ Authorization = "Bearer $script:Token" }; TimeoutSec = 30 }
+  if ($body -ne $null) { $req.Body = ($body | ConvertTo-Json -Depth 6); $req.ContentType = "application/json" }
+  return Invoke-RestMethod @req
 }
 function Login() {
   $r = Invoke-RestMethod "$Base/api/v1/auth/login" -Method POST -ContentType "application/json" `

@@ -144,6 +144,23 @@ De bestaande `tests/test_drivers.py` controleert voor alle geregistreerde driver
 Leescapabilities worden echt uitgelezen; stuurcapabilities worden in de test **niet** uitgevoerd
 (geen hardware bewegen zonder toestemming van de gebruiker).
 
+## 6b. Documentatie per driver (verplicht)
+
+Iedere echte driver documenteert in zijn module/README:
+
+| Veld | Inhoud |
+|---|---|
+| SOURCE DOCUMENTATION | titel, versie, URL of document-id van de officiële bron |
+| SUPPORTED MODELS / TESTED MODELS | welke modellen volgens de bron / welke echt getest |
+| SUPPORTED FIRMWARE | firmwareversies volgens de bron |
+| READ FEATURES / WRITE FEATURES | wat gelezen en wat geschreven kan worden |
+| KNOWN LIMITATIONS | bekende beperkingen |
+| Classificatie | OFFICIAL (fabrikant/standaard), COMMUNITY, GENERIC (gebruiker levert mapping), EXPERIMENTAL |
+
+Een driver hoeft de EMS-kern en de optimizer nooit te wijzigen: hij registreert zich via
+`@register_driver` of het entry point `ems.drivers` en meldt zijn capabilities. Apparaten op een andere
+node worden automatisch via `node.remote` beschikbaar.
+
 ## 7. Status van integraties
 
 Legenda teststatus: UNIT = geautomatiseerde tests met nagebootst apparaat; SIMULATOR = in de woningsimulator;

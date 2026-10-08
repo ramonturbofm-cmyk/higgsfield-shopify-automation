@@ -206,3 +206,63 @@ Nieuwe echte apparaten starten altijd op READ ONLY. Drivers zonder `write_capabl
 
 Elke configuratie heeft een `site.id`; snapshots, journaal en database-records dragen die id.
 Een tweede locatie = een tweede `EMSConfig` + runtime-instantie onder dezelfde API (nog niet gebouwd).
+
+## 14. Nodes: standalone en gedistribueerd
+
+Iedere computer met Energy Manager is een **node** (Windows, Raspberry Pi of Linux), met een vaste
+`node_id` (UUID in `node.json`), naam, platform, OS, versie, rollen en hartslag (`/api/v1/node/info`).
+
+| Rolpreset | Rollen | Gebruik |
+|---|---|---|
+| `all_in_one` (standaard) | alle | Windows-only, Pi-only of Linux-only installatie |
+| `controller` | alle | regelt ook apparaten van gekoppelde nodes |
+| `gateway` | DEVICE_GATEWAY, USER_INTERFACE | bijv. Pi in de meterkast met P1/RS485; beslist zelf niets |
+
+```
+ Windows (UI)            Linux mini-pc (controller)                   Raspberry Pi (gateway)
+ ┌──────────┐  HTTP/WS   ┌────────────────────────────┐  node-API   ┌─────────────────────────────┐
+ │ app / web│──────────▶ │ optimizer → scheduler      │ ──────────▶ │ lease-check (epoch) → age   │
+ └──────────┘            │ → grid guard → CommandGate │  token +    │ → inbedrijfstelling →       │
+                         │   (inbedrijfstelling,      │  epoch      │   SafetyValidator → driver  │
+                         │    safety, lease)          │ ◀────────── │ → P1 / Modbus / RS485       │
+                         │ node.remote-drivers        │  metingen   │ buffer historie (SQLite)    │
+                         └────────────────────────────┘             └─────────────────────────────┘
+```
+
+* **Eigenaar-node is de autoriteit.** Elke node met apparaten verleent een *lease* (TTL 30 s, verlengd met
+  de hartslag elke 5 s) aan één controller; bij iedere wissel stijgt de *epoch*. Opdrachten dragen
+  houder + epoch + uitgiftetijd; anders weigert de eigenaar-node (fencing tegen split brain, geen oude
+  opdrachten na een netwerkstoring).
+* **Lokale veiligheid blijft altijd actief**: de eigenaar-node controleert online/verse data, capability,
+  inbedrijfstellingsniveau (ook daar opgeslagen), bereik, SOC-grenzen en rate limit — ook als de
+  controller iets anders vraagt.
+* **Netwerkuitval**: lease verloopt → de eigenaar-node geeft alle op afstand aangestuurde apparaten terug
+  aan hun eigen regeling; de controller ziet de apparaten als offline en plant opnieuw. Na herstel haalt
+  de controller de op de gateway gebufferde historie op (vervangt het gat in één transactie, geen dubbele
+  records).
+* **Koppelen**: 6-cijferige code op de nieuwe node (10 min, eenmalig, blokkade na 5 pogingen) → lang
+  node-token; op de eigenaar-node alleen de SHA-256-hash, bij de controller versleuteld in de secret store.
+* **Ontdekken**: mDNS/DNS-SD `_energymanager._tcp` (alleen adverteren en luisteren; geen netwerkscans).
+* **Failover** is bewust niet automatisch: een tweede controller krijgt pas regelrecht als de lease van de
+  eerste verlopen is. Veiligheid gaat boven snelle overname.
+
+## 15. Commandoroute en prioriteiten
+
+`optimizer / handmatig / automatisering` → **scheduler** (één winnaar per apparaatfunctie: 1 veiligheid,
+2 nood, 3 netbeveiliging, 4 inbedrijfstelling, 5 handmatig, 6 optimizer, 7 automatisering, 8 standaard)
+→ **GridGuard** (begrenst EV-laden en batterijladen als de aansluiting overbelast zou raken, ook bij
+handmatige opdrachten) → **CommandGate** (inbedrijfstelling, SafetyValidator, regelrecht, dry-run/simulatie,
+deduplicatie) → driver (lokaal of `node.remote` → eigenaar-node → zelfde controles) → hardware.
+Elke uitkomst komt in het journaal met bron (optimizer, handmatig, automatisering, `node:<naam>`, safety).
+
+## 16. Datakwaliteit, energiebalans, prijzen en settlement
+
+* Iedere grootheid in de snapshot krijgt een kwaliteit (GOOD, CALCULATED, ESTIMATED, STALE, INVALID,
+  MISSING, UNKNOWN). Netgestuurde functies (zero-export, piekbegrenzing, fasebewaking) draaien alleen op een
+  GOOD primaire netmeting.
+* Energiebalans: net + PV = batterij + warmtepomp + EV + huis; een duidelijk negatieve rest wordt gemeld
+  met mogelijke oorzaken (tekenconventie, dubbele meting, verkeerde meter).
+* Intervallen: MARKET (15 min), CONTRACT (15/60 min), OPTIMIZER (15 min, elke 5 min herberekend),
+  CONTROL (10 s / apparaatafhankelijk). Lokale dagen hebben 92/96/100 kwartieren rond zomer-/wintertijd.
+* Tariefengine = marginale prijzen per kWh (vaste kosten nooit marginaal); energiebelasting per land/jaar.
+* Settlement engine = verrekening over een periode volgens landregels (NL 2026 salderen, 2027 niet).

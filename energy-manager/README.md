@@ -5,7 +5,7 @@ De EMS-server draait 24/7 zelfstandig op een **Raspberry Pi 4/5** (of andere Lin
 plant en logt. De **Windows-app** en de **webinterface** (telefoon/tablet) zijn alleen bediening:
 het EMS blijft werken als de app dicht is.
 
-> **Versie 0.2.0.** Volledige server, optimizer, webinterface, Windows-app en Demo Mode werken.
+> **Versie 0.3.0.** Volledige server, optimizer, webinterface, Windows-app en Demo Mode werken.
 > Uitlezen van echte apparaten: HomeWizard P1, DSMR P1 en generieke Modbus TCP/HTTP/MQTT
 > (alleen-lezen). Er is nog **niets met echte hardware getest** en er zijn bewust **geen schrijvende
 > drivers** voor echte apparaten (geen verzonnen protocollen). Status: [DEVELOPMENT.md](DEVELOPMENT.md).
@@ -65,34 +65,47 @@ gebruik `${VARIABELE}` met de waarde in `.env` voor eigen geheimen.
 
 ## Windows
 
-Installer: **`EnergyManagerSetup-<versie>.exe`** — wordt gebouwd door GitHub Actions
-(workflow *Energy Manager — Windows installer*, artifact *EnergyManager-Windows*).
+**Downloaden (altijd de nieuwste geteste versie):**
+https://github.com/ramonturbofm-cmyk/higgsfield-shopify-automation/releases/download/energy-manager-windows/EnergyManagerSetup.exe
 
-**Alles in één op uw Windows-pc — geen Raspberry Pi nodig.** Kies bij de installatie
-*"Alles op deze computer"* (standaard). Open daarna **Energy Manager** en kies onder *Op deze computer*:
+Iedere versie wordt op een schone Windows-machine automatisch getest (installeren, starten, Demo Mode,
+database, WebSocket, instellingen, app sluiten, herstart, upgrade, verwijderen); alleen bij succes wordt hij
+gepubliceerd. De testuitslag staat bij de download (`acceptance-results.txt`). Nog niet digitaal ondertekend:
+SmartScreen → *Meer informatie* → *Toch uitvoeren*.
 
-* **Mijn eigen installatie** — echte apparaten (slimme meter, zonnepanelen, …); bij de eerste keer maakt u
-  een beheerdersaccount aan;
-* **Demo** — een gesimuleerd huis om alles uit te proberen (inloggen: demo / demo).
+Bij het openen kiest u **hoe u Energy Manager wilt gebruiken**:
 
-Klik op **Starten**. Het EMS draait daarna op de achtergrond (zonder venster) en blijft werken als u de app
-sluit; met de installatie-optie *"EMS automatisch starten bij aanmelden"* start het ook na een herstart van
-Windows vanzelf. De app opent voortaan automatisch het EMS op deze computer. Stoppen: in de app via
-*Andere server* → **EMS stoppen**, of Startmenu → *Energy Manager → Hulpmiddelen → EMS stoppen*.
-Logboek bij problemen: `%LOCALAPPDATA%\EnergyManager\logs\server.log`, of Startmenu → *Hulpmiddelen →
-EMS starten met venster (foutzoeken)*.
+* **Alles op deze computer** — geen Raspberry Pi nodig. Kies *Mijn eigen installatie* (echte apparaten) of
+  *Demo* (gesimuleerd huis, inloggen demo/demo) en klik **Starten**. Het EMS draait op de achtergrond
+  (zonder venster), blijft werken als u de app sluit en start automatisch na aanmelden in Windows. Zet de
+  slaapstand van de pc uit; de app waarschuwt als de pc in slaap kan vallen.
+* **Verbinden met bestaand Energy Manager-systeem** — de app zoekt het EMS op het netwerk
+  (`energy-manager.local`, `raspberrypi.local`, eerdere servers) of u vult het adres in.
+* **Raspberry Pi / Linux-node toevoegen** — installeer Energy Manager op de Pi, toon daar onder *Nodes* de
+  koppelcode en koppel hem op deze computer onder *Nodes*. De Pi kan bijvoorbeeld de P1-meter of
+  RS485-apparaten aansluiten; samen vormen ze één EMS.
 
-Let op: voor regeling 24/7 moet de pc aan blijven (slaapstand uit). Een Raspberry Pi is zuiniger en
-betrouwbaarder voor permanent gebruik; de app werkt met beide.
+Stoppen: in de app *Andere server* → **EMS stoppen**, of Startmenu → *Energy Manager → Hulpmiddelen →
+EMS stoppen*. Logboek: `%LOCALAPPDATA%\EnergyManager\logs\server.log`. Gegevens blijven bewaard bij
+bijwerken en verwijderen (`%LOCALAPPDATA%\EnergyManager`).
 
-**Met een Raspberry Pi**: kies *"Alleen de app"* of gebruik in de app *Raspberry Pi of andere server*: de app
-zoekt de Pi (`energy-manager.local`, `raspberrypi.local`, eerder gebruikte servers) of u voert het IP-adres in.
+Zelf bouwen op Windows (Python 3.12, Node 20+, Rust, Inno Setup 6): `.\windows\build.ps1`;
+acceptatietest: `.\windows\acceptance.ps1 -Installer dist\EnergyManagerSetup-<versie>.exe`.
 
-* Installeert per gebruiker (geen beheerdersrechten); gegevens staan in `%LOCALAPPDATA%\EnergyManager`.
-* Nog niet digitaal ondertekend: SmartScreen → *Meer informatie* → *Toch uitvoeren*.
+## Meerdere computers (nodes)
 
-Zelf bouwen op Windows (Python 3.12, Node 20+, Rust, Inno Setup 6): `.\windows\build.ps1`.
-Ontwikkelen aan de app: `cd windows-app && npm install && npx tauri dev` (met een server op de achtergrond).
+Windows, Raspberry Pi en Linux zijn gelijkwaardig. Iedere installatie is een *node*; u kunt ze koppelen tot
+één EMS, bijvoorbeeld:
+
+| Opzet | Rollen |
+|---|---|
+| Alleen Windows / alleen Pi / alleen Linux | alles op die ene computer (standaard) |
+| Windows + Pi | Windows regelt en toont, de Pi in de meterkast leest P1/RS485 (rol *gateway*) |
+| Linux + Pi + Windows | Linux-mini-pc regelt (rol *controller*), Pi is gateway, Windows alleen bediening |
+
+Rol instellen: *Instellingen → Algemeen → Deze computer (node)* (ADVANCED). Koppelen gebeurt altijd met een
+koppelcode; een nieuwe node krijgt nooit automatisch toegang. Er regelt altijd maar één controller per
+apparaat; valt de verbinding weg, dan gaan de apparaten terug naar hun eigen regeling.
 
 ## Apparaten koppelen
 
@@ -125,7 +138,7 @@ cd energy-manager
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 ems serve --demo --data-dir ./data-demo     # http://127.0.0.1:8080 (login demo/demo)
-pytest -q                                   # 145 tests
+pytest -q                                   # 171 tests
 ruff check backend tests
 ems-sim --start 2026-06-15 --days 2 --compare-native   # simulator-CLI
 ```
@@ -142,6 +155,7 @@ energy-manager/
 │   ├── devices/       driver-interface, plugin-registry, DeviceManager
 │   ├── gridmeter/     GridMeter-abstractie en selectie van de primaire netmeter
 │   ├── integrations/  homewizard/, dsmr/, generic/ (Modbus TCP, HTTP/JSON, MQTT), mock/ (Demo Mode)
+│   ├── nodes/         node-identiteit, koppelen, regelrecht (lease), gateway, node.remote-driver
 │   ├── control/       controllers, zero-export, overrides, CommandGate (inbedrijfstelling)
 │   ├── tariffs/ prices/ forecasting/ optimizer/ automations/
 │   ├── services/      financieel, backtest/Auto-Tune, back-up

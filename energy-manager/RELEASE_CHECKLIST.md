@@ -48,6 +48,16 @@ Werk deze lijst af vóór elke release. Vink alleen af wat echt is gecontroleerd
 - [ ] Bijwerken over de vorige versie heen behoudt instellingen; verwijderen werkt
 - [ ] (Indien beschikbaar) installer en exe ondertekend
 
+- [ ] CI-stap *Windows acceptance test* groen (automatisch: installeren, Demo, database, WebSocket, instellingen, herstart via autostart, upgrade, verwijderen)
+- [ ] Slaapstandwaarschuwing verschijnt op een pc met slaapstand aan
+
+## 5b. Nodes (gedistribueerd)
+
+- [ ] Pi als gateway + Windows/Linux als controller: koppelen met code, P1-data komt binnen, opdracht naar de Pi uitgevoerd
+- [ ] Netwerkkabel van de Pi los: binnen 30 s apparaten terug naar eigen regeling; na herstel historie aangevuld
+- [ ] Tweede controller krijgt geen regelrecht zolang de eerste actief is
+- [ ] `pytest tests/test_distributed.py` groen
+
 ## 6. Webinterface
 
 - [ ] Alle pagina's openen zonder consolefouten (licht, donker, mobiel)
