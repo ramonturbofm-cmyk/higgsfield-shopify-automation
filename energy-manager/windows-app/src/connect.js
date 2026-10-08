@@ -60,7 +60,7 @@ async function scan() {
   const results = await Promise.all(candidates.map(async (b) => [b, await probe(b)]));
   const found = results.filter(([, i]) => i);
   list.replaceChildren(...(found.length ? found.map(([b, i]) => item(b, i))
-    : [Object.assign(document.createElement("p"), { className: "muted", textContent: "Geen server gevonden. Voer het adres van de Raspberry Pi handmatig in." })]));
+    : [Object.assign(document.createElement("p"), { className: "muted", textContent: "Geen server gevonden. Voer het adres van de Raspberry Pi handmatig in. Nog geen Raspberry Pi? Start via het Startmenu \"Energy Manager Server (Demo Mode)\" en klik daarna opnieuw op Zoeken." })]));
 }
 
 $("scan").onclick = scan;
@@ -69,7 +69,7 @@ $("manual").onsubmit = async (e) => {
   $("msg").textContent = "";
   let base;
   try { base = normalize($("addr").value); } catch { base = null; }
-  if (!base) { $("msg").textContent = "Ongeldig adres."; return; }
+  if (!base) { $("msg").textContent = $("addr").value.trim() ? "Ongeldig adres." : "Vul eerst het IP-adres of de naam van de Raspberry Pi in (bijv. 192.168.1.20), of 127.0.0.1 voor de server op deze pc."; return; }
   const info = await probe(base, 5000);
   if (!info) { $("msg").textContent = `Geen Energy Manager gevonden op ${base}. Staat de server aan en zit deze pc op hetzelfde netwerk?`; return; }
   open(base);
