@@ -1,24 +1,35 @@
-"""Settlement engine: what the measured energy costs under a country's settlement rules.
+"""Settlement engine: what the measured energy costs under a contract and the country's rules.
 
-Separate from the tariff engine (prices per kWh). Rules per country and period:
+Separate from the tariff engine (marginal prices per kWh for the optimizer). Results here are
+**estimates of the bill** (``kind: "estimate"``), never an official invoice; fixed costs only appear
+here, never in marginal decisions.
 
-* NL until 31-12-2026 — salderingsregeling: exported kWh are netted against imported kWh
-  over the year; netted kWh are credited at the (average) import price. Export above the
-  yearly import only earns the contract's feed-in value.
-* NL from 1-1-2027 — no netting (Wet beëindiging salderingsregeling): every exported kWh
-  earns the contract's export value, every imported kWh costs the import price.
+Rules per country and period:
+* NL until 31-12-2026 — salderingsregeling: energy tax (and VAT on it) is only due on the yearly
+  *net* consumption (import − export). How the supply part of netted kWh is settled depends on
+  the contract (``tariff.netting_method``):
+    - ``tax_only`` (typical for dynamic contracts): every kWh is bought and sold at its own
+      interval price; netting only removes energy tax + VAT on the netted kWh;
+    - ``import_price`` (typical for fixed/variable contracts): netted kWh are credited at the
+      period's average all-in import price.
+  ``auto`` picks ``tax_only`` for dynamic and ``import_price`` for other contracts.
+* NL from 1-1-2027 — no netting (Wet beëindiging salderingsregeling): tax on every imported kWh,
+  every exported kWh earns the contract's export value (which may be negative).
 
-The netting credit uses the period's average import price — an approximation of how
-suppliers settle; suppliers can differ in details (shown in the result).
+Energy tax uses the bracket table of the year of each interval (``tariffs.taxes``), counted from the
+start of the period (consumption before the period is unknown; noted in the result). A period that
+crosses a year boundary is split per year, each with that year's rules and rates.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from zoneinfo import ZoneInfo
 
-from ems.core.config import TariffConfig
+from ems.core.config import ContractType, TariffConfig
 from ems.tariffs.engine import TariffEngine
+from ems.tariffs.taxes import TaxRate, energy_tax_rate, tax_on_consumption
 
 
 @dataclass(frozen=True)
@@ -47,45 +58,144 @@ def rules_for(country: str, day: date) -> SettlementRules | None:
     return None
 
 
-def settle(slots: list[dict], tariff: TariffConfig, rules: SettlementRules, timezone: str,
-           fixed_per_day: float = 0.0, days: float = 0.0) -> dict:
-    """``slots``: 15-min history rows (slot_ts, spot, import_kwh, export_kwh). Prices are recomputed
-    from the spot price with the contract (without the contract's own netting switch)."""
+def _netting_method(tariff: TariffConfig) -> str:
+    m = getattr(tariff, "netting_method", "auto")
+    if m != "auto":
+        return m
+    return "tax_only" if tariff.contract_type == ContractType.DYNAMIC else "import_price"
+
+
+def _tax_rate(tariff: TariffConfig, day: date) -> TaxRate:
+    if tariff.energy_tax_mode == "table":
+        r = energy_tax_rate(tariff.tax_country, day)
+        if r is not None:
+            return r
+    return TaxRate(tariff.tax_country, day.year, tariff.energy_tax_eur_kwh, "handmatig ingesteld tarief")
+
+
+def _settle_year(rows: list[dict], tariff: TariffConfig, rules: SettlementRules, tz: ZoneInfo, year: int) -> dict:
     plain = tariff.model_copy(update={"netting": False})
-    engine = TariffEngine(plain, lambda _ts: None, timezone)
-    imp_kwh = exp_kwh = imp_cost = exp_value = 0.0
-    used = 0
-    for r in slots:
+    engine = TariffEngine(plain, lambda _ts: None, str(tz))
+    dynamic = tariff.contract_type == ContractType.DYNAMIC
+    vat = 1 + tariff.vat_pct / 100
+    imp_kwh = exp_kwh = supply = allin_cost = exp_value = neg_kwh = neg_cost = 0.0
+    used = missing = 0
+    for r in rows:
         if r.get("import_kwh") is None:
+            missing += 1
             continue
         ts = datetime.fromtimestamp(r["slot_ts"], UTC)
         b = engine.breakdown_with_spot(ts, r.get("spot"))
         if b.import_price is None:
+            missing += 1
             continue
         used += 1
         i, e = r.get("import_kwh") or 0.0, r.get("export_kwh") or 0.0
         imp_kwh += i
         exp_kwh += e
-        imp_cost += i * b.import_price
-        exp_value += e * (b.export_price or 0.0)
-    avg_import = imp_cost / imp_kwh if imp_kwh else 0.0
-    avg_export = exp_value / exp_kwh if exp_kwh else 0.0
-    if rules.netting:
-        netted = min(imp_kwh, exp_kwh)
-        netting_credit = netted * avg_import
-        export_revenue = (exp_kwh - netted) * avg_export
+        allin_cost += i * b.import_price
+        if dynamic:
+            parts = b.import_parts
+            supply += i * (parts.get("marktprijs", 0.0) + parts.get("inkoopopslag", 0.0) + parts.get("overig", 0.0)
+                           + parts.get("transactiekosten", 0.0))
+        ep = b.export_price or 0.0
+        exp_value += e * ep
+        if ep < 0 and e > 0:
+            neg_kwh += e
+            neg_cost += -e * ep
+    method = _netting_method(tariff) if rules.netting else "none"
+    netted = min(imp_kwh, exp_kwh) if rules.netting else 0.0
+    rate = _tax_rate(tariff, date(year, 7, 1))
+    warnings: list[str] = []
+    if dynamic:
+        taxable = imp_kwh - netted if rules.netting else imp_kwh
+        tax, warnings = tax_on_consumption(rate, 0.0, taxable)
+        tax_full, _ = tax_on_consumption(rate, 0.0, imp_kwh)
+        import_cost = (supply + tax_full) * vat                              # gross, before netting
+        if method == "import_price":
+            avg_imp = allin_cost / imp_kwh if imp_kwh else 0.0
+            avg_exp = exp_value / exp_kwh if exp_kwh else 0.0
+            netting_credit = netted * avg_imp
+            export_revenue = (exp_kwh - netted) * avg_exp
+        else:                                                                # tax_only / no netting
+            netting_credit = (tax_full - tax) * vat                          # avoided energy tax + VAT
+            export_revenue = exp_value
+        energy = import_cost - netting_credit - export_revenue
+        tax_eur = tax
     else:
-        netted, netting_credit, export_revenue = 0.0, 0.0, exp_value
-    energy = imp_cost - netting_credit - export_revenue
+        import_cost = allin_cost
+        avg_imp = allin_cost / imp_kwh if imp_kwh else 0.0
+        avg_exp = exp_value / exp_kwh if exp_kwh else 0.0
+        if rules.netting:
+            netting_credit = netted * avg_imp
+            export_revenue = (exp_kwh - netted) * avg_exp
+        else:
+            netting_credit, export_revenue = 0.0, exp_value
+        energy = import_cost - netting_credit - export_revenue
+        tax_eur = None
+        taxable = imp_kwh - netted
+    return {"year": year, "rules": rules.id, "netting_rules": rules.netting, "netting_method": method,
+            "slots": used, "missing_slots": missing,
+            "import_kwh": imp_kwh, "export_kwh": exp_kwh, "netted_kwh": netted, "taxable_kwh": taxable,
+            "import_cost_eur": import_cost, "netting_credit_eur": netting_credit, "export_revenue_eur": export_revenue,
+            "energy_tax_eur": tax_eur, "energy_cost_eur": energy, "negative_export_kwh": neg_kwh,
+            "negative_export_cost_eur": neg_cost, "allin_cost": allin_cost, "exp_value": exp_value,
+            "tax_source": rate.source, "warnings": warnings}
+
+
+def settle(slots: list[dict], tariff: TariffConfig, rules: SettlementRules | None, timezone: str,
+           fixed_per_day: float = 0.0, days: float = 0.0) -> dict:
+    """Estimated bill for ``slots`` (15-min rows: slot_ts, spot, import_kwh, export_kwh).
+
+    ``rules=None`` applies the rules valid on each interval's date (split per year); passing rules
+    forces them on the whole period (scenario comparison)."""
+    tz = ZoneInfo(timezone)
+    by_year: dict[int, list[dict]] = {}
+    for r in slots:
+        by_year.setdefault(datetime.fromtimestamp(r["slot_ts"], UTC).astimezone(tz).year, []).append(r)
+    parts = []
+    for year, rows in sorted(by_year.items()):
+        rr = rules or rules_for(tariff.tax_country, date(year, 7, 1)) or RULES["NL-2027"]
+        if rr.netting and not tariff.netting and rules is None:
+            rr = SettlementRules(f"{rr.id}-geen-saldering", f"{rr.label} — contract zonder salderen", rr.country,
+                                 False, rr.valid_from, rr.valid_to, rr.source)
+        parts.append(_settle_year(rows, tariff, rr, tz, year))
+    total = {k: sum(p[k] for p in parts) for k in ("import_kwh", "export_kwh", "netted_kwh", "import_cost_eur",
+                                                   "netting_credit_eur", "export_revenue_eur", "energy_cost_eur",
+                                                   "negative_export_kwh", "negative_export_cost_eur", "allin_cost",
+                                                   "exp_value", "slots", "missing_slots")}
+    first = rules or (rules_for(tariff.tax_country, date(min(by_year), 7, 1)) if by_year else None) or RULES["NL-2027"]
     fixed = fixed_per_day * days
     r2 = lambda x: round(x, 2)  # noqa: E731
-    return {"rules": rules.id, "label": rules.label, "netting": rules.netting, "source": rules.source,
-            "slots": used, "import_kwh": r2(imp_kwh), "export_kwh": r2(exp_kwh), "netted_kwh": r2(netted),
-            "import_cost_eur": r2(imp_cost), "netting_credit_eur": r2(netting_credit),
-            "export_revenue_eur": r2(export_revenue), "energy_cost_eur": r2(energy), "fixed_costs_eur": r2(fixed),
-            "total_eur": r2(energy + fixed), "avg_import_price": round(avg_import, 4),
-            "avg_export_value": round(avg_export, 4),
-            "note": "Salderen benaderd met de gemiddelde afnameprijs van de periode." if rules.netting else ""}
+    warnings = sorted({w for p in parts for w in p["warnings"]})
+    if total["missing_slots"]:
+        warnings.append(f"{total['missing_slots']} kwartieren zonder meting of prijs niet meegeteld")
+    tax_parts = [p["energy_tax_eur"] for p in parts if p["energy_tax_eur"] is not None]
+    method = parts[0]["netting_method"] if parts else "none"
+    note = []
+    if any(p["netted_kwh"] for p in parts):
+        note.append("Salderen: " + ("alleen energiebelasting + btw over gesaldeerde kWh vervalt; iedere kWh wordt "
+                                    "tegen de eigen kwartierprijs gekocht en verkocht" if method == "tax_only" else
+                                    "gesaldeerde kWh verrekend tegen de gemiddelde afnameprijs van de periode"))
+    if tax_parts:
+        note.append("Energiebelasting per schijf gerekend vanaf het begin van de periode (verbruik eerder in het "
+                    "jaar is niet bekend)")
+    return {"kind": "estimate", "rules": first.id if len(parts) <= 1 else "+".join(p["rules"] for p in parts),
+            "label": first.label if len(parts) <= 1 else " / ".join(f"{p['year']}: {p['rules']}" for p in parts),
+            "netting": any(p["netting_rules"] for p in parts),
+            "netting_method": method, "source": first.source, "years": [p["year"] for p in parts],
+            "slots": total["slots"], "missing_slots": total["missing_slots"],
+            "import_kwh": r2(total["import_kwh"]), "export_kwh": r2(total["export_kwh"]),
+            "netted_kwh": r2(total["netted_kwh"]), "import_cost_eur": r2(total["import_cost_eur"]),
+            "netting_credit_eur": r2(total["netting_credit_eur"]), "export_revenue_eur": r2(total["export_revenue_eur"]),
+            "energy_tax_eur": r2(sum(tax_parts)) if tax_parts else None,
+            "negative_export_kwh": r2(total["negative_export_kwh"]),
+            "negative_export_cost_eur": r2(total["negative_export_cost_eur"]),
+            "energy_cost_eur": r2(total["energy_cost_eur"]), "fixed_costs_eur": r2(fixed),
+            "total_eur": r2(total["energy_cost_eur"] + fixed),
+            "avg_import_price": round(total["allin_cost"] / total["import_kwh"], 4) if total["import_kwh"] else 0.0,
+            "avg_export_value": round(total["exp_value"] / total["export_kwh"], 4) if total["export_kwh"] else 0.0,
+            "tax_sources": sorted({p["tax_source"] for p in parts}), "warnings": warnings, "note": "; ".join(note)}
 
 
 def compare(slots: list[dict], tariff: TariffConfig, timezone: str, fixed_per_day: float, days: float,
@@ -98,6 +208,9 @@ def compare(slots: list[dict], tariff: TariffConfig, timezone: str, fixed_per_da
     for r in results[1:]:
         r["difference_eur"] = round(r["total_eur"] - base, 2)
         r["difference_per_year_eur"] = round(r["difference_eur"] * scale, 0) if scale else None
-    return {"days": days, "scenarios": results,
+    return {"days": days, "scenarios": results, "kind": "scenario",
             "explanation": "Zelfde gemeten verbruik en opwek, alleen de verrekenregels verschillen. Zonder salderen "
-                           "is iedere zelf gebruikte kWh (batterij, warmtepomp, auto op zonne-energie) meer waard."}
+                           "is iedere zelf gebruikte kWh (batterij, warmtepomp, auto op zonne-energie) meer waard.",
+            "limitation": "Ceteris paribus: het gedrag (batterijstrategie, verbruik) is in beide scenario's gelijk "
+                          "gehouden. In werkelijkheid zou de optimizer zonder salderen anders plannen; dit is dus "
+                          "geen simulatie van het toekomstige gedrag."}

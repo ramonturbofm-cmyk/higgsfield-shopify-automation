@@ -51,6 +51,18 @@ class BatteryModel:
     grid_export: bool = True
 
 
+def break_even_sell_price(buy_eur_kwh: float, b: BatteryModel, wear_multiplier: float = 1.0) -> float:
+    """Lowest price at which 1 kWh bought from the grid at ``buy_eur_kwh`` and sold (or used) later is
+    profitable, with the *same* cost terms as the optimizer objective: wear/2 per kWh charged and per
+    kWh discharged, the minimum grid-charge spread, and charge/discharge losses.
+
+    x kWh in -> x*eta_c*eta_d kWh out:  sell >= (buy + wear/2 + spread) / (eta_c*eta_d) + wear/2
+    """
+    wear = b.degradation_eur_kwh * wear_multiplier
+    rt = b.eta_charge * b.eta_discharge
+    return (buy_eur_kwh + wear / 2 + b.min_spread_eur_kwh) / rt + wear / 2
+
+
 @dataclass
 class HeatPumpModel:
     heat_loss_w_per_k: float
@@ -282,7 +294,8 @@ def solve(inp: OptimizerInput) -> Plan:
             if need_yb[t]:
                 m.con([(bc[t], 1), (yb[t], -b.max_charge_w)], hi=0)
                 m.con([(bd[t], 1), (yb[t], b.max_discharge_w)], hi=b.max_discharge_w)
-            m.con([(bg[t], 1), (bc[t], -1)], lo=-max(0.0, inp.pv_w[t] - inp.load_w[t]))
+            # Grid share of charging: at least the charge not covered by PV surplus, never above the charge.
+            m.con([(bg[t], 1), (bc[t], -1)], lo=-max(0.0, inp.pv_w[t] - inp.load_w[t]), hi=0.0)
             if not b.grid_export:
                 m.con([(ge[t], 1), (pvu[t], -1)], hi=0)
         if hp:

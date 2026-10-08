@@ -25,7 +25,7 @@ from ems.security.auth import ROLES, Principal, hash_api_token, hash_password, n
 from ems.server.history import day_bounds
 from ems.server.runtime import EMSRuntime
 from ems.services.finance import finance_summary
-from ems.services.settlement import compare, rules_for
+from ems.services.settlement import compare, rules_for, settle
 from ems.tariffs.taxes import TAX_TABLE
 
 router = APIRouter(prefix="/api/v1")
@@ -573,7 +573,7 @@ async def finance(period: str = Query("today", pattern=r"^(today|month|year|\d{1
     except ValueError as exc:
         raise _err(exc) from exc
     rows = await asyncio.to_thread(rt.db.slots_between, rt.config.site.id, start.timestamp(), end.timestamp())
-    days = (end - start).total_seconds() / 86400
+    days = max(0.0, (min(end, rt.now()) - start).total_seconds() / 86400)    # elapsed part of the period
     out = finance_summary(rows, rt.config, rt.tariff.fixed_costs_per_day(), days)
     caps = [float(d.params["capacity_kwh"]) for d in rt.config.devices if d.enabled and d.params.get("capacity_kwh")]
     if out.get("available") and caps:
@@ -608,12 +608,27 @@ async def settlement_compare(period: str = Query("30d", pattern=r"^(month|year|\
             "current_rules": current.id if current else None, **out}
 
 
+@router.get("/settlement/estimate", tags=["finance"])
+async def settlement_estimate(period: str = Query("30d", pattern=r"^(month|year|\d{1,3}d)$"),
+                              _: Principal = Depends(viewer), rt: EMSRuntime = Depends(get_runtime)) -> dict:
+    """Estimated bill for the measured period with the rules and tax rates valid on each date
+    (split at a year boundary). An estimate, not the supplier's invoice."""
+    tz = ZoneInfo(rt.config.site.timezone)
+    start, end = day_bounds(rt.now(), tz, period)
+    rows = await asyncio.to_thread(rt.db.slots_between, rt.config.site.id, start.timestamp(), end.timestamp())
+    days = max(1e-6, (min(end, rt.now()) - start).total_seconds() / 86400)
+    out = settle(rows, rt.config.tariff, None, rt.config.site.timezone, rt.tariff.fixed_costs_per_day(), days)
+    return {"period": period, "start": start.isoformat(), "end": end.isoformat(), **out}
+
+
 @router.get("/tariff/taxes", tags=["tariff"])
 async def tax_table(_: Principal = Depends(viewer), rt: EMSRuntime = Depends(get_runtime)) -> dict:
     return {"mode": rt.config.tariff.energy_tax_mode, "country": rt.config.tariff.tax_country,
             "current": rt.tariff.energy_tax(rt.now()),
             "table": [{"country": r.country, "year": r.year, "energy_tax_eur_kwh": r.energy_tax_eur_kwh,
-                       "source": r.source, "verify": r.verify} for r in TAX_TABLE.values()]}
+                       "source": r.source, "verify": r.verify,
+                       "brackets": [{"upto_kwh": b.upto_kwh, "rate_eur_kwh": b.rate_eur_kwh, "verify": b.verify}
+                                    for b in r.bracket_table()]} for r in TAX_TABLE.values()]}
 
 
 def safe_filename(text: str) -> str:

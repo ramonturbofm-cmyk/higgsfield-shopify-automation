@@ -252,6 +252,12 @@ class TariffConfig(_Base):
     export_vat: bool = setting(False, label="Btw over teruglevering", level="advanced")
     netting: bool = setting(False, label="Salderen",
                             help="Teruggeleverde kWh worden verrekend tegen de afnameprijs (zolang export < import).")
+    netting_method: Literal["auto", "tax_only", "import_price"] = setting(
+        "auto", label="Salderen: verrekening", level="expert",
+        help="Hoe uw leverancier gesaldeerde kWh verrekent (tot en met 2026). 'tax_only': alleen energiebelasting "
+             "en btw vervallen, iedere kWh tegen de eigen kwartierprijs (gebruikelijk bij dynamisch). "
+             "'import_price': tegen de gemiddelde afnameprijs (gebruikelijk bij vast/variabel). 'auto' kiest op "
+             "basis van het contracttype. Controleer dit in uw contract.")
     fixed_export_price_eur_kwh: float | None = setting(None, label="Vaste terugleververgoeding", unit="EUR/kWh")
     # Fixed costs
     fixed_monthly_eur: float = setting(0.0, label="Vaste kosten per maand", unit="EUR", level="advanced")
