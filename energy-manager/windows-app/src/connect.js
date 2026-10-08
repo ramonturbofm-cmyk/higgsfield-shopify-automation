@@ -70,8 +70,16 @@ $("manual").onsubmit = async (e) => {
   let base;
   try { base = normalize($("addr").value); } catch { base = null; }
   if (!base) { $("msg").textContent = $("addr").value.trim() ? "Ongeldig adres." : "Vul eerst het IP-adres of de naam van de Raspberry Pi in (bijv. 192.168.1.20), of 127.0.0.1 voor de server op deze pc."; return; }
-  const info = await probe(base, 5000);
-  if (!info) { $("msg").textContent = `Geen Energy Manager gevonden op ${base}. Staat de server aan en zit deze pc op hetzelfde netwerk?`; return; }
+  $("msg").textContent = "Verbinden…";
+  const info = await probe(base, 8000);
+  if (!info) {
+    // The check may be blocked while the server itself is fine: offer to open it directly.
+    const direct = Object.assign(document.createElement("button"), { type: "button", className: "btn", textContent: "Toch openen" });
+    direct.onclick = () => open(base);
+    $("msg").replaceChildren(`Geen Energy Manager gevonden op ${base}. Staat de server aan (zwart venster "Energy Manager server")? `,
+      "U kunt het adres ook direct openen: ", direct);
+    return;
+  }
   open(base);
 };
 
