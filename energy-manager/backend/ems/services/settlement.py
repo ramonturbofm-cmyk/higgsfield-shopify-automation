@@ -80,12 +80,21 @@ def _settle_year(rows: list[dict], tariff: TariffConfig, rules: SettlementRules,
     vat = 1 + tariff.vat_pct / 100
     imp_kwh = exp_kwh = supply = allin_cost = exp_value = neg_kwh = neg_cost = 0.0
     used = missing = 0
+    hourly: dict[datetime, float] = {}
+    if tariff.price_resolution_min == 60:            # contract bills the hourly average of the quarters
+        acc: dict[datetime, list[float]] = {}
+        for r in rows:
+            if r.get("spot") is not None:
+                h = datetime.fromtimestamp(r["slot_ts"], UTC).astimezone(tz).replace(minute=0, second=0)
+                acc.setdefault(h, []).append(r["spot"])
+        hourly = {h: sum(v) / len(v) for h, v in acc.items()}
     for r in rows:
         if r.get("import_kwh") is None:
             missing += 1
             continue
         ts = datetime.fromtimestamp(r["slot_ts"], UTC)
-        b = engine.breakdown_with_spot(ts, r.get("spot"))
+        spot = hourly.get(ts.astimezone(tz).replace(minute=0, second=0), r.get("spot")) if hourly else r.get("spot")
+        b = engine.breakdown_with_spot(ts, spot)
         if b.import_price is None:
             missing += 1
             continue

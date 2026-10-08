@@ -24,9 +24,14 @@ log = logging.getLogger(__name__)
 @dataclass
 class PriceSeriesPoint:
     start: datetime
-    spot: float
+    spot: float | None
     resolution_min: int
     estimated: bool
+
+    @property
+    def status(self) -> str:
+        """confirmed (published price) | estimated (forecast, never presented as known) | missing."""
+        return "missing" if self.spot is None else "estimated" if self.estimated else "confirmed"
 
 
 def local_day_slots(day: date, tz: ZoneInfo, minutes: int = 15) -> list[datetime]:
@@ -126,14 +131,28 @@ class PriceService:
         p = self._cache[-1]
         return p.start + timedelta(minutes=p.resolution_min)
 
-    def series(self, start: datetime, end: datetime, step_min: int = 15, estimate: bool = True) -> list[PriceSeriesPoint]:
+    def series(self, start: datetime, end: datetime, step_min: int = 15, estimate: bool = True,
+               include_missing: bool = False) -> list[PriceSeriesPoint]:
         out, t = [], start
         while t < end:
             v, est = self.spot_or_estimate(t) if estimate else (self.spot(t), False)
-            if v is not None:
-                out.append(PriceSeriesPoint(t, v, step_min, est))
+            if v is not None or include_missing:
+                out.append(PriceSeriesPoint(t, v, step_min, est and v is not None))
             t += timedelta(minutes=step_min)
         return out
+
+    def current(self, now: datetime) -> dict | None:
+        """The *published* price whose interval contains ``now`` (start <= now < end), or None.
+        Never an older price and never an estimate (audit P1-06)."""
+        i = bisect_right(self._starts, now) - 1
+        if i < 0:
+            return None
+        p = self._cache[i]
+        end = p.start + timedelta(minutes=p.resolution_min)
+        if not p.start <= now < end:
+            return None
+        return {"start": p.start.isoformat(), "end": end.isoformat(), "spot": p.price_eur_kwh,
+                "resolution_min": p.resolution_min}
 
     def coverage(self, day: date, minutes: int = 15) -> dict:
         """Which intervals of a local day have a known price (detects missing quarter-hours)."""

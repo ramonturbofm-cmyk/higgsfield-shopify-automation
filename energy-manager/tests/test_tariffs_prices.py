@@ -81,7 +81,7 @@ def test_parse_entsoe_acknowledgement_is_error():
 
 
 def test_manual_prices_require_timezone():
-    pts = parse_manual_prices([{"start": "2026-07-01T00:00:00+02:00", "price_eur_kwh": 0.1}])
+    pts, _ = parse_manual_prices([{"start": "2026-07-01T00:00:00+02:00", "price_eur_kwh": 0.1}])
     assert pts[0].start == datetime(2026, 6, 30, 22, tzinfo=UTC)
     with pytest.raises(ValueError):
         parse_manual_prices([{"start": "2026-07-01T00:00:00", "price_eur_kwh": 0.1}])

@@ -1,4 +1,4 @@
-import { api, can, eur, field, guard, h, num, state } from "../lib.js";
+import { api, can, dateTime, eur, field, guard, h, num, state } from "../lib.js";
 
 const SECTION_LABEL = { site: "Woning", grid: "Netaansluiting", battery: "Batterij", heatpump: "Warmtepomp", strategy: "Strategie",
   optimizer: "Optimizer", control: "Regeling", forecast: "Prognoses", notifications: "Meldingen", runtime: "Systeem", tariff: "Energiecontract",
@@ -99,7 +99,20 @@ export async function render(root, [tab = "general"]) {
       h("p", { class: "muted small" }, "ACTUAL_IMPORT_PRICE en ACTUAL_EXPORT_PRICE worden zo per kwartier berekend en gebruikt door de optimizer en het financiële overzicht. Er is geen leverancier ingebouwd: vul de waarden van uw eigen contract in."))));
     show();
   } else if (tab === "prices") {
-    const csv = h("textarea", { rows: 4, placeholder: "2026-10-07T00:00:00+02:00;0.105\n2026-10-07T01:00:00+02:00;0.098" });
+    const csv = h("textarea", { rows: 6, "aria-label": "prijzen (CSV)", placeholder: "2026-10-07T00:00:00+02:00;0.105\n2026-10-07T00:15:00+02:00;0.098" });
+    const res = h("select", { "aria-label": "resolutie" }, h("option", { value: "15" }, "per kwartier (15 min)"), h("option", { value: "60" }, "per uur (60 min)"));
+    const file = h("input", { type: "file", accept: ".csv,.txt", "aria-label": "CSV-bestand" });
+    file.addEventListener("change", async () => { if (file.files[0]) csv.value = await file.files[0].text(); });
+    const report = h("div", { class: "small", role: "status" });
+    const parse = () => csv.value.trim().split(/\n+/).filter((l) => l.trim() && !/^\s*(start|tijd)/i.test(l)).map((l) => {
+      const [start, price] = l.split(/[;\t]|,(?=\s*-?\d)/);
+      return { start: (start || "").trim(), price_eur_kwh: (price || "").trim(), resolution_min: Number(res.value) };
+    });
+    const send = (dryRun) => guard(async () => {
+      const r = await api("/prices/manual", { method: "POST", body: { points: parse(), dry_run: dryRun } });
+      report.replaceChildren(h("div", {}, `${r.intervals} intervallen (${r.first ? dateTime(r.first) : "—"} t/m ${r.last_end ? dateTime(r.last_end) : "—"})${dryRun ? "" : " opgeslagen"}.`),
+        r.gaps.length ? h("div", { class: "nok" }, `Ontbrekende intervallen: ${r.gaps.map((g) => `${dateTime(g.from)} – ${dateTime(g.to)}`).join("; ")}. Daar gebruikt het EMS een schatting.`) : h("div", { class: "ok" }, "Geen gaten."));
+    }, dryRun ? null : "Prijzen opgeslagen");
     const howto = h("details", { class: "small", style: { marginTop: "10px" } }, h("summary", {}, "Hoe krijg ik een ENTSO-E-token? (gratis)"),
       h("ol", {},
         h("li", {}, "Maak een gratis account aan op ", h("a", { href: "https://transparency.entsoe.eu/", target: "_blank", rel: "noopener" }, "transparency.entsoe.eu"), " (Login → Register)."),
@@ -108,12 +121,11 @@ export async function render(root, [tab = "general"]) {
         h("li", {}, "Kopieer het token hierboven, kies prijsbron ENTSO-E en klik op Opslaan.")),
       h("p", { class: "muted" }, "Makkelijker: kies prijsbron „EnergyZero” — dezelfde Nederlandse marktprijzen, zonder account of token."));
     root.append(h("div", { class: "grid cols-2" }, card("prices", howto), card("forecast"), h("div", { class: "card" }, h("h3", {}, "Prijzen handmatig invoeren"),
-      h("p", { class: "muted small" }, "Eén regel per uur: tijdstip met tijdzone;marktprijs in €/kWh (excl. btw)."), csv,
-      h("div", { class: "row", style: { marginTop: "10px" } }, h("button", { class: "btn", disabled: ro || null, onclick: () => guard(async () => {
-        const points = csv.value.trim().split(/\n+/).map((l) => { const [start, price] = l.split(/[;,\t]/); return { start: start.trim(), price_eur_kwh: Number(price), resolution_min: 60 }; });
-        const r = await api("/prices/manual", { method: "POST", body: { points } });
-        return r;
-      }, "Prijzen opgeslagen") }, "Opslaan")))));
+      h("p", { class: "muted small" }, "Eén regel per interval: tijdstip mét tijdzone (bijv. +02:00);marktprijs in €/kWh excl. btw. Rond de zomer-/wintertijd heeft een dag 92 of 100 kwartieren."),
+      h("div", { class: "row" }, h("label", { class: "f" }, "Resolutie", res), h("label", { class: "f" }, "Of CSV-bestand", file)), csv,
+      h("div", { class: "row", style: { marginTop: "10px" } },
+        h("button", { class: "btn", onclick: () => send(true) }, "Controleren"),
+        h("button", { class: "btn primary", disabled: ro || null, onclick: () => send(false) }, "Opslaan")), report)));
   } else if (tab === "profile") {
     const p = await api("/profiles");
     const sim = h("div", {});

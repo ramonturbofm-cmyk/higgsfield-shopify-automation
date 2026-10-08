@@ -134,6 +134,8 @@ class OptimizerService:
             spot, estimated = self.prices.spot_or_estimate(t)
             if spot is None and self.tariff.needs_spot:
                 break
+            if spot is not None and not estimated:     # hourly contract: hourly average of known quarters
+                spot = self.tariff.contract_spot(t, spot)
             b = self.tariff.breakdown_with_spot(t, spot)
             if b.import_price is None or b.export_price is None:
                 break

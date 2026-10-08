@@ -231,6 +231,10 @@ class TariffConfig(_Base):
     # Import (afname)
     import_markup_eur_kwh: float = setting(0.02, label="Inkoopopslag", unit="EUR/kWh",
                                            help="Opslag van de leverancier bovenop de marktprijs (excl. btw).")
+    price_resolution_min: Literal[15, 60] = setting(
+        15, label="Contractprijs per", unit="min", level="advanced",
+        help="15: iedere kwartier eigen prijs. 60: uw leverancier rekent per uur (gemiddelde van de vier "
+             "kwartierprijzen van de markt). Staat in uw contract.")
     energy_tax_mode: Literal["table", "manual"] = setting(
         "manual", label="Energiebelasting bepalen", level="advanced",
         help="'table': per jaar uit de belastingtabel van het land (historie rekent met het tarief van dat jaar). "

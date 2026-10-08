@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from ems.core.config import ContractType, TariffConfig
@@ -68,8 +68,20 @@ class TariffEngine:
                 return p.price_eur_kwh
         return None
 
+    def contract_spot(self, ts: datetime, quarter_spot: float | None = None) -> float | None:
+        """Market price as the contract bills it: the quarter-hour price, or for an hourly contract
+        the average of the four quarter-hours of that (local) hour. Missing quarters are skipped."""
+        if self.tariff.price_resolution_min != 60:
+            return self.spot(ts) if quarter_spot is None else quarter_spot
+        local = ts.astimezone(self.tz)
+        hour = local.replace(minute=0, second=0, microsecond=0)
+        vals = [v for k in range(4) if (v := self.spot(hour + timedelta(minutes=15 * k))) is not None]
+        if not vals:
+            return quarter_spot
+        return sum(vals) / len(vals)
+
     def breakdown(self, ts: datetime) -> PriceBreakdown:
-        return self.breakdown_with_spot(ts, self.spot(ts))
+        return self.breakdown_with_spot(ts, self.contract_spot(ts))
 
     def breakdown_with_spot(self, ts: datetime, spot: float | None) -> PriceBreakdown:
         t = self.tariff

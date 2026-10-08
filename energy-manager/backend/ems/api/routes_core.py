@@ -351,11 +351,21 @@ async def get_prices(hours: float = Query(36, ge=1, le=168), past_hours: float =
     now = rt.now()
     start = (now - timedelta(hours=past_hours)).replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)
     out = []
-    for p in rt.prices.series(start, now + timedelta(hours=hours), estimate=True):
-        b = rt.tariff.breakdown_with_spot(p.start, p.spot)
-        out.append({"start": p.start.isoformat(), "spot": p.spot, "import": b.import_price,
-                    "export": b.export_price, "estimated": p.estimated})
-    return {"status": rt.prices.status(now), "points": out, "now": now.isoformat()}
+    for p in rt.prices.series(start, now + timedelta(hours=hours), estimate=True, include_missing=True):
+        spot = None if p.spot is None else rt.tariff.contract_spot(p.start, p.spot)
+        b = rt.tariff.breakdown_with_spot(p.start, spot) if spot is not None else None
+        out.append({"start": p.start.isoformat(), "end": (p.start + timedelta(minutes=p.resolution_min)).isoformat(),
+                    "spot": p.spot, "import": None if b is None else b.import_price,
+                    "export": None if b is None else b.export_price, "estimated": p.estimated, "status": p.status})
+    cur = rt.prices.current(now)
+    current = None
+    if cur is not None:
+        b = rt.tariff.breakdown_with_spot(now, rt.tariff.contract_spot(now, cur["spot"]))
+        current = {**cur, "import": b.import_price, "export": b.export_price}
+    return {"status": rt.prices.status(now), "points": out, "now": now.isoformat(), "current": current,
+            "current_reason": None if current else "geen gepubliceerde prijs voor het huidige interval",
+            "market_resolution_min": 15, "contract_resolution_min": rt.config.tariff.price_resolution_min,
+            "timezone": rt.config.site.timezone}
 
 
 @router.post("/prices/refresh", tags=["prices"])
@@ -368,17 +378,20 @@ async def refresh_prices(_: Principal = Depends(operator), rt: EMSRuntime = Depe
 
 class ManualPrices(BaseModel):
     points: list[dict] = Field(max_length=5000)
+    dry_run: bool = False          # only validate and report gaps
 
 
 @router.post("/prices/manual", tags=["prices"])
 async def manual_prices(body: ManualPrices, _: Principal = Depends(admin), rt: EMSRuntime = Depends(get_runtime)) -> dict:
     try:
-        pts = parse_manual_prices(body.points)
+        pts, report = parse_manual_prices(body.points, rt.config.site.timezone)
     except (KeyError, ValueError, TypeError) as exc:
         raise _err(exc) from exc
+    if body.dry_run:
+        return {"stored": 0, **report}
     n = await asyncio.to_thread(rt.prices.add_points, pts, "manual")
     rt.optimizer.request("handmatige prijzen")
-    return {"stored": n}
+    return {"stored": n, **report}
 
 
 # ---------------------------------------------------------------- forecast

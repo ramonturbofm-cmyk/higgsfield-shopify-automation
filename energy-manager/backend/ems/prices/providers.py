@@ -221,12 +221,45 @@ class DemoProvider(PriceProvider):
         return out
 
 
-def parse_manual_prices(rows: list[dict]) -> list[PricePoint]:
-    """[{"start": ISO-8601 with offset, "price_eur_kwh": 0.12, "resolution_min": 60}, ...]"""
-    out = []
-    for r in rows:
-        start = datetime.fromisoformat(str(r["start"]).replace("Z", "+00:00"))
+def parse_manual_prices(rows: list[dict], timezone: str = "Europe/Amsterdam") -> tuple[list[PricePoint], dict]:
+    """Manual prices: [{"start": ISO-8601 *with* offset, "price_eur_kwh": 0.12, "resolution_min": 15|60}, ...].
+
+    Validates time zone, resolution, alignment and duplicates, and reports gaps (missing intervals,
+    also around daylight-saving changes) so the user sees what the EMS will have to estimate."""
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo(timezone)
+    out: dict[datetime, PricePoint] = {}
+    for n, r in enumerate(rows, start=1):
+        raw = str(r.get("start", "")).strip()
+        try:
+            start = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            raise ValueError(f"regel {n}: ongeldig tijdstip {raw!r}") from None
         if start.tzinfo is None:
-            raise ValueError("tijdstip zonder tijdzone")
-        out.append(PricePoint(start.astimezone(UTC), float(r["price_eur_kwh"]), int(r.get("resolution_min", 60))))
-    return out
+            raise ValueError(f"regel {n}: tijdstip zonder tijdzone (bijv. 2026-10-07T00:00:00+02:00)")
+        res = int(r.get("resolution_min", 60))
+        if res not in (15, 60):
+            raise ValueError(f"regel {n}: resolutie moet 15 of 60 minuten zijn")
+        if start.minute % res or start.second:
+            raise ValueError(f"regel {n}: {raw} valt niet op een {res}-minutengrens")
+        try:
+            price = float(str(r["price_eur_kwh"]).replace(",", "."))
+        except (KeyError, ValueError):
+            raise ValueError(f"regel {n}: ongeldige prijs") from None
+        if not -5 <= price <= 5:
+            raise ValueError(f"regel {n}: prijs {price} €/kWh onwaarschijnlijk (verwacht €/kWh, niet €/MWh)")
+        key = start.astimezone(UTC)
+        if key in out:
+            raise ValueError(f"regel {n}: dubbel interval {raw}")
+        out[key] = PricePoint(key, price, res)
+    points = sorted(out.values(), key=lambda p: p.start)
+    gaps = []
+    for a, b in zip(points, points[1:], strict=False):
+        end = a.start + timedelta(minutes=a.resolution_min)
+        if b.start > end:
+            gaps.append({"from": end.astimezone(tz).isoformat(), "to": b.start.astimezone(tz).isoformat()})
+    report = {"intervals": len(points), "gaps": gaps,
+              "first": points[0].start.astimezone(tz).isoformat() if points else None,
+              "last_end": (points[-1].start + timedelta(minutes=points[-1].resolution_min)).astimezone(tz).isoformat()
+              if points else None}
+    return points, report
