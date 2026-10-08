@@ -164,7 +164,7 @@ class MockSolarInverter(MockDriverBase):
 class MockBattery(MockDriverBase):
     manifest = _manifest("mock.battery", "Gesimuleerde thuisbatterij", DeviceCategory.BATTERY,
                          {C.READ_BATTERY_POWER, C.READ_BATTERY_SOC, C.READ_BATTERY_TEMPERATURE,
-                          C.CONTROL_BATTERY_MODE})
+                          C.CONTROL_BATTERY_MODE, C.CONTROL_BATTERY_POWER})
     component_type = SimBattery
 
     def _read(self) -> dict[Metric, Any]:

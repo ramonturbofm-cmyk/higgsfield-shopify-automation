@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from ems.control.authority import ConfirmationTracker, ControlState, ExecCheck, can_execute, control_state
 from ems.control.base import ControlContext, Controller
 from ems.control.gate import CommandGate, GateMode, GateResult, Outcome
 from ems.control.overrides import OverrideManager
@@ -28,6 +29,7 @@ from ems.core.clock import Clock
 from ems.core.config import EMSConfig
 from ems.core.events import EventBus
 from ems.core.journal import DecisionJournal, JournalEntry
+from ems.core.models import Command
 from ems.core.snapshot import SiteSnapshot, build_snapshot
 from ems.devices.manager import DeviceManager
 from ems.gridmeter.meter import GridMeterStatus, feature_availability, select_primary_grid_meter
@@ -65,6 +67,7 @@ class EMSEngine:
         self.gate = gate or CommandGate(devices, gate_mode(config), config.control.command_refresh_s,
                                         levels=self._level, safety=SafetyValidator.from_config(config))
         self.last_decisions: dict[str, dict] = {}
+        self.executions = ConfirmationTracker()
         self.tz = ZoneInfo(config.site.timezone)
         self.overrides = overrides or OverrideManager(clock, self.tz)
         self.failsafe_active = False
@@ -125,6 +128,7 @@ class EMSEngine:
         await self.bus.publish("snapshot", snap)
 
         await self._expire_overrides(now, run_id)
+        self.executions.evaluate({i: st.values for i, st in snap.devices.items()}, now)
 
         result.issues = self._health_issues(snap, now)
         if result.issues:
@@ -153,6 +157,7 @@ class EMSEngine:
         for decision in decisions:
             gr = await self.gate.submit(decision, now)
             result.results.append(gr)
+            self.executions.record(decision.command, gr.decision.command, gr.outcome.value, now, gr.error)
             if gr.outcome == Outcome.SENT:
                 self.commands_sent += 1
             repeat_reject = False
@@ -172,6 +177,19 @@ class EMSEngine:
                     "reasons": gr.decision.reasons, "expected_benefit": gr.decision.expected_benefit_eur}
         self.heartbeat = now
         return result
+
+    # -------------------------------------------------------- control state
+    def control_state(self, device_id: str) -> ControlState:
+        """The one authoritative control state of a device (shown everywhere in the UI)."""
+        md = self.devices.devices.get(device_id)
+        override = any(o.command.device_id == device_id for o in self.overrides.active())
+        return control_state(md, failsafe=self.failsafe_active, override_active=override)
+
+    def check(self, command: Command, user=None) -> ExecCheck:
+        """Central per-action validation (manual overrides, automations, UI action lists)."""
+        md = self.devices.devices.get(command.device_id)
+        return can_execute(md, command, user, self.control_state(command.device_id), config=self.config,
+                           gate_mode=self.gate.mode.value)
 
     # --------------------------------------------------------------- health
     def _level(self, device_id: str) -> tuple[str, float]:
@@ -194,7 +212,7 @@ class EMSEngine:
         return issues
 
     def _capabilities(self):
-        return {dev_id: d.driver.capabilities() for dev_id, d in self.devices.devices.items()
+        return {dev_id: d.driver.device_capabilities() for dev_id, d in self.devices.devices.items()
                 if d.driver is not None}
 
     async def _enter_failsafe(self, reason: str, run_id: str = "") -> None:

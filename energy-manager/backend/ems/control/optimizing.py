@@ -106,10 +106,23 @@ class OptimizingController(Controller):
             "self_consumption": "Batterij in zelfconsumptie",
         }[why].replace(".", ",")
         data = {"plan_battery_w": slot["battery_w"], "plan_soc_pct": slot["soc_pct"], "mode": why}
-        return [Decision(Command(s.device_id, action, value if action in (CommandAction.BATTERY_CHARGE,
-                                                                         CommandAction.BATTERY_DISCHARGE) else None),
-                         summary, list(reasons), source=f"controller:{self.name}", data=data,
-                         expected_benefit_eur=benefit) for s in devs]
+        power = (CommandAction.BATTERY_CHARGE, CommandAction.BATTERY_DISCHARGE)
+        out = []
+        for s in devs:
+            if action in power and not ctx.can(s.device_id, Capability.CONTROL_BATTERY_POWER):
+                # The device only supports modes, no power setpoint: never send a charge/discharge
+                # power command it cannot execute; keep it in its own self-consumption mode.
+                out.append(Decision(Command(s.device_id, CommandAction.BATTERY_AUTO),
+                                    "Batterij in zelfconsumptie (vermogen instellen niet ondersteund)",
+                                    list(reasons) + ["Plan wil laden/ontladen met vast vermogen, maar dit apparaat "
+                                                     "ondersteunt geen vermogensopdracht"],
+                                    source=f"controller:{self.name}", data={**data, "reason_code": "capability_missing"},
+                                    expected_benefit_eur=None))
+                continue
+            out.append(Decision(Command(s.device_id, action, value if action in power else None),
+                                summary, list(reasons), source=f"controller:{self.name}", data=data,
+                                expected_benefit_eur=benefit))
+        return out
 
     # -------------------------------------------------------------------- PV
     def _pv(self, snap: SiteSnapshot, ctx: ControlContext, slot: dict | None, tz) -> list[Decision]:

@@ -124,8 +124,13 @@ class DeviceDriver(ABC):
     def write_capable(self) -> bool:
         return self.manifest.write_capable or self.manifest.simulated
 
+    def device_capabilities(self) -> frozenset[Capability]:
+        """Type schema ∩ driver support — use this everywhere outside the driver itself."""
+        from ems.devices.capabilities import device_capabilities
+        return device_capabilities(self)
+
     def supports(self, command: Command) -> bool:
-        return ACTION_CAPABILITY[command.action] in self.capabilities()
+        return ACTION_CAPABILITY[command.action] in self.device_capabilities()
 
     @abstractmethod
     async def connect(self) -> None: ...
@@ -155,7 +160,7 @@ class DeviceDriver(ABC):
         report.reachable = True
         report.sample = {str(k): v for k, v in values.items()}
         report.checks.append(TestCheck("reachable", "apparaat bereikbaar", True))
-        caps = self.capabilities()
+        caps = self.device_capabilities()
         for cap in Capability:
             label = CAPABILITY_LABELS_NL.get(cap, cap.value)
             metrics = CAPABILITY_METRICS.get(cap)
@@ -169,21 +174,9 @@ class DeviceDriver(ABC):
                 # Control capabilities are not exercised during a test, to
                 # avoid moving real hardware without the user's consent.
                 report.checks.append(TestCheck(cap.value, label, True, "ondersteund door driver"))
-        for cap in sorted(set(Capability) - set(caps), key=lambda c: c.value):
-            if cap.value.startswith("control_") and _relevant(cap, self.config.category):
+        from ems.devices.capabilities import type_capabilities
+        for cap in sorted(type_capabilities(self.config.category) - set(caps), key=lambda c: c.value):
+            if cap.value.startswith("control_"):
                 report.checks.append(TestCheck(cap.value, CAPABILITY_LABELS_NL[cap], False,
                                                "niet ondersteund door deze driver"))
         return report
-
-
-_RELEVANT_CONTROLS: dict[Capability, tuple[DeviceCategory, ...]] = {
-    Capability.CONTROL_PV_LIMIT: (DeviceCategory.PV_INVERTER, DeviceCategory.HYBRID_INVERTER),
-    Capability.CONTROL_BATTERY_MODE: (DeviceCategory.BATTERY, DeviceCategory.HYBRID_INVERTER),
-    Capability.CONTROL_HP_MODE: (DeviceCategory.HEAT_PUMP, DeviceCategory.HEAT_PUMP_BOILER),
-    Capability.CONTROL_EV_CURRENT: (DeviceCategory.EV_CHARGER,),
-    Capability.CONTROL_SWITCH: (DeviceCategory.SMART_PLUG, DeviceCategory.BOILER),
-}
-
-
-def _relevant(cap: Capability, category: DeviceCategory) -> bool:
-    return category in _RELEVANT_CONTROLS.get(cap, ())

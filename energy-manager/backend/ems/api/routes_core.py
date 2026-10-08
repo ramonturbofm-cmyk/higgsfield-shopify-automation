@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from ems import __version__
 from ems.api.deps import admin, get_runtime, operator, viewer
 from ems.core.config import ConfigError, StrategyProfile, dump_config, settings_schema
-from ems.core.models import ACTION_CAPABILITY, HP_MODES, Command, CommandAction
+from ems.core.models import Command, CommandAction
 from ems.prices.providers import parse_manual_prices
 from ems.security.auth import ROLES, Principal, hash_api_token, hash_password, new_api_token, verify_password
 from ems.server.history import day_bounds
@@ -416,21 +416,15 @@ async def create_override(body: OverrideIn, p: Principal = Depends(operator), rt
         rt.config.device(body.device)
     except KeyError:
         raise HTTPException(404, "apparaat niet gevonden") from None
-    drv = rt.devices.devices[body.device].driver
-    if drv is None or ACTION_CAPABILITY[body.action] not in drv.capabilities():
-        raise HTTPException(422, "dit apparaat ondersteunt deze bediening niet")
-    if body.action == CommandAction.HP_MODE and body.value not in HP_MODES:
-        raise HTTPException(422, "warmtepompmodus moet normal, boost of eco zijn")
-    value = body.value
-    if body.action in (CommandAction.BATTERY_CHARGE, CommandAction.BATTERY_DISCHARGE, CommandAction.EV_CURRENT):
-        try:
-            value = float(value or 0)
-        except ValueError:
-            raise HTTPException(422, "waarde moet een getal zijn") from None
+    chk = rt.engine.check(Command(body.device, body.action, body.value), p)
+    if not chk.allowed:
+        raise HTTPException(422, "; ".join(chk.reasons) or "opdracht niet toegestaan")
+    value = chk.value
     ov = rt.engine.overrides.set(Command(body.device, body.action, value), body.duration_min, user=p.username)
     rt.optimizer.request("handmatige bediening")
     return {"device": body.device, "description": ov.command.describe_nl(),
-            "expires": None if ov.expires is None else ov.expires.isoformat()}
+            "expires": None if ov.expires is None else ov.expires.isoformat(),
+            "executes": chk.executes, "notes": chk.reasons, "control_state": chk.state}
 
 
 @router.delete("/overrides/{device}", tags=["control"])

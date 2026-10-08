@@ -206,7 +206,7 @@ class EMSRuntime:
         elif cfg.forecast.weather_provider == "demo" and self.site is not None:
             weather = DemoWeatherProvider(self.site.env)
         self.forecast = ForecastService(cfg, self.db, weather)
-        caps = {i: d.driver.capabilities() for i, d in self.devices.devices.items() if d.driver is not None}
+        caps = {i: d.driver.device_capabilities() for i, d in self.devices.devices.items() if d.driver is not None}
         self.optimizer = OptimizerService(cfg, self.prices, self.tariff, self.forecast, caps)
         # A pure device-gateway node never decides itself; its controller sends commands via the node API.
         self.controller = OptimizingController(self.optimizer) if self.nodes.identity.is_controller \
@@ -511,7 +511,7 @@ class EMSRuntime:
                     "reason": ", ".join(o.command.describe_nl() for o in manual)}
         controllable = [d for d in self.config.devices if d.enabled and self.devices.devices.get(d.id)
                         and self.devices.devices[d.id].driver is not None
-                        and any(c.value.startswith("control_") for c in self.devices.devices[d.id].driver.capabilities())]
+                        and any(c.value.startswith("control_") for c in self.devices.devices[d.id].driver.device_capabilities())]
         if controllable and all(d.control_level in ("shadow", "read_only", "connection_test") for d in controllable) \
                 and any(d.control_level == "shadow" for d in controllable):
             return {"state": "SHADOW_MODE", "label": "Schaduwmodus", "reason": "het EMS rekent mee maar stuurt niets aan"}
@@ -692,7 +692,7 @@ class EMSRuntime:
         for dev_id, md in self.devices.devices.items():
             cfg = md.config
             if cfg.enabled and md.driver is not None and cfg.control_level in ("shadow", "read_only") and any(
-                    c.value.startswith("control_") for c in md.driver.capabilities()):
+                    c.value.startswith("control_") for c in md.driver.device_capabilities()):
                 add(f"control:{dev_id}", f"Regeling {cfg.name}", "warn",
                     "schaduwmodus" if cfg.control_level == "shadow" else "alleen lezen")
         score = round(100 * sum({"ok": 1, "warn": 0.5, "error": 0}[c["state"]] for c in checks) / max(1, len(checks)))

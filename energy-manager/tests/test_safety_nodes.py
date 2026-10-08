@@ -28,8 +28,9 @@ class FakeDriver:
 def device(soc=50.0, age_s=1.0, connected=True, caps=None, params=None):
     cfg = DeviceConfig(id="bat", name="Batterij", category="battery", driver="x",
                        params=params or {"max_charge_w": 5000, "max_discharge_w": 4000})
-    md = ManagedDevice(cfg, FakeDriver(caps or {Capability.CONTROL_BATTERY_MODE, Capability.CONTROL_EV_CURRENT,
-                                               Capability.CONTROL_PV_LIMIT}), connected=connected)
+    caps = caps or {Capability.CONTROL_BATTERY_MODE, Capability.CONTROL_BATTERY_POWER,
+                    Capability.CONTROL_EV_CURRENT, Capability.CONTROL_PV_LIMIT}
+    md = ManagedDevice(cfg, FakeDriver(caps), connected=connected)
     md.last_ok = NOW - timedelta(seconds=age_s)
     md.last_values = {Metric.BATTERY_SOC_PCT: soc} if soc is not None else {}
     return md

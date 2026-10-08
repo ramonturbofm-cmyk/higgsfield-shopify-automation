@@ -104,18 +104,21 @@ async def test_full_chain_controller_gateway(cluster):
     gw.site.component("battery").soc_pct = 50.0
     await gw.tick_once()
     await ctl.nodes.step()           # heartbeat renews the lease
+    # A manual value above the battery's own limit is refused up front (backend range validation).
     r = await c.post("/api/v1/overrides", json={"device": batt_id, "action": "battery_charge", "value": 20000,
                                                 "duration_min": 30})
+    assert r.status_code == 422 and "6000" in r.text
+    r = await c.post("/api/v1/overrides", json={"device": batt_id, "action": "battery_charge", "value": 6000,
+                                                "duration_min": 30})
     assert r.status_code == 200, r.text
+    assert r.json()["executes"] is True
     await ctl.tick_once()
     last = ctl.engine.last_decisions[batt_id]
     assert last["outcome"] == "sent", last
     assert batt_id in ctl.engine.last_decisions
     pi_dec = gw.db.recent_decisions(10, device="battery")
     assert pi_dec and pi_dec[0]["outcome"] == "sent" and pi_dec[0]["source"] == "node:Mini-PC"
-    # 20 kW requested: clamped to the battery's own 6 kW limit (controller and Pi both validate).
     assert pi_dec[0]["new_value"] == 6000
-    assert any("Veiligheidscontrole" in r for r in last["reasons"])
     # The Pi validates on its own, even if a controller sends an out-of-range value directly.
     link = ctl.nodes.links[gid]
     from ems.core.models import Command, CommandAction

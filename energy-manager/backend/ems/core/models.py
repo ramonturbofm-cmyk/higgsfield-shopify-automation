@@ -31,6 +31,10 @@ class DeviceCategory(StrEnum):
     AIRCO = "airco"
     SMART_PLUG = "smart_plug"
     VENTILATION = "ventilation"
+    BATTERY_SYSTEM = "battery_system"
+    HVAC = "hvac"
+    SMART_RELAY = "smart_relay"
+    FLEXIBLE_LOAD = "flexible_load"
 
 
 class Metric(StrEnum):
@@ -58,6 +62,7 @@ class Metric(StrEnum):
     BATTERY_SOC_PCT = "battery_soc_pct"
     BATTERY_TEMPERATURE_C = "battery_temperature_c"
     BATTERY_MODE = "battery_mode"
+    BATTERY_MAX_SOC_PCT = "battery_max_soc_pct"   # SOC limit as reported by the device
     # Heat pump
     HP_POWER_W = "hp_power_w"
     HP_THERMAL_POWER_W = "hp_thermal_power_w"
@@ -69,6 +74,7 @@ class Metric(StrEnum):
     OUTDOOR_TEMP_C = "outdoor_temp_c"
     FLOW_TEMP_C = "flow_temp_c"
     RETURN_TEMP_C = "return_temp_c"
+    DHW_TEMP_C = "dhw_temp_c"                # domestic hot water (tapwater)
     # EV
     EV_POWER_W = "ev_power_w"
     EV_CONNECTED = "ev_connected"
@@ -96,10 +102,19 @@ class Capability(StrEnum):
     READ_EV_CONNECTED = "read_ev_connected"
     READ_EV_SOC = "read_ev_soc"
     READ_LOAD_POWER = "read_load_power"
-    # Control capabilities
+    READ_RETURN_TEMP = "read_return_temp"
+    READ_HP_COP = "read_hp_cop"
+    READ_HP_STATUS = "read_hp_status"
+    READ_TEMP_SETPOINT = "read_temp_setpoint"
+    READ_DHW_TEMP = "read_dhw_temp"
+    READ_SOC_LIMIT = "read_soc_limit"
+    # Control capabilities — one per independently controllable function
     CONTROL_PV_LIMIT = "control_pv_limit"
-    CONTROL_BATTERY_MODE = "control_battery_mode"
+    CONTROL_BATTERY_MODE = "control_battery_mode"      # auto (self-consumption) / standby
+    CONTROL_BATTERY_POWER = "control_battery_power"    # charge / discharge with a power setpoint
+    CONTROL_SOC_LIMIT = "control_soc_limit"            # set the device's maximum SOC
     CONTROL_HP_MODE = "control_hp_mode"
+    CONTROL_TEMP_SETPOINT = "control_temp_setpoint"    # room / water temperature setpoint
     CONTROL_EV_CURRENT = "control_ev_current"
     CONTROL_SWITCH = "control_switch"
 
@@ -123,6 +138,12 @@ CAPABILITY_METRICS: dict[Capability, tuple[Metric, ...]] = {
     Capability.READ_EV_CONNECTED: (Metric.EV_CONNECTED,),
     Capability.READ_EV_SOC: (Metric.EV_SOC_PCT,),
     Capability.READ_LOAD_POWER: (Metric.LOAD_POWER_W,),
+    Capability.READ_RETURN_TEMP: (Metric.RETURN_TEMP_C,),
+    Capability.READ_HP_COP: (Metric.HP_COP,),
+    Capability.READ_HP_STATUS: (Metric.HP_COMPRESSOR_ON,),
+    Capability.READ_TEMP_SETPOINT: (Metric.HP_SETPOINT_C,),
+    Capability.READ_DHW_TEMP: (Metric.DHW_TEMP_C,),
+    Capability.READ_SOC_LIMIT: (Metric.BATTERY_MAX_SOC_PCT,),
 }
 
 # Human readable (Dutch) capability labels for the device wizard.
@@ -142,8 +163,17 @@ CAPABILITY_LABELS_NL: dict[Capability, str] = {
     Capability.READ_EV_CONNECTED: "auto aangesloten uitleesbaar",
     Capability.READ_EV_SOC: "auto-SOC uitleesbaar",
     Capability.READ_LOAD_POWER: "verbruik uitleesbaar",
+    Capability.READ_RETURN_TEMP: "retourtemperatuur uitleesbaar",
+    Capability.READ_HP_COP: "COP uitleesbaar",
+    Capability.READ_HP_STATUS: "compressorstatus uitleesbaar",
+    Capability.READ_TEMP_SETPOINT: "temperatuur-setpoint uitleesbaar",
+    Capability.READ_DHW_TEMP: "tapwatertemperatuur uitleesbaar",
+    Capability.READ_SOC_LIMIT: "maximale SOC uitleesbaar",
     Capability.CONTROL_PV_LIMIT: "vermogensbegrenzing beschikbaar",
-    Capability.CONTROL_BATTERY_MODE: "batterijbesturing beschikbaar",
+    Capability.CONTROL_BATTERY_MODE: "batterijmodus (automatisch / stand-by) instelbaar",
+    Capability.CONTROL_BATTERY_POWER: "laden / ontladen met vermogen instelbaar",
+    Capability.CONTROL_SOC_LIMIT: "maximale SOC instelbaar",
+    Capability.CONTROL_TEMP_SETPOINT: "temperatuur-setpoint instelbaar",
     Capability.CONTROL_HP_MODE: "warmtepompmodus (normaal/boost/eco) beschikbaar",
     Capability.CONTROL_EV_CURRENT: "laadstroomregeling beschikbaar",
     Capability.CONTROL_SWITCH: "aan/uit schakelen beschikbaar",
@@ -159,17 +189,21 @@ class CommandAction(StrEnum):
     HP_MODE = "hp_mode"                      # value: "normal" | "boost" | "eco"
     EV_CURRENT = "ev_current"                # value: A per phase, 0 = pause
     SWITCH = "switch"                        # value: "on" | "off"
+    BATTERY_SOC_LIMIT = "battery_soc_limit"  # value: max SOC %
+    TEMP_SETPOINT = "temp_setpoint"          # value: °C
 
 
 ACTION_CAPABILITY: dict[CommandAction, Capability] = {
     CommandAction.BATTERY_AUTO: Capability.CONTROL_BATTERY_MODE,
-    CommandAction.BATTERY_CHARGE: Capability.CONTROL_BATTERY_MODE,
-    CommandAction.BATTERY_DISCHARGE: Capability.CONTROL_BATTERY_MODE,
+    CommandAction.BATTERY_CHARGE: Capability.CONTROL_BATTERY_POWER,
+    CommandAction.BATTERY_DISCHARGE: Capability.CONTROL_BATTERY_POWER,
     CommandAction.BATTERY_STANDBY: Capability.CONTROL_BATTERY_MODE,
     CommandAction.PV_LIMIT: Capability.CONTROL_PV_LIMIT,
     CommandAction.HP_MODE: Capability.CONTROL_HP_MODE,
     CommandAction.EV_CURRENT: Capability.CONTROL_EV_CURRENT,
     CommandAction.SWITCH: Capability.CONTROL_SWITCH,
+    CommandAction.BATTERY_SOC_LIMIT: Capability.CONTROL_SOC_LIMIT,
+    CommandAction.TEMP_SETPOINT: Capability.CONTROL_TEMP_SETPOINT,
 }
 
 # Commands in the same group overwrite each other (used for de-duplication).
@@ -182,6 +216,8 @@ ACTION_GROUP: dict[CommandAction, str] = {
     CommandAction.HP_MODE: "hp_mode",
     CommandAction.EV_CURRENT: "ev_current",
     CommandAction.SWITCH: "switch",
+    CommandAction.BATTERY_SOC_LIMIT: "soc_limit",
+    CommandAction.TEMP_SETPOINT: "temp_setpoint",
 }
 
 HP_MODES = ("normal", "boost", "eco")
@@ -216,6 +252,10 @@ class Command:
                 return "laden pauzeren" if not v else f"laadstroom {float(v):.0f} A"
             case CommandAction.SWITCH:
                 return f"schakelen {v}"
+            case CommandAction.BATTERY_SOC_LIMIT:
+                return f"maximale SOC {float(v or 0):.0f}%"
+            case CommandAction.TEMP_SETPOINT:
+                return f"setpoint {float(v or 0):.1f} °C"
         return f"{self.action} {v}"  # pragma: no cover
 
 

@@ -53,8 +53,9 @@ async def test_self_test_report_lists_capabilities():
     text = report.render()
     assert "✓ apparaat bereikbaar" in text
     assert "✓ batterij-SOC uitleesbaar" in text
-    assert "✓ batterijbesturing beschikbaar" in text
-    assert not report.unavailable
+    assert "✓ batterijmodus (automatisch / stand-by) instelbaar" in text
+    # The type schema lists every battery control; the mock lacks a SOC-limit setpoint.
+    assert report.unavailable == [Capability.CONTROL_SOC_LIMIT.value]
 
 
 async def test_self_test_shows_missing_controls():

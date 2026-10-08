@@ -12,9 +12,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from ems.api.deps import get_runtime, installer, viewer
+from ems.control.authority import EXECUTING, STATE_LABELS
 from ems.core.config import ConfigError, DeviceConfig
-from ems.core.models import CAPABILITY_LABELS_NL, DeviceCategory
+from ems.core.models import CAPABILITY_LABELS_NL, Command, CommandAction, DeviceCategory
 from ems.devices.base import DriverContext
+from ems.devices.capabilities import TYPE_SCHEMAS, actions_for, capability_view, missing_control_params, schema_view
 from ems.integrations.homewizard import client as hw
 from ems.integrations.homewizard.discovery import discover
 from ems.security.auth import Principal
@@ -60,11 +62,18 @@ async def drivers(category: DeviceCategory | None = None, _: Principal = Depends
 
 @router.get("/device-categories", tags=["devices"])
 async def categories(_: Principal = Depends(viewer)) -> list[dict]:
-    labels = {"smart_meter": "Slimme meter", "energy_meter": "Energiemeter", "pv_inverter": "PV-omvormer",
-              "hybrid_inverter": "Hybride omvormer", "battery": "Batterij", "heat_pump": "Warmtepomp",
-              "heat_pump_boiler": "Warmtepompboiler", "boiler": "Boiler", "ev_charger": "Laadpaal",
-              "ev": "Elektrische auto", "airco": "Airco", "smart_plug": "Slimme stekker", "ventilation": "Ventilatie"}
-    return [{"id": c.value, "label": labels.get(c.value, c.value)} for c in DeviceCategory]
+    return [{"id": c.value, "label": TYPE_SCHEMAS[c].label} for c in DeviceCategory]
+
+
+@router.get("/device-schemas", tags=["devices"])
+async def device_schemas(_: Principal = Depends(viewer)) -> list[dict]:
+    """Type-bound capability and parameter schemas (single source for UI forms and validation)."""
+    return [schema_view(c) for c in DeviceCategory]
+
+
+@router.get("/device-schemas/{category}", tags=["devices"])
+async def device_schema(category: DeviceCategory, _: Principal = Depends(viewer)) -> dict:
+    return schema_view(category)
 
 
 def _device_view(rt: EMSRuntime, cfg: DeviceConfig) -> dict:
@@ -86,8 +95,49 @@ def _device_view(rt: EMSRuntime, cfg: DeviceConfig) -> dict:
         "is_primary_grid_meter": sel.device_id == cfg.id,
         "primary_grid_meter_status": sel.status.value if sel.device_id == cfg.id else None,
         "last_decision": rt.engine.last_decisions.get(cfg.id),
+        "capabilities": [] if drv is None else capability_view(drv.device_capabilities()),
+        "missing_control_params": missing_control_params(cfg.category, cfg.params),
     })
+    data.update(_control_view(rt, cfg.id))
     return data
+
+
+def _control_view(rt: EMSRuntime, device_id: str) -> dict:
+    """Control state plus "EMS zou doen" (decision) versus "EMS doet nu" (sent and confirmed)."""
+    state = rt.engine.control_state(device_id)
+    executions = rt.engine.executions.for_device(device_id)
+    doing = [x for x in executions if x["status"] in ("sent", "confirmed", "unconfirmed", "no_feedback")]
+    return {"control_state": state.value, "control_state_label": STATE_LABELS[state],
+            "ems_would_do": rt.engine.last_decisions.get(device_id),
+            "ems_does_now": doing if state in EXECUTING else [],
+            "executions": executions}
+
+
+@router.get("/devices/{device_id}/actions", tags=["control"])
+async def device_actions(device_id: str, p: Principal = Depends(viewer), rt: EMSRuntime = Depends(get_runtime)):
+    """Exactly the actions this device supports, with value ranges from its own limits and, per
+    action, whether this user may run it now and whether it would really be executed."""
+    cfg = _get(rt, device_id)
+    md = rt.devices.devices.get(device_id)
+    caps = frozenset() if md is None or md.driver is None else md.driver.device_capabilities()
+    out = []
+    for spec in actions_for(cfg.category, caps, cfg.params, rt.config):
+        probe = spec.value.get("min") if spec.value and spec.value.get("type") == "number" else (
+            spec.value["options"][0] if spec.value and spec.value.get("type") == "enum" else None)
+        if spec.value and spec.value.get("type") == "number" and spec.value.get("max") is None:
+            probe = 0 if spec.value.get("zero_allowed") else probe
+        chk = rt.engine.check(Command(device_id, CommandAction(spec.action), probe), p)
+        d = spec.to_dict()
+        d["executes"] = chk.executes
+        d["reasons"] = list(chk.reasons)
+        if spec.value and spec.value.get("type") == "number" and spec.value.get("max") is None \
+                and spec.value.get("unit") in ("W", "A"):
+            d["available"] = False
+            d["reasons"].append("apparaatlimiet niet ingesteld — stel eerst het maximum in bij het apparaat")
+        elif not chk.allowed:
+            d["available"] = False
+        out.append(d)
+    return {"device_id": device_id, **_control_view(rt, device_id), "actions": out}
 
 
 @router.get("/devices", tags=["devices"])
@@ -344,7 +394,7 @@ def _commissioning_view(rt: EMSRuntime, device_id: str, test: dict | None) -> di
     cfg = rt.config.device(device_id)
     md = rt.devices.devices[device_id]
     manifest = None if md.driver is None else md.driver.manifest
-    controls = [] if md.driver is None else [c.value for c in md.driver.capabilities() if c.value.startswith("control_")]
+    controls = [] if md.driver is None else [c.value for c in md.driver.device_capabilities() if c.value.startswith("control_")]
     allowed = {}
     for lvl in LEVELS:
         ok, why = True, ""
