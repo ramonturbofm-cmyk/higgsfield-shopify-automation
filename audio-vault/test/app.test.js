@@ -532,3 +532,34 @@ test('packages and trial week: plan opens collections, an ended period locks the
   // No end date at all.
   assert.equal((await owner('PATCH', `/api/users/${id}`, { access_until: null })).data.user.access_until, null);
 });
+
+test('studio status, track details and genre filter only report real values', { skip: (!DB && 'TEST_DATABASE_URL not set') || (!hasFfmpeg && 'ffmpeg not installed') }, async () => {
+  const owner = client();
+  assert.equal((await owner('POST', '/api/login', { email: 'owner@example.com', password: 'supergeheim1' })).status, 200);
+  const st = await owner('GET', '/api/status');
+  assert.equal(st.status, 200);
+  assert.equal(st.data.db.ok, true);
+  assert.equal(typeof st.data.db.ms, 'number');
+  assert.ok(st.data.active_clients >= 1, 'the owner itself is active');
+  assert.equal((await client()('GET', '/api/status')).status, 401);
+
+  const col = (await owner('POST', '/api/collections', { name: 'Details' })).data.collection;
+  const fd = new FormData();
+  fd.append('collection_id', String(col.id));
+  fd.append('file', new Blob([wav()]), 'details-test.wav');
+  const up = await owner('POST', '/api/files', fd);
+  assert.equal(up.status, 201);
+  const d = await owner('GET', `/api/files/${up.data.file.id}/details`);
+  assert.equal(d.status, 200);
+  assert.equal(d.data.details.readable, true);
+  assert.equal(d.data.details.sample_rate, 8000); // what the test WAV really is
+  assert.equal(d.data.details.channels, 1);
+  assert.equal(d.data.details.bits_per_sample, 16);
+  assert.equal(d.data.details.album, null); // not in the file: no made-up value
+  assert.equal((await owner('GET', '/api/files/999999/details')).status, 404);
+
+  await pool.query("UPDATE audio_files SET genre = 'Polka, Instrumentaal' WHERE id = $1", [up.data.file.id]);
+  const g = await owner('GET', '/api/files?genre=polka');
+  assert.ok(g.data.files.some((f) => f.id === up.data.file.id));
+  assert.ok(g.data.files.every((f) => /polka/i.test(f.genre)));
+});

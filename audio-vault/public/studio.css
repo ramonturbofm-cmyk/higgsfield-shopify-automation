@@ -277,3 +277,109 @@ dialog::backdrop { background: rgba(0, 0, 0, .7); }
 .vu-scale span:last-child { transform: translateX(-100%); }
 .vu.clip .vu-row span { color: var(--accent); }
 .now-times > span:first-child { white-space: nowrap; }
+
+/* ---------- 2.16: status, log, dashboard, details ---------- */
+:root { --err: #ff453a; }
+
+/* Selection bar always keeps its place, so the list never jumps under the mouse. */
+.lib-selbar { height: 34px; overflow: hidden; }
+.lib-selbar.idle { border-color: var(--line); background: transparent; color: var(--muted); font-size: 12px; }
+.lib-selbar.idle span { font-weight: 400; }
+
+/* Player status: one clear label with a coloured dot; colour only where it means something. */
+.deck-state { display: inline-flex; align-items: center; gap: 5px; }
+.deck-state::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.deck.st-playing .deck-state { color: var(--ok); }
+.deck.st-playing .deck-state::before { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+.deck.st-playing.is-live { border-color: var(--ok); box-shadow: inset 0 0 0 1px var(--ok); }
+.deck.st-tail .deck-state { color: var(--muted); }
+.deck.st-paused .deck-state { color: var(--warn); }
+.deck.st-paused .deck-state::before { background: var(--warn); }
+.deck.st-paused { border-color: var(--warn); }
+.deck.st-cued .deck-state::before { background: var(--cued); }
+.deck.st-error { border-color: var(--err); }
+.deck.st-error .deck-state { color: var(--err); }
+.deck.st-error .deck-state::before { background: var(--err); }
+.deck-error { color: var(--err); font-size: 11px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Quick filters above the database */
+.lib-quick { display: flex; gap: 5px; align-items: center; margin-bottom: 6px; }
+.lib-quick .qf { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; cursor: pointer; font-size: 12px; white-space: nowrap; }
+.lib-quick .qf.on { border-color: var(--accent); color: var(--text); box-shadow: inset 0 0 0 1px var(--accent); }
+.lib-quick select { flex: 1; min-width: 0; padding: 4px 7px; font-size: 12px; }
+.fav-mark { color: var(--warn); }
+
+/* Track details (one track selected) */
+.lib-details { border-top: 1px solid var(--line); padding: 7px 4px 2px; font-size: 12px; }
+.lib-details .d-head { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
+.lib-details .d-title { flex: 1; font-weight: 700; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lib-details dl { display: grid; grid-template-columns: repeat(2, auto minmax(0, 1fr)); gap: 2px 8px; margin: 0; }
+.lib-details dt { color: var(--muted); white-space: nowrap; }
+.lib-details dd { margin: 0; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Status bar: system checks */
+.statusbar { align-items: center; gap: 16px; }
+.statusbar .sys { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; font-size: 11px; letter-spacing: .06em; color: var(--muted); }
+.statusbar .sys b { color: var(--text); font-weight: 600; letter-spacing: 0; }
+.statusbar .sys i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.statusbar .sys.ok i { background: var(--ok); }
+.statusbar .sys.warn i { background: var(--warn); }
+.statusbar .sys.warn b { color: var(--warn); }
+.statusbar .sys.bad i { background: var(--err); }
+.statusbar .sys.bad b { color: var(--err); }
+.statusbar .keys { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.log-badge { display: inline-block; min-width: 16px; padding: 0 4px; border-radius: 8px; background: var(--err); color: #fff; font-size: 10px; font-weight: 800; }
+.log-badge.warn { background: var(--warn); color: #000; }
+
+/* Log panel: slides over the bottom, never pushes the studio around */
+.logpanel { position: fixed; left: 10px; right: 10px; bottom: 34px; height: 210px; z-index: 20; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 -8px 30px rgba(0,0,0,.5); display: flex; flex-direction: column; }
+.log-head { display: flex; align-items: center; gap: 12px; padding: 6px 10px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.log-head strong { letter-spacing: .16em; font-size: 11px; color: var(--muted); }
+.log-head label { display: flex; gap: 5px; align-items: center; }
+.log-head label input { width: auto; }
+.log-head .muted { flex: 1; }
+.log-list { overflow-y: auto; flex: 1; font: 12px/1.45 ui-monospace, Consolas, monospace; padding: 4px 10px; }
+.log-row { display: grid; grid-template-columns: 74px 64px 1fr; gap: 8px; }
+.log-row .lv { font-weight: 700; }
+.log-row.INFO .lv { color: var(--muted); }
+.log-row.WARNING .lv, .log-row.WARNING .m { color: var(--warn); }
+.log-row.ERROR .lv, .log-row.ERROR .m { color: var(--err); }
+
+/* Dashboard */
+#dashboard { width: min(980px, 96vw); }
+#slot-info { width: min(460px, 94vw); }
+.dash { padding: 16px 18px 18px; }
+.dash-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.dash-head h2 { margin: 0; flex: 1; font-size: 13px; letter-spacing: .2em; color: var(--muted); }
+.dash-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.dash-box { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; min-width: 0; }
+.dash-box.wide { grid-column: span 2; }
+.dash-box.full { grid-column: 1 / -1; }
+.dash-box h3 { margin: 0 0 6px; font-size: 10px; letter-spacing: .18em; color: var(--muted); font-weight: 700; }
+.dash-box .big { font-size: 18px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash-box .sub { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash-box .num { font: 700 28px/1.1 ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; }
+.dash-box ol { margin: 0; padding-left: 18px; }
+.dash-box li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash-box li .t { font: 12px ui-monospace, Consolas, monospace; color: var(--muted); margin-right: 6px; }
+.dash-box .st { display: flex; align-items: center; gap: 6px; font-weight: 700; }
+.dash-box .st i { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+.dash-box .st.ok i { background: var(--ok); } .dash-box .st.warn { color: var(--warn); } .dash-box .st.warn i { background: var(--warn); }
+.dash-box .st.bad { color: var(--err); } .dash-box .st.bad i { background: var(--err); }
+.dash-box.alert { border-color: var(--err); }
+.dash-box.alert li { color: var(--err); white-space: normal; }
+.dash-box.alert li.WARNING { color: var(--warn); }
+.info-grid { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 13px; }
+.info-grid dt { color: var(--muted); }
+.info-grid dd { margin: 0; }
+
+/* Jingle buttons: name, category and length readable; empty slots clearly empty */
+.slot-cat { font-size: 10px; letter-spacing: .06em; opacity: .8; position: relative; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: uppercase; }
+.slot-foot { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; position: relative; }
+.slot.empty-slot { opacity: .55; font-size: 18px; }
+.slot.empty-slot:hover { opacity: 1; border-color: var(--accent); }
+.statusbar { flex-wrap: nowrap; overflow: hidden; }
+.statusbar > span, .statusbar > button { white-space: nowrap; flex: none; }
+.statusbar #status-msg { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.statusbar .keys { flex: 0 1 auto; }
+.lib-selbar span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

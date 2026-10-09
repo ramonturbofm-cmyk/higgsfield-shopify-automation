@@ -66,6 +66,28 @@ Open via **▶ Open studio** na het inloggen, of ga naar `/studio.html`.
   `/nu.html` (scherm in de studio of op je website; kleur via `?kleur=30d158`)
   of op te halen als JSON via `/api/now-playing`.
 
+### Status, dashboard en logboek
+
+- **Statusbalk** (onderaan): *SERVER* (gemeten responstijd, elke 15 s), *DATABASE*
+  (de server controleert de verbinding), *AUDIO* (uitgang van de players: samplerate,
+  geluidskaart, en of er een apparaatfout is) en voor beheerders *CLIENTS* (wie de
+  server de laatste 2 minuten gebruikte). Alleen echte metingen; wat niet gemeten kan
+  worden (bijv. buffer of CPU in de browser), staat er niet.
+- **Players**: statuslampje per player — groen = on air, blauw = klaar, oranje =
+  pauze, rood = fout. Kan een bestand niet laden (weg, beschadigd), dan wordt het
+  overgeslagen, gaat de volgende door en staat er 20 s *⚠ Overgeslagen: …*.
+- **▦ Dashboard** (of toets **D**): nu op de radio, hierna, playlist, server,
+  database, audio en waarschuwingen in één overzicht. Alleen kijken, verandert niets.
+- **LOG** (statusbalk): logboek met INFO / WARNING / ERROR (players, fouten,
+  verbinding). Bewaart de laatste 500 regels in deze browser, groeit dus niet onbeperkt.
+- **Database**: snelfilters *Alles*, *★ Favorieten*, *Nieuw* en genre (genres komen
+  vanzelf uit de tags). Klik één nummer aan voor details uit het bestand zelf (album,
+  jaar, formaat, samplerate, bitdiepte, bitrate, kanalen); wat het bestand niet weet,
+  wordt niet getoond. Favoriet maken: rechtsklik → ★ of de knop in het infovak.
+- **Jingle-knoppen** tonen naam, categorie (collectie of eigen tekst) en lengte.
+  Rechtsklik: kleur, *Vervangen door selectie*, *Categorie…*, *Eigenschappen*,
+  *Leegmaken…* (met bevestiging; het bestand zelf blijft in de database).
+
 ### Uurklokken (◔)
 
 Leg één keer vast hoe een uur is opgebouwd, bijvoorbeeld *Top of the hour →

@@ -201,11 +201,11 @@ const canPickOutput = () => typeof AudioContext !== 'undefined' && typeof AudioC
 function setOutput(key) {
   const ctx = contexts[key];
   if (!ctx || typeof ctx.setSinkId !== 'function') return;
-  ctx.setSinkId(S.outputs[key] || '').catch((e) => status(`Geluidskaart voor ${key} niet beschikbaar: ${e.message}`));
+  ctx.setSinkId(S.outputs[key] || '').catch((e) => { status(`Geluidskaart voor ${key} niet beschikbaar: ${e.message}`); logEvent('WARNING', `Geluidskaart voor ${outputName(key)} niet beschikbaar: ${e.message}`); });
 }
 function route(audio, key) {
   if (!audio._gain) {
-    if (!contexts[key]) { contexts[key] = new AudioContext({ latencyHint: 'playback' }); setOutput(key); if (key !== 'pfl') addMeterTap(contexts[key]); }
+    if (!contexts[key]) { contexts[key] = new AudioContext({ latencyHint: 'playback' }); watchOutput(key); setOutput(key); if (key !== 'pfl') addMeterTap(contexts[key]); }
     const ctx = contexts[key];
     audio._ctx = ctx;
     audio._src = ctx.createMediaElementSource(audio);
@@ -331,6 +331,10 @@ async function loadDeck(deck, item) {
     if (deck.pendingStart && !S.live) startDeck(deck);
   } catch (e) {
     if (token !== deck.token) return;
+    const what = deck.file ? label(deck.file) : 'Bestand';
+    deck.error = { msg: `${what}: ${e.message}`, at: Date.now() };
+    logEvent('ERROR', `Player ${deck.name}: ${what} kan niet worden geladen (${e.message}) — wordt overgeslagen`);
+    setTimeout(render, 20500);
     item.error = true; deck.item = null; deck.file = null; deck.state = 'empty';
     status(e.message);
     cueNext();
@@ -378,6 +382,7 @@ function startDeck(deck) {
   setFade(deck.audio, 1);
   deck.audio.play().catch((e) => status(`Afspelen geblokkeerd: ${e.message}`));
   S.live = deck;
+  logEvent('INFO', `Player ${deck.name} gestart: ${label(deck.file)}`);
   api('POST', '/api/now-playing', { file_id: deck.file.id }).catch(() => {});
   cueNext();
   savePlaylistSoon();
@@ -391,6 +396,7 @@ function fadeDeck(deck, seconds, { stop = true } = {}) {
 function finishDeck(deck, { advance }) {
   const wasLive = deck === S.live;
   const item = deck.item;
+  if (deck.file) logEvent('INFO', `Player ${deck.name} klaar: ${label(deck.file)}`);
   if (item && item.state === 'playing') item.state = 'played';
   unloadDeck(deck);
   if (wasLive) {
@@ -416,15 +422,17 @@ function cmdStart() {
 function cmdPause() {
   const d = S.live;
   if (!d) return;
-  if (d.state === 'playing') { d.audio.pause(); d.state = 'paused'; }
-  else if (d.state === 'paused') { d.audio.play(); d.state = 'playing'; }
+  if (d.state === 'playing') { d.audio.pause(); d.state = 'paused'; logEvent('INFO', `PAUZE: Player ${d.name}`); }
+  else if (d.state === 'paused') { d.audio.play(); d.state = 'playing'; logEvent('INFO', `Verder na pauze: Player ${d.name}`); }
   render();
 }
 function cmdStop() {
+  if (decks.some((d) => d.state === 'playing' || d.state === 'paused')) logEvent('INFO', 'STOP');
   for (const d of decks) if (d.state === 'playing' || d.state === 'paused') finishDeck(d, { advance: false });
 }
 function cmdFade() {
   if (!S.live || S.live.state !== 'playing') return;
+  logEvent('INFO', `FADE: Player ${S.live.name}`);
   S.live.noAdvance = true;
   fadeDeck(S.live, S.settings.fadeOut);
 }
@@ -478,12 +486,14 @@ const nonstopOn = () => S.settings.auto && S.settings.clockAuto;
 async function cmdNonstop() {
   if (nonstopOn()) {
     S.settings.clockAuto = false;
+    logEvent('INFO', 'NONSTOP uit');
     saveSettingsSoon(); render();
     status('Nonstop uit: de playlist speelt verder af, er wordt niets meer bijgepland');
     return;
   }
   S.settings.auto = true;
   S.settings.clockAuto = true;
+  logEvent('INFO', 'NONSTOP aan');
   saveSettingsSoon(); render();
   const waiting = () => S.playlist.filter((i) => i.state === 'queued' && !i.marker && !i.error).length;
   if (waiting() < 3) {
@@ -499,6 +509,7 @@ async function cmdNonstop() {
 
 function cmdAuto() {
   S.settings.auto = !S.settings.auto;
+  logEvent('INFO', `AUTO ${S.settings.auto ? 'aan' : 'uit'}`);
   saveSettingsSoon();
   render();
 }
@@ -578,6 +589,7 @@ async function cartTrigger(index) {
   } catch (e) {
     S.cartPlayers.delete(index);
     status(e.message);
+    logEvent('ERROR', `Jingle ${label(file)} kan niet worden afgespeeld: ${e.message}`);
   }
   renderCart();
 }
@@ -780,10 +792,13 @@ function fmtDb(db) {
 function renderDecks() {
   for (const d of decks) {
     const el = $(`deck-${d.index}`);
-    const stateLabel = { empty: 'LEEG', loading: 'LADEN…', cued: 'KLAAR', playing: d === S.live ? 'ON AIR' : 'UITLOOP', paused: 'PAUZE' }[d.state];
-    el.className = `deck ${d.state === 'paused' ? 'playing' : d.state}`;
+    const err = d.error && Date.now() - d.error.at < 20000 ? d.error : null;
+    const st = d.state === 'playing' ? (d === S.live ? 'playing' : 'tail') : d.state;
+    const stateLabel = err && d.state === 'empty' ? 'FOUT' : { empty: 'LEEG', loading: 'LADEN…', cued: 'KLAAR', playing: d === S.live ? 'ON AIR' : 'UITLOOP', paused: 'PAUZE' }[d.state];
+    el.className = `deck ${d.state === 'paused' ? 'playing' : d.state} st-${err && d.state === 'empty' ? 'error' : st}${d === S.live ? ' is-live' : ''}`;
     el.replaceChildren(
       h('div', { class: 'deck-head' }, h('span', {}, `PLAYER ${d.name}`), h('span', { class: 'deck-state' }, stateLabel)),
+      ...(err ? [h('div', { class: 'deck-error', title: err.msg }, `⚠ Overgeslagen: ${err.msg}`)] : []),
       h('div', { class: 'deck-title' }, d.file ? d.file.title : '—'),
       h('div', { class: 'deck-artist' }, d.file ? d.file.artist || ' ' : ' ',
         d.file && S.settings.normalize && (d.chained || d.file.loudness_lufs != null) ? h('span', { class: 'deck-gain', title: d.chained ? 'Naadloos: zelfde volume als het vorige nummer' : 'Gelijk volume' }, `${d.chained ? '⇥ ' : ''}${fmtDb(20 * Math.log10(d.audio._norm || 1))}`) : null),
@@ -938,6 +953,9 @@ function libraryParams(offset) {
   if (col === 'nonstop') params.set('nonstop', 'blocked');
   else if (col) params.set('collection_id', col);
   if ($('lib-search').value.trim()) params.set('q', $('lib-search').value.trim());
+  if (libFilter.mode === 'new') params.set('sort', 'new');
+  if (libFilter.mode === 'fav') params.set('ids', favIds().join(','));
+  if (libFilter.genre) params.set('genre', libFilter.genre);
   return params;
 }
 // Keeps the copy the studio already has (it may carry fresher cue points), but takes
@@ -952,6 +970,7 @@ const remember = (files) => files.map((f) => {
 // New search: first page. Scrolling down loads the next pages, through the whole database.
 async function searchLibrary() {
   const token = ++lib.token;
+  if (libFilter.mode === 'fav' && !favIds().length) { lib.files = []; lib.total = 0; renderLibrary(); updateSelection(); return; }
   lib.loading = true;
   try {
     const { files, total } = await api('GET', `/api/files?${libraryParams(0)}`);
@@ -1015,7 +1034,9 @@ function updateSelection() {
   document.querySelectorAll('#library .lib-row').forEach((r) => r.classList.toggle('sel', sel.ids.has(Number(r.dataset.file))));
   const n = selectedIds().length;
   const bar = $('lib-selbar');
-  bar.classList.toggle('hidden', n < 1);
+  bar.classList.toggle('idle', n < 1);
+  showDetails(n === 1 ? selectedIds()[0] : null);
+  if (n < 1) bar.replaceChildren(h('span', {}, 'Klik = kiezen (info onderaan) · Ctrl/Shift+klik = meer · dubbelklik = achteraan'));
   if (n >= 1) {
     bar.replaceChildren(
       h('span', {}, n === 1 ? `✓ 1 nummer geselecteerd — Ctrl/Shift+klik voor meer` : `✓ ${n} nummers geselecteerd`),
@@ -1042,7 +1063,8 @@ function libraryRow(f) {
     oncontextmenu: (e) => { e.preventDefault(); fileMenu(e, f); },
   },
   h('div', { class: 'pl-main' },
-    h('div', { class: 'pl-title' }, f.nonstop_blocked ? h('span', { class: 'ns-blocked', title: 'Komt niet in de nonstop (uurklok)' }, '🚫 ') : null, f.title,
+    h('div', { class: 'pl-title' }, isFav(f.id) ? h('span', { class: 'fav-mark', title: 'Favoriet' }, '★ ') : null,
+      f.nonstop_blocked ? h('span', { class: 'ns-blocked', title: 'Komt niet in de nonstop (uurklok)' }, '🚫 ') : null, f.title,
       f.segue ? h('span', { class: 'segue-mark', title: 'Naadloos: sluit strak aan op het volgende nummer' }, ' ⇥') : null),
     h('div', { class: 'pl-artist' }, f.artist || ' ', f.genre ? h('span', { class: 'lib-genre' }, ` · ${f.genre}`) : null)),
   h('div', { class: 'pl-dur' }, fmt(cueOut(f) !== null ? cueOut(f) - cueIn(f) : null)),
@@ -1059,7 +1081,8 @@ function flashRow(el) {
 function renderLibrary() {
   updateLibraryCount();
   $('library').replaceChildren(...(lib.files.length ? [...lib.files.map(libraryRow), ...libraryTail()]
-    : [h('div', { class: 'empty' }, $('lib-search').value.trim() || $('lib-collection').value ? 'Niets gevonden.' : 'De database is nog leeg. Upload muziek via ☰ Bibliotheek.')]));
+    : [h('div', { class: 'empty' }, libFilter.mode === 'fav' && !favIds().length ? 'Nog geen favorieten. Rechtsklik op een nummer → ★ Favoriet.'
+      : $('lib-search').value.trim() || $('lib-collection').value || libFilter.mode !== 'all' || libFilter.genre ? 'Niets gevonden.' : 'De database is nog leeg. Upload muziek via ☰ Bibliotheek.')]));
 }
 // PFL on/off without rebuilding the (possibly very long) list.
 function updatePflButtons() {
@@ -1095,6 +1118,7 @@ function fileMenu(e, f, { playlist = false } = {}) {
       item('⤴  Als volgende afspelen', () => { addNext(ids); clearSelection(); }),
       item('+  Achteraan de playlist', () => { addToPlaylist(ids); clearSelection(); }),
       item(`🎵  Op jingle-knoppen zetten (${ids.length})`, () => assignToCart(ids)),
+      item(`★  Favoriet maken (${ids.length})`, () => { setFav(ids, true); clearSelection(); }),
       item(`🚫  Niet in nonstop (${ids.length} nummers)`, () => { addNonstopBlocks(ids.map((id) => ({ kind: 'file', value: id }))); clearSelection(); }),
       item(`⇥  Naadloos aansluiten aan (${ids.length} nummers)`, () => { setSegue(ids, true); clearSelection(); }),
       item('⇥  Naadloos aansluiten uit', () => { setSegue(ids, false); clearSelection(); }),
@@ -1109,6 +1133,7 @@ function fileMenu(e, f, { playlist = false } = {}) {
     item('▶  Direct afspelen', () => playNow(f.id), 'live'),
     item('🎧  Voorbeluisteren', () => togglePfl(f)),
     item('🎵  Op een jingle-knop zetten', () => assignToCart([f.id])),
+    item(isFav(f.id) ? '☆  Uit favorieten' : '★  Favoriet', () => setFav([f.id], !isFav(f.id))),
     ...nonstopMenuItems(f, item));
   menu.style.left = `${Math.min(e.clientX, innerWidth - 240)}px`;
   menu.style.top = `${Math.min(e.clientY, innerHeight - 200)}px`;
@@ -1256,7 +1281,8 @@ function renderCart() {
     h('div', { class: 'slot-fill' }),
     h('div', { class: 'slot-key' }, key),
     h('div', { class: 'slot-title' }, file.title),
-    h('div', { class: 'slot-time' }, fmt(cueOut(file) !== null ? cueOut(file) - cueIn(file) : null)));
+    h('div', { class: 'slot-foot' }, h('span', { class: 'slot-cat' }, slotCategory(slot, file)),
+      h('div', { class: 'slot-time' }, fmt(cueOut(file) !== null ? cueOut(file) - cueIn(file) : null))));
   }));
 }
 
@@ -1267,9 +1293,18 @@ function slotMenu(e, index) {
   const outside = (ev) => { if (!menu.contains(ev.target)) close(); };
   menu.replaceChildren(
     ...SLOT_COLORS.map((c) => h('button', { class: 'sw', style: { background: c }, onclick: () => { cartSlots()[index].color = c; saveSettingsSoon(); renderCart(); close(); } })),
-    h('button', { class: 'mini wide', onclick: () => { stopCart(index); cartSlots()[index] = null; saveSettingsSoon(); renderCart(); close(); } }, 'Leegmaken'));
+    ...(selectedIds().length === 1 ? [h('button', { class: 'mini wide', onclick: () => { replaceSlot(index, selectedIds()[0]); close(); } }, 'Vervangen door selectie')] : []),
+    h('button', { class: 'mini wide', onclick: () => { close(); renameSlotCategory(index); } }, 'Categorie…'),
+    h('button', { class: 'mini wide', onclick: () => { close(); showSlotInfo(index); } }, 'Eigenschappen'),
+    h('button', { class: 'mini wide', onclick: () => {
+      close();
+      const f = S.files.get(cartSlots()[index].id);
+      if (!confirm(`Jingle "${f ? f.title : ''}" van deze knop halen?\n(Het bestand zelf blijft gewoon in de database.)`)) return;
+      stopCart(index); cartSlots()[index] = null; saveSettingsSoon(); renderCart();
+      logEvent('INFO', `Jingle-knop ${index + 1} leeggemaakt${f ? `: ${f.title}` : ''}`);
+    } }, 'Leegmaken…'));
   menu.style.left = `${Math.min(e.clientX, innerWidth - 180)}px`;
-  menu.style.top = `${Math.min(e.clientY, innerHeight - 120)}px`;
+  menu.style.top = `${Math.min(e.clientY, innerHeight - 230)}px`;
   menu.classList.remove('hidden');
   setTimeout(() => document.addEventListener('mousedown', outside), 0);
 }
@@ -1409,8 +1444,10 @@ function bindSettings() {
 
 document.addEventListener('keydown', (e) => {
   if (e.target.matches('input, select, textarea') || e.ctrlKey || e.metaKey || e.altKey) return;
-  if ($('settings').open) return;
+  if ($('settings').open || $('slot-info').open) return;
   const k = e.key.toLowerCase();
+  if (k === 'd') { toggleDashboard(); return; }
+  if ($('dashboard').open) return;
   if (k === 'escape') clearSelection();
   else if (k === ' ') { e.preventDefault(); cmdStart(); }
   else if (k === 'n') cmdStart();
@@ -1510,6 +1547,7 @@ async function boot() {
   pl.addEventListener('dragleave', (e) => { if (!pl.contains(e.relatedTarget)) { dragOverUid = null; renderPlaylist(); } });
 
   bindSettings();
+  initExtras();
   applyTheme();
   renderOutputsStatus();
   renderQuality();
@@ -1519,6 +1557,333 @@ async function boot() {
   render();
   cueNext();
   preloadCartPage();
+}
+
+// ---------- event log ----------
+// Kept in this browser (last 500 lines, older ones drop off), so it never grows without
+// limit and writing it never touches the server or the audio.
+const LOG_MAX = 500;
+const eventLog = readLocal('aot_eventlog', []).slice(-LOG_MAX);
+let logUnseen = { WARNING: 0, ERROR: 0 };
+let logSaveTimer = null;
+function logEvent(level, msg) {
+  eventLog.push({ t: Date.now(), level, msg: String(msg).slice(0, 300) });
+  if (eventLog.length > LOG_MAX) eventLog.splice(0, eventLog.length - LOG_MAX);
+  if (!logSaveTimer) logSaveTimer = setTimeout(() => { logSaveTimer = null; writeLocal('aot_eventlog', eventLog); }, 3000);
+  if (level !== 'INFO' && $('logpanel').classList.contains('hidden')) logUnseen[level]++;
+  if (!$('logpanel').classList.contains('hidden')) renderLog(); else renderLogBadge();
+}
+function renderLogBadge() {
+  const n = logUnseen.WARNING + logUnseen.ERROR;
+  const b = $('log-badge');
+  b.textContent = n > 99 ? '99+' : String(n);
+  b.className = `log-badge${n ? '' : ' hidden'}${!logUnseen.ERROR && n ? ' warn' : ''}`;
+}
+const fmtTime = (t) => new Date(t).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+function renderLog() {
+  const problems = $('log-problems').checked;
+  const rows = eventLog.filter((e) => !problems || e.level !== 'INFO').slice(-300).reverse();
+  $('log-count').textContent = `${rows.length} regels${problems ? ' (alleen problemen)' : ''} · max. ${LOG_MAX} bewaard`;
+  $('log-list').replaceChildren(...(rows.length ? rows.map((e) => h('div', { class: `log-row ${e.level}` },
+    h('span', {}, fmtTime(e.t)), h('span', { class: 'lv' }, e.level), h('span', { class: 'm' }, e.msg)))
+    : [h('div', { class: 'muted' }, 'Nog niets gelogd.')]));
+}
+function toggleLog(open = $('logpanel').classList.contains('hidden')) {
+  $('logpanel').classList.toggle('hidden', !open);
+  if (open) { logUnseen = { WARNING: 0, ERROR: 0 }; renderLog(); }
+  renderLogBadge();
+}
+
+// ---------- system status ----------
+// Only real checks: the server and database answer /api/status, the audio outputs are
+// watched for device errors and checked that their clock really runs.
+const OUTPUT_NAMES = Object.fromEntries(OUTPUTS);
+const outputName = (key) => OUTPUT_NAMES[key] || key;
+const outState = {};
+function watchOutput(key) {
+  const ctx = contexts[key];
+  ctx.addEventListener('error', () => {
+    (outState[key] ||= {}).failedAt = Date.now();
+    logEvent('ERROR', `Geluidsuitgang ${outputName(key)}: fout van het audioapparaat of de audio-engine`);
+    renderSystem();
+  });
+}
+const sys = { server: null, db: null, clients: null, checking: false, devices: [] };
+async function checkSystem() {
+  if (sys.checking) return;
+  sys.checking = true;
+  const t0 = performance.now();
+  let server, db = null, clients = null;
+  try {
+    const r = await fetch('/api/status', { cache: 'no-store', signal: AbortSignal.timeout(6000) });
+    const ms = Math.round(performance.now() - t0);
+    if (r.status === 401) server = { ok: false, error: 'niet meer ingelogd' };
+    else if (!r.ok) server = { ok: false, error: `fout ${r.status}` };
+    else { const data = await r.json(); server = { ok: true, ms }; db = data.db; clients = data.active_clients; }
+  } catch (e) {
+    server = { ok: false, error: e.name === 'TimeoutError' ? 'geen antwoord binnen 6 seconden' : 'niet bereikbaar' };
+  } finally { sys.checking = false; }
+  if (sys.server && sys.server.ok !== server.ok) logEvent(server.ok ? 'INFO' : 'ERROR', server.ok ? `Server weer bereikbaar (${server.ms} ms)` : `Server: ${server.error}`);
+  else if (!sys.server && !server.ok) logEvent('ERROR', `Server: ${server.error}`);
+  if (db && sys.db && sys.db.ok !== db.ok) logEvent(db.ok ? 'INFO' : 'ERROR', db.ok ? 'Database weer bereikbaar' : `Database: ${db.error}`);
+  else if (db && !sys.db && !db.ok) logEvent('ERROR', `Database: ${db.error}`);
+  sys.server = server; sys.db = db; sys.clients = clients;
+  renderSystem();
+}
+// Audio: the players' outputs (the on-air path). An output that reported a device error
+// counts as faulty until its clock is seen running again.
+function audioHealth() {
+  const keys = ['A', 'B'].filter((k) => contexts[k]);
+  if (!keys.length) return { level: '', text: 'nog niet gebruikt' };
+  const problems = [];
+  for (const k of keys) {
+    const c = contexts[k];
+    const o = outState[k] ||= {};
+    const now = c.currentTime;
+    const running = c.state === 'running' && o.lastTime !== undefined && now > o.lastTime;
+    o.lastTime = now;
+    if (running && o.failedAt) { o.failedAt = null; logEvent('INFO', `Geluidsuitgang ${outputName(k)} werkt weer`); }
+    if (c.state === 'closed') problems.push(`${outputName(k)} gesloten`);
+    else if (o.failedAt) problems.push(`${outputName(k)}: apparaatfout`);
+  }
+  const live = S.live && S.live.state === 'playing' ? S.live : null;
+  if (live && live.audio.error) problems.push(`Player ${live.name}: afspeelfout`);
+  if (live && live.audio._ctx && live.audio._ctx.state !== 'running') problems.push(`Player ${live.name}: uitgang ${live.audio._ctx.state}`);
+  if (problems.length) return { level: 'bad', text: problems.join(' · ') };
+  const ctx = contexts[keys[0]];
+  const id = S.outputs.A || '';
+  const dev = sys.devices.find((d) => d.deviceId === id);
+  const device = id ? (dev && dev.label) || 'gekozen geluidskaart' : 'standaard geluidskaart';
+  return { level: 'ok', text: `OK · ${(ctx.sampleRate / 1000).toLocaleString('nl-NL')} kHz · ${device}`, rate: ctx.sampleRate, device };
+}
+function setSys(id, level, text) {
+  const el = $(id);
+  el.className = `sys ${level}`;
+  el.querySelector('b').textContent = text;
+}
+function renderSystem() {
+  const s = sys.server;
+  setSys('sys-server', !s ? '' : s.ok ? (s.ms > 800 ? 'warn' : 'ok') : 'bad', !s ? '…' : s.ok ? `${s.ms} ms` : s.error);
+  const d = sys.db;
+  setSys('sys-db', !s ? '' : !s.ok || !d ? 'warn' : d.ok ? 'ok' : 'bad', !s ? '…' : !s.ok || !d ? 'onbekend' : d.ok ? `OK (${d.ms} ms)` : d.error);
+  const a = audioHealth();
+  setSys('sys-audio', a.level, a.text);
+  const c = $('sys-clients');
+  c.classList.toggle('hidden', sys.clients === null || sys.clients === undefined);
+  if (sys.clients !== null && sys.clients !== undefined) c.querySelector('b').textContent = String(sys.clients);
+}
+async function refreshDevices() {
+  try { sys.devices = await listDevices(); } catch { sys.devices = []; }
+}
+
+// ---------- favourites and quick filters ----------
+// Favourites live in the studio settings (per person), like the playlist and jingles.
+const favIds = () => (Array.isArray(S.settings.favorites) ? S.settings.favorites : []);
+const isFav = (id) => favIds().includes(id);
+function setFav(ids, on) {
+  const set = new Set(favIds());
+  for (const id of ids) { if (on) set.add(id); else set.delete(id); }
+  S.settings.favorites = [...set].slice(-1000);
+  saveSettingsSoon();
+  status(on ? `★ ${ids.length === 1 ? 'Favoriet' : `${ids.length} favorieten`} toegevoegd` : '☆ Uit favorieten');
+  for (const id of ids) {
+    const row = document.querySelector(`#library .lib-row[data-file="${id}"]`);
+    const f = S.files.get(id);
+    if (row && f) row.replaceWith(libraryRow(f));
+  }
+  if (libFilter.mode === 'fav') searchLibrary();
+  if (details.id && ids.includes(details.id)) renderDetails();
+}
+const libFilter = { mode: 'all', genre: '' };
+function bindQuickFilters() {
+  document.querySelectorAll('#lib-quick .qf').forEach((b) => b.addEventListener('click', () => {
+    libFilter.mode = b.dataset.mode;
+    document.querySelectorAll('#lib-quick .qf').forEach((x) => x.classList.toggle('on', x === b));
+    searchLibrary();
+  }));
+  $('lib-genre').addEventListener('change', () => { libFilter.genre = $('lib-genre').value; searchLibrary(); });
+  loadGenres();
+}
+// Genres come from the tags in the database itself, so new genres show up by themselves.
+async function loadGenres() {
+  try {
+    const { genres } = await api('GET', '/api/genres');
+    const keep = $('lib-genre').value;
+    $('lib-genre').replaceChildren(h('option', { value: '' }, 'Alle genres'), ...genres.map((g) => h('option', { value: g.genre }, `${g.genre} (${g.count.toLocaleString('nl-NL')})`)));
+    $('lib-genre').value = keep;
+  } catch { /* keep the list as it is */ }
+}
+
+// ---------- track details ----------
+const details = { id: null, data: null, timer: null, token: 0 };
+// Shown a moment after a single click, so a double-click never lands on a moved row.
+function showDetails(id) {
+  clearTimeout(details.timer);
+  if (!id) { details.id = null; $('lib-details').classList.add('hidden'); return; }
+  details.timer = setTimeout(async () => {
+    const token = ++details.token;
+    details.id = id; details.data = null;
+    renderDetails();
+    try {
+      const data = await api('GET', `/api/files/${id}/details`);
+      if (token === details.token) { details.data = data; renderDetails(); }
+    } catch (e) { if (token === details.token) { details.data = { error: e.message }; renderDetails(); } }
+  }, 450);
+}
+const kHz = (hz) => `${(hz / 1000).toLocaleString('nl-NL')} kHz`;
+function detailRows(f, d) {
+  const len = cueOut(f) !== null ? cueOut(f) - cueIn(f) : f.duration_seconds;
+  const fmtName = d && (d.codec || d.container) ? `${d.codec || d.container}${d.lossless === true ? ' (verliesvrij)' : ''}` : (f.mime_type || '').replace('audio/', '').toUpperCase();
+  const rows = [
+    ['Artiest', f.artist], ['Titel', f.title], ['Album', d && d.album], ['Genre', f.genre], ['Jaar', d && d.year],
+    ['Speelduur', len ? fmt(len) : null], ['Formaat', fmtName], ['Samplerate', d && d.sample_rate ? kHz(d.sample_rate) : null],
+    ['Bitdiepte', d && d.bits_per_sample ? `${d.bits_per_sample} bit` : null], ['Bitrate', d && d.bitrate ? `${Math.round(d.bitrate / 1000)} kbps` : null],
+    ['Kanalen', d && d.channels ? (d.channels === 1 ? 'mono' : d.channels === 2 ? 'stereo' : String(d.channels)) : null],
+    ['Loudness', f.loudness_lufs != null ? `${String(f.loudness_lufs).replace('.', ',')} LUFS` : null],
+    ['Grootte', f.size_bytes ? `${(f.size_bytes / 1048576).toLocaleString('nl-NL', { maximumFractionDigits: 1 })} MB` : null],
+  ];
+  return rows.filter(([, v]) => v !== null && v !== undefined && v !== ''); // missing = not shown, never guessed
+}
+function renderDetails() {
+  const box = $('lib-details');
+  const f = details.id && S.files.get(details.id);
+  if (!f) { box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  const d = details.data && details.data.details;
+  const file = (details.data && details.data.file) ? { ...f, ...details.data.file } : f;
+  box.replaceChildren(
+    h('div', { class: 'd-head' }, h('span', { class: 'd-title' }, label(f)),
+      h('button', { class: 'mini', title: 'Favoriet aan/uit', onclick: () => setFav([f.id], !isFav(f.id)) }, isFav(f.id) ? '★ Favoriet' : '☆ Favoriet'),
+      h('button', { class: 'mini', title: 'Sluiten (Esc)', onclick: clearSelection }, '✕')),
+    details.data && details.data.error ? h('div', { class: 'muted' }, `Details niet beschikbaar: ${details.data.error}`)
+      : h('dl', {}, detailRows(file, d).filter(([k]) => k !== 'Artiest' && k !== 'Titel').map(([k, v]) => [h('dt', {}, k), h('dd', { title: String(v) }, String(v))])),
+    ...(!details.data ? [h('div', { class: 'muted' }, 'Bestandsgegevens lezen…')] : []));
+}
+
+// ---------- jingle buttons ----------
+function slotCategory(slot, file) {
+  if (slot.cat) return slot.cat;
+  const c = S.collections.find((x) => x.id === file.collection_id);
+  return c ? c.name : '';
+}
+function replaceSlot(index, id) {
+  const slot = cartSlots()[index];
+  const old = slot && S.files.get(slot.id);
+  stopCart(index);
+  cartSlots()[index] = { ...slot, id };
+  saveSettingsSoon(); preloadCartPage(); renderCart();
+  const f = S.files.get(id);
+  logEvent('INFO', `Jingle-knop ${index + 1}: ${old ? old.title : '—'} → ${f ? f.title : id}`);
+}
+function renameSlotCategory(index) {
+  const slot = cartSlots()[index];
+  const f = slot && S.files.get(slot.id);
+  if (!slot || !f) return;
+  const v = prompt('Categorie op deze knop (leeg = naam van de collectie)', slot.cat || '');
+  if (v === null) return;
+  slot.cat = v.trim().slice(0, 30) || undefined;
+  saveSettingsSoon(); renderCart();
+}
+function showSlotInfo(index) {
+  const slot = cartSlots()[index];
+  const f = slot && S.files.get(slot.id);
+  if (!f) return;
+  const page = 'ABCD'[Math.floor(index / cartDims().count)] || '';
+  const key = index % cartDims().count;
+  $('slot-info-body').replaceChildren(h('dl', { class: 'info-grid' },
+    [['Knop', `${page} ${key + 1}${key < 10 ? ` (toets ${(key + 1) % 10})` : ''}`], ['Categorie', slotCategory(slot, f) || '—'],
+      ...detailRows(f, null), ['Gelijk volume', S.settings.normalize ? (f.loudness_lufs != null ? 'aan' : 'aan (nog niet gemeten)') : 'uit']]
+      .map(([k, v]) => [h('dt', {}, k), h('dd', {}, String(v))])),
+  h('p', { class: 'muted', style: 'margin:12px 0 0' }, 'Kleur, categorie en vervangen: rechtsklik op de knop.'));
+  $('slot-info').showModal();
+}
+
+// ---------- dashboard ----------
+// One overview of everything that matters on air. Purely a view: nothing here changes
+// the playlist, the players or the jingles.
+let dashTimer = null;
+function upcoming() {
+  const live = S.live && S.live.file ? S.live : null;
+  let at = Date.now();
+  if (live) at += ((mixPoint(live.file) ?? cueOut(live.file)) - live.audio.currentTime) * 1000;
+  let known = true;
+  let total = 0;
+  const list = [];
+  for (const item of S.playlist) {
+    if (item.marker || item.state !== 'queued' || item.error) continue;
+    const f = S.files.get(item.id);
+    if (!f) continue;
+    list.push({ f, at: known ? at : null });
+    const len = playLength(f);
+    if (len === null || item.stopAfter) known = false;
+    if (len !== null) { at += len * 1000; total += len; }
+  }
+  return { list, total };
+}
+function dashBox(title, body, cls = '') { return h('div', { class: `dash-box ${cls}` }, h('h3', {}, title), body); }
+const stLine = (level, text) => h('div', { class: `st ${level}` }, h('i'), text);
+function renderDashboard() {
+  $('dash-time').textContent = fmtClock(new Date());
+  const live = S.live && S.live.file ? S.live : null;
+  const { list, total } = upcoming();
+  const a = audioHealth();
+  const s = sys.server;
+  const d = sys.db;
+  const remaining = live ? (cueOut(live.file) ?? live.audio.duration) - live.audio.currentTime : null;
+  const warnings = [];
+  if (s && !s.ok) warnings.push(['ERROR', `Server: ${s.error}`]);
+  if (d && !d.ok) warnings.push(['ERROR', `Database: ${d.error}`]);
+  if (a.level === 'bad') warnings.push(['ERROR', `Audio: ${a.text}`]);
+  for (const dk of decks) if (dk.error && Date.now() - dk.error.at < 120000) warnings.push(['WARNING', `Player ${dk.name} sloeg over: ${dk.error.msg}`]);
+  if (S.settings.auto && !live && list.length === 0) warnings.push(['WARNING', 'Er speelt niets en de playlist is leeg']);
+  else if (S.settings.auto && live && list.length === 0 && !nonstopOn()) warnings.push(['WARNING', 'Na dit nummer is de playlist leeg']);
+  const recent = eventLog.filter((e) => e.level !== 'INFO' && Date.now() - e.t < 10 * 60 * 1000).slice(-5).reverse();
+  $('dash-grid').replaceChildren(
+    dashBox('NU OP DE RADIO', live ? [h('div', { class: 'big' }, label(live.file)),
+      h('div', { class: 'num' }, fmt(remaining, { sign: '-' })),
+      h('div', { class: 'sub' }, `Player ${live.name}${live.state === 'paused' ? ' · PAUZE' : ''}`)] : h('div', { class: 'sub' }, 'Er speelt niets'), 'wide'),
+    dashBox('PLAYLIST', [h('div', { class: 'num' }, String(list.length)), h('div', { class: 'sub' }, `nummers · nog ${total ? fmt(total) : '0:00'}`),
+      h('div', { class: 'sub' }, `AUTO ${S.settings.auto ? 'aan' : 'uit'} · NONSTOP ${nonstopOn() ? 'aan' : 'uit'}`)]),
+    dashBox('HIERNA', list.length ? h('ol', {}, list.slice(0, 3).map((x) => h('li', {}, h('span', { class: 't' }, x.at ? fmtClock(new Date(x.at)).slice(0, 5) : '--:--'), label(x.f))))
+      : h('div', { class: 'sub' }, 'Niets meer in de playlist'), 'wide'),
+    dashBox('SERVER', [stLine(!s ? '' : s.ok ? 'ok' : 'bad', !s ? 'nog niet gecontroleerd' : s.ok ? `Online · ${s.ms} ms` : `Offline · ${s.error}`),
+      h('div', { class: 'sub' }, sys.clients !== null && sys.clients !== undefined ? `Actieve gebruikers (2 min): ${sys.clients}` : '')]),
+    dashBox('DATABASE', stLine(!d ? 'warn' : d.ok ? 'ok' : 'bad', !d ? 'onbekend (server niet bereikt)' : d.ok ? `Verbonden · ${d.ms} ms` : `Niet verbonden · ${d.error}`)),
+    dashBox('AUDIO', [stLine(a.level, a.level === 'ok' ? 'OK' : a.text), a.rate ? h('div', { class: 'sub' }, `${a.device} · ${kHz(a.rate)}`) : null]),
+    ...(warnings.length || recent.length ? [dashBox('WAARSCHUWINGEN', h('ul', {}, [...warnings.map(([lv, m]) => h('li', { class: lv }, m)),
+      ...recent.map((e) => h('li', { class: e.level }, `${fmtTime(e.t)} ${e.msg}`))]), 'full alert')] : []));
+}
+function toggleDashboard(open = !$('dashboard').open) {
+  if (open) {
+    renderDashboard();
+    $('dashboard').showModal();
+    clearInterval(dashTimer);
+    dashTimer = setInterval(renderDashboard, 500);
+  } else $('dashboard').close();
+}
+
+function initExtras() {
+  $('btn-dashboard').addEventListener('click', () => toggleDashboard(true));
+  $('dash-close').addEventListener('click', () => toggleDashboard(false));
+  $('dashboard').addEventListener('close', () => { clearInterval(dashTimer); dashTimer = null; });
+  $('slot-info-close').addEventListener('click', () => $('slot-info').close());
+  $('btn-log').addEventListener('click', () => toggleLog());
+  $('log-close').addEventListener('click', () => toggleLog(false));
+  $('log-problems').addEventListener('change', renderLog);
+  $('log-clear').addEventListener('click', () => {
+    if (!confirm('Logboek leegmaken? (Alleen dit overzicht; muziek, playlist en instellingen blijven.)')) return;
+    eventLog.length = 0; writeLocal('aot_eventlog', eventLog); renderLog();
+  });
+  $('settings').addEventListener('close', refreshDevices);
+  bindQuickFilters();
+  updateSelection();
+  renderLogBadge();
+  refreshDevices();
+  logEvent('INFO', 'Studio gestart');
+  checkSystem();
+  setInterval(checkSystem, 15000);
+  setInterval(renderSystem, 2000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) checkSystem(); });
 }
 
 boot();

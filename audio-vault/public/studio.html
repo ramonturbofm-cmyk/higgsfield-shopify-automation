@@ -30,6 +30,7 @@
   <div class="countdown" id="now-remaining">-0:00</div>
   <div class="clock"><div id="clock-time">00:00:00</div><div id="clock-date" class="clock-date"></div></div>
   <div class="top-actions">
+    <button class="icon-btn" id="btn-dashboard" title="Dashboard: alles in één overzicht (D)">▦</button>
     <button class="icon-btn update-btn hidden" id="btn-update" title="Updates">⬆</button>
     <button class="icon-btn" id="btn-settings" title="Instellingen">⚙</button>
     <a class="icon-btn" href="/klok.html" target="aot-beheer" title="Uurklokken (eigen venster; de muziek speelt door)">◔</a>
@@ -73,8 +74,15 @@
         <option value="new">Nieuwste eerst</option>
       </select>
     </div>
-    <div class="lib-selbar hidden" id="lib-selbar"></div>
+    <div class="lib-quick" id="lib-quick">
+      <button class="qf on" data-mode="all">Alles</button>
+      <button class="qf" data-mode="fav" title="Je favorieten (★ via rechtsklik of het infovak)">★ Favorieten</button>
+      <button class="qf" data-mode="new" title="Laatst toegevoegd eerst">Nieuw</button>
+      <select id="lib-genre" title="Genre"><option value="">Alle genres</option></select>
+    </div>
+    <div class="lib-selbar" id="lib-selbar"></div>
     <div class="library" id="library"></div>
+    <div class="lib-details hidden" id="lib-details"></div>
     <div class="hint">Ctrl/Shift+klik = meerdere kiezen · ⤴ = als volgende · + = achteraan · dubbelklik = achteraan · rechtsklik = meer · sleep naar playlist of jingle-knop · 🎧 = voorbeluisteren</div>
   </section>
 
@@ -90,11 +98,41 @@
 </main>
 
 <footer class="statusbar">
+  <span class="sys" id="sys-server" title="Verbinding met de server (gemeten elke 15 seconden)"><i></i>SERVER <b>…</b></span>
+  <span class="sys" id="sys-db" title="Database (gecontroleerd door de server)"><i></i>DATABASE <b>…</b></span>
+  <span class="sys" id="sys-audio" title="Geluidsuitgang van de players"><i></i>AUDIO <b>…</b></span>
+  <span class="sys hidden" id="sys-clients" title="Ingelogde gebruikers die de server de laatste 2 minuten gebruikten">CLIENTS <b></b></span>
   <span id="status-outputs"></span>
   <span id="status-quality"></span>
   <span id="status-msg"></span>
-  <span class="muted">Spatie = start · N = volgende · P = pauze · F = fade · A = auto · O = nonstop · ← → = doorspoelen</span>
+  <span class="muted keys" title="Sneltoetsen">Spatie start · N volgende · P pauze · F fade · A auto · O nonstop · ←→ spoelen · D dashboard</span>
+  <button class="mini" id="btn-log" title="Logboek openen/sluiten">LOG <span id="log-badge" class="log-badge hidden"></span></button>
 </footer>
+
+<section class="logpanel hidden" id="logpanel">
+  <div class="log-head">
+    <strong>LOGBOEK</strong>
+    <label><input type="checkbox" id="log-problems"> alleen waarschuwingen en fouten</label>
+    <span class="muted" id="log-count"></span>
+    <button class="mini" id="log-clear" title="Logboek leegmaken (alleen dit overzicht)">Wissen</button>
+    <button class="mini" id="log-close">Sluiten</button>
+  </div>
+  <div class="log-list" id="log-list"></div>
+</section>
+
+<dialog id="dashboard">
+  <div class="dash">
+    <div class="dash-head"><h2>DASHBOARD</h2><span class="muted" id="dash-time"></span><button class="mini" id="dash-close">Sluiten (Esc)</button></div>
+    <div class="dash-grid" id="dash-grid"></div>
+  </div>
+</dialog>
+
+<dialog id="slot-info">
+  <div class="dash">
+    <div class="dash-head"><h2>JINGLE</h2><button class="mini" id="slot-info-close">Sluiten</button></div>
+    <div id="slot-info-body"></div>
+  </div>
+</dialog>
 
 <div class="menu hidden" id="slot-menu"></div>
 

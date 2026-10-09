@@ -9,6 +9,7 @@ const { AUDIO_TYPES, ingestFile } = require('./ingest');
 const { createClockRouter } = require('./clocks');
 const nonstop = require('./nonstop');
 const { createTranscoder } = require('./transcode');
+const mm = require('music-metadata');
 
 const INVITE_DAYS = 7;
 
@@ -71,12 +72,17 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
 
   // ---------- sessions ----------
 
+  // Who used the server lately (any logged-in request): the "clients" count in the studio.
+  const lastSeen = new Map();
+  const ACTIVE_MS = 2 * 60 * 1000;
+
   async function loadSessionUser(req) {
     const session = auth.readSession(sessionSecret, auth.parseCookies(req.headers.cookie)[auth.SESSION_COOKIE]);
     if (!session) return null;
     const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [session.userId]);
     const user = rows[0];
     if (!user || !lib.isActive(user) || user.session_version !== session.sessionVersion) return null;
+    lastSeen.set(user.id, Date.now());
     return user;
   }
 
@@ -183,6 +189,25 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
   // ---------- own account ----------
 
   app.get('/api/me', requireUser, (req, res) => res.json({ user: publicUser(req.user) }));
+
+  // Real checks only, for the studio's status bar and dashboard: is the database
+  // answering (and how fast), and how many people used the server in the last 2 minutes.
+  app.get('/api/status', requireUser, wrap(async (req, res) => {
+    const started = Date.now();
+    let db;
+    try {
+      await Promise.race([pool.query('SELECT 1'), new Promise((_, no) => setTimeout(() => no(new Error('geen antwoord binnen 3 seconden')), 3000))]);
+      db = { ok: true, ms: Date.now() - started };
+    } catch (err) {
+      db = { ok: false, error: err.message };
+    }
+    const now = Date.now();
+    for (const [id, at] of lastSeen) if (now - at > ACTIVE_MS) lastSeen.delete(id);
+    res.set('Cache-Control', 'no-store').json({
+      server_time: new Date().toISOString(), uptime_seconds: Math.round(process.uptime()), db,
+      active_clients: lib.isAdmin(req.user) ? lastSeen.size : null,
+    });
+  }));
 
   app.post('/api/me/password', requireUser, wrap(async (req, res) => {
     const { current_password: current, new_password: next } = req.body || {};
@@ -396,6 +421,10 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
       const ids = String(req.query.ids).split(',').map(Number).filter(Number.isInteger).slice(0, 1000);
       params.push(ids); where += ` AND id = ANY($${params.length})`;
     }
+    if (req.query.genre) {
+      params.push(`%${String(req.query.genre).replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+      where += ` AND coalesce(genre, '') ILIKE $${params.length}`;
+    }
     if (req.query.q) {
       // Every word must appear in title, artist or tags: "turbo id" finds "Turbo FM – Station ID".
       for (const word of String(req.query.q).trim().split(/\s+/).slice(0, 6)) {
@@ -514,6 +543,33 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
     }
     res.set('X-Audio-Format', 'original');
     sendAudio(req, res, file, { download });
+  }));
+
+  // Details for the studio's info panel, read from the stored file itself (only when
+  // someone clicks a track; a small cache keeps repeated clicks instant). Only what the
+  // file really says: missing values stay null, nothing is guessed.
+  const detailsCache = new Map();
+  app.get('/api/files/:id/details', requireUser, wrap(async (req, res) => {
+    const file = await lib.readableFile(pool, req.user, Number(req.params.id));
+    if (!file) throw new HttpError(404, 'Bestand niet gevonden');
+    let details = detailsCache.get(file.storage_key);
+    if (!details) {
+      let meta = null;
+      try { meta = await mm.parseFile(path.join(filesDir, file.storage_key), { duration: false, skipCovers: true }); } catch { /* unreadable: no extra details */ }
+      const fmt = (meta && meta.format) || {};
+      const common = (meta && meta.common) || {};
+      const val = (v) => (v === undefined || v === null || v === '' ? null : v);
+      details = {
+        album: val(common.album), year: val(common.year), track: val(common.track && common.track.no),
+        container: val(fmt.container), codec: val(fmt.codec), lossless: typeof fmt.lossless === 'boolean' ? fmt.lossless : null,
+        sample_rate: val(fmt.sampleRate), bits_per_sample: val(fmt.bitsPerSample),
+        bitrate: fmt.bitrate ? Math.round(fmt.bitrate) : null, channels: val(fmt.numberOfChannels),
+        readable: Boolean(meta),
+      };
+      detailsCache.set(file.storage_key, details);
+      if (detailsCache.size > 500) detailsCache.delete(detailsCache.keys().next().value);
+    }
+    res.json({ file: publicFile(file), details, size_bytes: Number(file.size_bytes) });
   }));
 
   // Cue points found by the studio's silence analysis. Anyone who may play the file
