@@ -119,7 +119,7 @@ Samenvatting: **P0: 7 FIXED, 1 PARTIAL** (P0-08: bewezen in simulatie, niet met 
 | 10 | "Nu"-prijs niet uit verlopen interval | `test_10_*` | PASS |
 | 11 | Btw, vaste kosten, break-even incl. verlies en slijtage | `test_11_*` | PASS |
 | 12 | Backtest reproduceerbaar, dekking, geen dubbeltelling | `test_12_*` (finance + backtest) | PASS |
-| 13 | Windows: service na sluiten GUI en herstart | `windows/acceptance.ps1` (CI, schone Windows-runner) | zie [TEST_RESULTS.md](TEST_RESULTS.md) |
+| 13 | Windows: service na sluiten GUI en herstart | `windows/acceptance.ps1` (CI, schone Windows-runner) | PASS (12/12) |
 | 14 | Linux en Pi standalone, persistentie, herstart | `deploy/acceptance-linux.sh` (CI: Docker amd64, Docker arm64/QEMU, systemd) | PASS in CI; fysieke Pi: NOT TESTED |
 | 15 | Gedistribueerd read/command/ack/audit | `test_distributed.py` (in-process) | PASS (gesimuleerd, niet op 3 machines) |
 | 16 | Partitie, pairing, dubbele controller, lease, epoch, herstart, replay | `test_distributed.py`, `test_safety_nodes.py` | PASS |
@@ -130,4 +130,4 @@ Samenvatting: **P0: 7 FIXED, 1 PARTIAL** (P0-08: bewezen in simulatie, niet met 
 | 21 | Trage/offline API | `tests/ui/ui_acceptance.py` | PASS |
 | 22 | Optimizer 5/15/60 min, echte uuraggregatie | `test_audit_planning.py::test_22_*` | PASS |
 | 23 | 1366×768, 1920×1080, touch, toetsenbord | `tests/ui/ui_acceptance.py` | PASS |
-| 24 | Installer: installatie, update, downgradepreventie, verwijderen, config, demo | `windows/acceptance.ps1` + `test_version.py` | zie [TEST_RESULTS.md](TEST_RESULTS.md) |
+| 24 | Installer: installatie, update, downgradepreventie, verwijderen, config, demo | `windows/acceptance.ps1` + `test_version.py` | PASS (schone Windows-runner; geen aparte VM) |
