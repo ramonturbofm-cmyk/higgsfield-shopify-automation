@@ -2,7 +2,7 @@ import { api, can, dateTime, eur, field, guard, h, num, state } from "../lib.js"
 
 const SECTION_LABEL = { site: "Woning", grid: "Netaansluiting", battery: "Batterij", heatpump: "Warmtepomp", strategy: "Strategie",
   optimizer: "Optimizer", control: "Regeling", forecast: "Prognoses", notifications: "Meldingen", runtime: "Systeem", tariff: "Energiecontract",
-  prices: "Marktgegevens (prijsbron)", node: "Deze computer (node)" };
+  prices: "Marktgegevens (prijsbron)", cloud: "Energy Manager Cloud", node: "Deze computer (node)" };
 const LEVELS = ["simple", "advanced", "expert"];
 const ENUM_LABEL = { lowest_cost: "Laagste kosten", maximum_profit: "Maximale opbrengst", maximum_self_consumption: "Maximale zelfconsumptie",
   zero_export: "Geen teruglevering", battery_saver: "Batterij sparen", peak_shaving: "Piekbegrenzing", comfort: "Comfort", eco: "Eco",
@@ -108,15 +108,15 @@ async function marketCard(schema, values, ro, howto) {
 export async function render(root, [tab = "general"]) {
   const [schema, values] = await Promise.all([api("/settings/schema"), api("/settings")]);
   const tabs = h("div", { class: "seg" }, [["general", "Algemeen"], ["tariff", "Energiecontract"], ["prices", "Marktgegevens & prognoses"], ["profile", "EMS-strategie"],
-    ["users", "Gebruikers"]].map(([k, l]) => h("button", { class: k === tab ? "on" : "", onclick: () => { location.hash = `#/settings/${k}`; } }, l)));
+    ["users", "Gebruikers"], ...(state.level === "simple" ? [] : [["cloud", "Cloud"]])].map(([k, l]) => h("button", { class: k === tab ? "on" : "", onclick: () => { location.hash = `#/settings/${k}`; } }, l)));
   const lv = h("div", { class: "seg", title: "Hoeveel instellingen wilt u zien?" }, LEVELS.map((l) => h("button", { class: l === state.level ? "on" : "",
     onclick: () => { state.level = l; document.body.dataset.level = l; try { localStorage.setItem("ems.level", l); } catch { /* ignore */ } root.replaceChildren(); render(root, [tab]); } },
   { simple: "SIMPLE", advanced: "ADVANCED", expert: "EXPERT" }[l])));
   root.append(h("div", { class: "row spread" }, h("h1", {}, "Instellingen"), lv), tabs, h("div", { style: { height: "14px" } }));
   const ro = !can("admin");
   if (ro) root.append(h("div", { class: "notice info inline" }, "Alleen-lezen: wijzigen vereist beheerdersrechten."));
-  const card = (section, extra) => {
-    const f = sectionForm(schema, section, values[section]);
+  const card = (section, extra, only = null) => {
+    const f = sectionForm(schema, section, values[section], { only });
     return h("div", { class: "card" }, h("h3", {}, SECTION_LABEL[section]), f.el, extra || null,
       h("div", { class: "row", style: { marginTop: "12px" } }, h("button", { class: "btn primary", disabled: ro || null, onclick: () => guard(async () => {
         await api("/settings", { method: "PUT", body: { [section]: f.read() } });
@@ -201,6 +201,30 @@ export async function render(root, [tab = "general"]) {
           h("button", { class: "btn sm", disabled: !can("operator") || null, onclick: () => guard(() => api("/profiles/active", { method: "PUT", body: { profile: x.id } }), `Profiel: ${x.label}`)
             .then(() => { root.replaceChildren(); render(root, [tab]); }) }, "Kiezen"))))),
       h("p", { class: "muted small" }, "De strategie bepaalt hoe de optimizer kosten, opbrengst, batterijslijtage, comfort en teruglevering afweegt.")), sim, card("strategy"));
+  } else if (tab === "cloud") {
+    const st = await api("/cloud");
+    const url = h("input", { type: "url", value: st.url || "", placeholder: "https://cloud.voorbeeld.nl", "aria-label": "cloud-adres" });
+    const code = h("input", { value: "", placeholder: "ABCD-EFGH", autocomplete: "off", "aria-label": "koppelcode", style: { textTransform: "uppercase" } });
+    const openCloud = () => { if (/^https:\/\//.test(url.value)) window.open(url.value, "_blank", "noopener"); };
+    const statusRows = st.paired ? h("table", {}, h("tbody", {},
+      h("tr", {}, h("td", {}, "Gekoppeld aan"), h("td", {}, `${st.organization || "—"} · ${st.site_name || "—"}`)),
+      h("tr", {}, h("td", {}, "Verbinding"), h("td", {}, st.connected ? h("span", { class: "pill good" }, "verbonden") : h("span", { class: "pill warn" }, st.last_error || "niet verbonden"))),
+      h("tr", {}, h("td", {}, "Laatste contact"), h("td", {}, st.last_ok ? dateTime(st.last_ok) : "—")),
+      h("tr", {}, h("td", {}, "Licentie"), h("td", {}, st.license ? `${st.license.plan || "—"} · ${st.license.valid ? "geldig" : "verlopen (alleen cloudfuncties uit)"}` : "—")),
+      h("tr", {}, h("td", {}, "Bediening op afstand"), h("td", {}, `cloud: ${st.remote_control_enabled_in_cloud ? "aan" : "uit"} · deze installatie: ${st.remote_control_allowed_locally ? "toegestaan" : "niet toegestaan"}`)))) : null;
+    root.append(h("div", { class: "grid cols-2" },
+      h("div", { class: "card" }, h("h3", {}, "Energy Manager Cloud"),
+        h("p", { class: "muted small" }, "Optioneel. Uw installatie maakt alleen een uitgaande, versleutelde verbinding; er hoeven geen poorten open op uw router. ", st.local_note),
+        st.paired ? statusRows : h("div", { class: "form" },
+          field("Cloud-adres", url, "Het adres van de Energy Manager Cloud-dienst."),
+          h("div", { class: "row" }, h("button", { class: "btn", onclick: openCloud }, "Inloggen bij Energy Manager Cloud")),
+          h("p", { class: "small muted" }, "Log in (of maak een account) en kies bij uw locatie ‘Installatie koppelen’. U krijgt een koppelcode die 15 minuten geldig is."),
+          field("Koppelcode", code)),
+        h("div", { class: "row", style: { marginTop: "12px" } }, st.paired
+          ? [h("button", { class: "btn", disabled: ro || null, onclick: () => guard(() => api("/cloud/check", { method: "POST" }), "Verbinding gecontroleerd").then(() => { root.replaceChildren(); render(root, [tab]); }) }, "Verbinding controleren"),
+            h("button", { class: "btn danger", disabled: ro || null, onclick: () => confirm("Deze installatie ontkoppelen van Energy Manager Cloud?") && guard(() => api("/cloud/unpair", { method: "POST" }), "Ontkoppeld").then(() => { root.replaceChildren(); render(root, [tab]); }) }, "Ontkoppelen")]
+          : h("button", { class: "btn primary", disabled: ro || null, onclick: () => guard(() => api("/cloud/pair", { method: "POST", body: { url: url.value, code: code.value } }), "Installatie gekoppeld").then(() => { root.replaceChildren(); render(root, [tab]); }) }, "Deze installatie aan mijn account koppelen"))),
+      card("cloud", h("p", { class: "small muted" }, "Opdrachten op afstand worden alleen uitgevoerd als bediening op afstand in de cloud voor deze locatie aan staat én hier is toegestaan. Ze gaan door dezelfde veiligheidscontrole als handmatige bediening."), ["enabled", "remote_control_allowed", "share_summary", "heartbeat_s"])));
   } else if (tab === "users") {
     if (!can("admin")) { root.append(h("div", { class: "card muted" }, "Vereist beheerdersrechten.")); return; }
     const [users, tokens] = await Promise.all([api("/users"), api("/auth/tokens")]);

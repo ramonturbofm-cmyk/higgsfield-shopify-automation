@@ -1,0 +1,6 @@
+# Automatic HTTPS (Let's Encrypt) for {$EMC_DOMAIN}; only the proxy is reachable from the internet.
+{$EMC_DOMAIN} {
+	encode gzip
+	reverse_proxy api:8800
+	header -Server
+}

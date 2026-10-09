@@ -29,6 +29,7 @@ import yaml
 
 from ems import __version__
 from ems.automations import AutomationEngine
+from ems.cloud.link import CloudLink
 from ems.control.base import NativeController
 from ems.control.optimizing import OptimizingController
 from ems.core.clock import SimulatedClock, SystemClock
@@ -139,6 +140,7 @@ class EMSRuntime:
         self.automations = AutomationEngine(self.db, self._run_automation_action)
         self.nodes = NodeService(self)
         self.nodes.load_links()
+        self.cloud = CloudLink(self)
         if self.config.runtime.mode == "demo" and await asyncio.to_thread(self.db.count_users) == 0:
             await asyncio.to_thread(self.db.create_user, "demo", hash_password("demo"), "installer")
         self.bus.subscribe("decision", self._on_decision)
@@ -223,7 +225,7 @@ class EMSRuntime:
     # ----------------------------------------------------------------- loops
     def _start_loops(self) -> None:
         loops = [self._control_loop(), self._price_loop(), self._forecast_loop(), self._maintenance_loop(),
-                 self._watchdog_loop(), self.nodes.loop()]
+                 self._watchdog_loop(), self.nodes.loop(), self.cloud.loop()]
         if self.nodes.identity.is_controller:
             loops.append(self._optimizer_loop())
         for coro in loops:

@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "energy-manager-cloud"
+version = "0.5.0"
+description = "Energy Manager Cloud: accounts, organisaties, locaties, nodes, licenties en abonnementen (optioneel naast het lokale EMS)"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "SQLAlchemy>=2.0",
+    "pydantic>=2.6",
+    "argon2-cffi>=23.1",      # password hashing (Argon2id, RFC 9106)
+    "pyotp>=2.9",             # TOTP (RFC 6238) for MFA
+    "cryptography>=42",       # Fernet: encryption of MFA secrets at rest
+    "httpx>=0.27",
+    "email-validator>=2.0",   # e-mail address syntax (pydantic EmailStr)
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff"]
+postgres = ["psycopg[binary]>=3.1"]
+
+[project.scripts]
+emcloud = "emcloud.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["emcloud*"]
+
+[tool.setuptools.package-data]
+emcloud = ["web/*", "plans_default.json"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 140
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "I", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["emcloud"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.params.Depends"]

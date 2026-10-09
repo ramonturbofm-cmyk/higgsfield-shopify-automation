@@ -62,7 +62,7 @@ PROFILE_HELP = {
     "custom": "Eigen instellingen uit Instellingen → Batterij / Strategie.",
 }
 SETTINGS_SECTIONS = ("runtime", "site", "grid", "control", "optimizer", "battery", "heatpump", "strategy", "tariff",
-                     "prices", "forecast", "notifications", "node")
+                     "prices", "forecast", "notifications", "node", "cloud")
 
 
 def _err(exc: Exception, code: int = 422) -> HTTPException:
@@ -346,6 +346,46 @@ async def import_config(body: ConfigImport, p: Principal = Depends(admin),
     except (ConfigError, ValueError, yaml.YAMLError) as exc:
         raise _err(exc) from exc
     return {"ok": True}
+
+
+# ------------------------------------------------------------------- cloud
+class CloudPair(BaseModel):
+    url: str = Field(max_length=300)
+    code: str = Field(min_length=4, max_length=20)
+
+
+@router.get("/cloud", tags=["cloud"])
+async def cloud_status(_: Principal = Depends(viewer), rt: EMSRuntime = Depends(get_runtime)) -> dict:
+    return rt.cloud.status()
+
+
+@router.post("/cloud/pair", tags=["cloud"])
+async def cloud_pair(body: CloudPair, p: Principal = Depends(admin), rt: EMSRuntime = Depends(get_runtime)) -> dict:
+    """'Deze installatie aan mijn account koppelen' with the one-time code from the cloud portal."""
+    try:
+        info = await rt.cloud.pair(body.url, body.code)
+    except ValueError as exc:
+        raise _err(exc) from exc
+    data = rt.config.model_dump(mode="json")
+    data["cloud"] = {**data["cloud"], "enabled": True, "url": info.get("url") or body.url.strip().rstrip("/")}
+    await rt.reload(data, p.username, "gekoppeld aan Energy Manager Cloud")
+    await rt.cloud.heartbeat_once()
+    return rt.cloud.status()
+
+
+@router.post("/cloud/unpair", tags=["cloud"])
+async def cloud_unpair(p: Principal = Depends(admin), rt: EMSRuntime = Depends(get_runtime)) -> dict:
+    await rt.cloud.unpair()
+    data = rt.config.model_dump(mode="json")
+    data["cloud"] = {**data["cloud"], "enabled": False, "remote_control_allowed": False}
+    await rt.reload(data, p.username, "ontkoppeld van Energy Manager Cloud")
+    return rt.cloud.status()
+
+
+@router.post("/cloud/check", tags=["cloud"])
+async def cloud_check(_: Principal = Depends(admin), rt: EMSRuntime = Depends(get_runtime)) -> dict:
+    await rt.cloud.heartbeat_once()
+    return rt.cloud.status()
 
 
 # ------------------------------------------------------------------ tariff

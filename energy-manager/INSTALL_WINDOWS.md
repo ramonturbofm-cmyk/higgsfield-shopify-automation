@@ -48,3 +48,11 @@ Het EMS draait daarna op de achtergrond (zonder venster) en blijft regelen als d
 
 Python 3.12, Node 20+, Rust, Inno Setup 6: `.\windows\build.ps1`; acceptatietest:
 `.\windows\acceptance.ps1 -Installer dist\EnergyManagerSetup-<versie>.exe`.
+
+## Prijzen en cloud (0.5.0)
+
+* Prijsbron: *Instellingen → Marktgegevens & prognoses*. EnergyZero werkt zonder account of token
+  ("Verbinding testen" laat zien of de prijzen binnenkomen). Wat u zelf betaalt stelt u in bij
+  *Energiecontract*.
+* Energy Manager Cloud is optioneel (*Instellingen → Cloud*, niveau Uitgebreid): alleen een uitgaande
+  HTTPS-verbinding, geen open poorten. Lokaal werkt alles ook zonder cloud.

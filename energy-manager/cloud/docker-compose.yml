@@ -1,0 +1,55 @@
+# Energy Manager Cloud — production-style stack: Caddy (automatic HTTPS) -> API -> PostgreSQL.
+# Requirements: a server with a public IP, a DNS name pointing to it (EMC_DOMAIN), ports 80/443 open on
+# THAT SERVER (never on customers' routers), and a filled-in .env (see .env.example + DEPLOYMENT.md).
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: emcloud
+      POSTGRES_USER: emcloud
+      POSTGRES_PASSWORD: ${EMC_DB_PASSWORD:?EMC_DB_PASSWORD ontbreekt}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U emcloud -d emcloud"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+
+  api:
+    build: .
+    image: energy-manager-cloud:0.5.0
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      EMC_DATABASE_URL: postgresql+psycopg://emcloud:${EMC_DB_PASSWORD}@db:5432/emcloud
+      EMC_TRUSTED_PROXIES: "1"
+    networks: [internal]
+
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [api]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      EMC_DOMAIN: ${EMC_DOMAIN:?EMC_DOMAIN ontbreekt}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [internal]
+
+volumes:
+  db-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  internal:

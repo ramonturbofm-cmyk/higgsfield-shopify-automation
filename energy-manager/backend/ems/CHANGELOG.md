@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.5.0 — prijzen, prognoses, accounts en cloudplatform (UNSIGNED TEST BUILD)
+
+**Marktgegevens, contract en prognoses gescheiden**
+- Prijsinstellingen per bron: bij EnergyZero geen ENTSO-E-token; ENTSO-E toont het token; "Eigen API" (Expert)
+  met eigen velden; optionele reserveprijsbron (toont dan ook de velden van die bron)
+- EnergyZero via het officiële endpoint `public.api.energyzero.nl/v1/prices` (`date`, `interval`,
+  `energy_type`); ander adres alleen met "Aangepaste API-adressen toestaan"
+- Veilige uitgaande verzoeken: alleen https, geen inloggegevens in de URL, geen interne/gereserveerde
+  adressen (SSRF), geen redirects, maximale antwoordgrootte, retries bij netwerkfouten/429/5xx
+- Echte verbindingstest (dekking per dag, interval, morgen beschikbaar, duur, verworpen waarden)
+- Controle van prijzen (bereik, uitlijning, dubbelen), dekking per lokale dag (92/96/100 kwartieren),
+  publicatiebewaking na 13:00 met herhaalde controles en melding bij vertraging (15:30)
+- Statussen per kwartier: beursprijs, prognose, geschat (gat), verouderd, ontbreekt; grafieken met
+  doorgetrokken/gestippelde/grijze lijn en onzekerheidsband
+- Prijsprognose na de laatste beursprijs (instelbaar: aan/uit, horizon, model, betrouwbaarheidsdrempel,
+  gebruik door optimizer, batterijhandel); beginners zien alleen "Prijzen na morgen voorspellen"
+- Optimizer plant alleen op toegestane prijzen en laadt op prognoses niet uit het net (tenzij bewust aan)
+- Energiecontract: veld "Overige voorwaarden"; laatste synchronisatie per bron blijft bewaard na herstart
+
+**Energy Manager Cloud (nieuw, optioneel, `cloud/`)**
+- Accounts: registratie met e-mailverificatie, wachtwoord of wachtwoordloos (e-maillink), reset, TOTP-MFA
+  (verplicht voor platformbeheer, instelbaar per organisatie), sessies bekijken/intrekken, export, verwijderen
+- Organisaties, locaties, installaties; rollen (eigenaar, beheerder, installateur, bediener, kijker,
+  tijdelijke support) met fijnmazige rechten; tenant-isolatie; auditlog
+- Klantportaal (Mijn installaties online/offline, koppelen, bediening op afstand, leden, privacy,
+  abonnement) en platformbeheerportaal (totalen, versies, licenties, registraties, klant toevoegen, prijzen)
+- Licenties en abonnementen (BASIC/PRO/BUSINESS/ENTERPRISE, prijzen niet in de code), proef, upgrade,
+  downgrade, opzeggen, achterstand; verlopen licentie zet alleen cloudfuncties uit
+- Koppelen met eenmalige code, uitgaande HTTPS-verbinding, node-token met rotatie, intrekken
+- Opdrachten op afstand alleen met recht + locatie-instelling + licentie + lokale toestemming, en altijd
+  via de lokale veiligheidscontrole
+- Deployment: Dockerfile, docker-compose (Caddy TLS + PostgreSQL), DEPLOYMENT.md; PRIVACY_COMPLIANCE.md
+
+**Lokaal**
+- Instellingen → Cloud (Uitgebreid): "Inloggen bij Energy Manager Cloud" en "Deze installatie aan mijn
+  account koppelen"; lokale schakelaar voor bediening op afstand
+
 ## 0.4.0 — audit-remediatie (UNSIGNED TEST BUILD)
 
 Alle P0-bevindingen uit de audit van 0.2.0 opgelost of (P0-08) in simulatie aangetoond; zie

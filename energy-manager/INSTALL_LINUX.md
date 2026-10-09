@@ -8,7 +8,7 @@ Bediening via de browser (`http://<computer>:8080`), op telefoon, tablet of pc. 
 ```bash
 git clone https://github.com/ramonturbofm-cmyk/higgsfield-shopify-automation.git
 cd higgsfield-shopify-automation/energy-manager
-cp .env.example .env          # optioneel: tijdzone, poort, ENTSOE_TOKEN
+cp .env.example .env          # optioneel: tijdzone, poort (ENTSOE_TOKEN alleen als u ENTSO-E kiest)
 ./install.sh                  # installeert Docker indien nodig, bouwt en start (productie)
 # of: ./install.sh demo
 ```
@@ -53,3 +53,10 @@ nooit nepwaarden getoond: zonder netmeter ziet u "Geen primaire netmeter ingeste
 `deploy/acceptance-linux.sh` draait in CI op een schone Ubuntu-runner: Docker (amd64), Docker (arm64 via
 QEMU) en systemd. Het controleert start, web-UI, eerste account, cookie + CSRF, geen nepdata, herstart,
 herstel na een crash en bijwerken met behoud van gegevens.
+
+## Prijzen en cloud
+
+* Prijsbron: *Instellingen → Marktgegevens & prognoses*. EnergyZero werkt zonder account of token; klik
+  op "Verbinding testen" om te zien of de prijzen binnenkomen.
+* Energy Manager Cloud is optioneel (*Instellingen → Cloud*, niveau Uitgebreid). De installatie maakt dan
+  alleen een uitgaande HTTPS-verbinding; open geen poorten.

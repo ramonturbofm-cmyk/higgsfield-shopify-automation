@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "energy-manager"
-version = "0.4.0"
+version = "0.5.0"
 description = "Universeel, vooruitkijkend Energy Management System voor Raspberry Pi / Linux"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -60,6 +60,7 @@ select = ["E", "F", "W", "B", "I", "UP"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["ems", "conftest"]
+known-third-party = ["emcloud"]
 
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.File", "fastapi.params.Depends"]

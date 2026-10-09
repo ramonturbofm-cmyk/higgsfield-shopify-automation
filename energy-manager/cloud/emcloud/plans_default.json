@@ -1,0 +1,15 @@
+{
+  "_comment": "Default plan structure (features and limits). Prices are deliberately null: the platform admin sets them in the admin portal (PUT /api/v1/admin/plans/{key}). Until then the portal shows 'prijs nog niet ingesteld'.",
+  "plans": [
+    {"key": "BASIC", "name": "Basic", "rank": 1, "max_sites": 1, "max_nodes": 1,
+     "entitlements": ["cloud_status", "remote_view"]},
+    {"key": "PRO", "name": "Pro", "rank": 2, "max_sites": 1, "max_nodes": 3,
+     "entitlements": ["cloud_status", "remote_view", "remote_control", "multi_user", "history_sync"]},
+    {"key": "BUSINESS", "name": "Business", "rank": 3, "max_sites": 10, "max_nodes": 30,
+     "entitlements": ["cloud_status", "remote_view", "remote_control", "multi_user", "history_sync", "multi_site",
+                      "support_access", "api_access"]},
+    {"key": "ENTERPRISE", "name": "Enterprise", "rank": 4, "max_sites": null, "max_nodes": null,
+     "entitlements": ["cloud_status", "remote_view", "remote_control", "multi_user", "history_sync", "multi_site",
+                      "support_access", "api_access", "custom_limits"]}
+  ]
+}

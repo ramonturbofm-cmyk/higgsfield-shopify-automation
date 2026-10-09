@@ -396,6 +396,25 @@ class NotificationConfig(_Base):
                                          level="advanced", ge=50, le=100)
 
 
+class CloudConfig(_Base):
+    """Energy Manager Cloud (optional). The local EMS never depends on it: without cloud, with an expired
+    licence or during an outage everything local keeps working. Only outbound HTTPS connections."""
+
+    enabled: bool = setting(False, label="Energy Manager Cloud gebruiken", level="advanced",
+                            help="Optioneel: installatie op afstand bekijken en (als u dat toestaat) bedienen.")
+    url: str = setting("", label="Cloud-adres", level="advanced",
+                       help="HTTPS-adres van de Energy Manager Cloud-dienst (bijv. https://cloud.uwdomein.nl).")
+    remote_control_allowed: bool = setting(
+        False, label="Bediening op afstand toestaan (op deze installatie)", level="advanced",
+        help="Ook als de cloud bediening op afstand toestaat, voert deze installatie opdrachten alleen uit als dit "
+             "aan staat. Elke opdracht gaat door dezelfde lokale veiligheidscontrole als handmatige bediening.")
+    share_summary: bool = setting(
+        False, label="Actuele waarden delen met de cloud", level="expert",
+        help="Stuurt netvermogen, zonne-energie en batterijlading mee (alleen als uw organisatie in de cloud "
+             "ook toestemming gaf). Uit = alleen status en apparaatnamen.")
+    heartbeat_s: int = setting(60, label="Statusbericht elke", unit="s", level="expert", ge=15, le=600)
+
+
 class NodeConfig(_Base):
     name: str = setting("", label="Naam van deze computer",
                         help="Zoals deze Energy Manager-node in het overzicht verschijnt. Leeg = computernaam.")
@@ -450,6 +469,7 @@ class EMSConfig(_Base):
     forecast: ForecastConfig = Field(default_factory=ForecastConfig)
     notifications: NotificationConfig = Field(default_factory=NotificationConfig)
     node: NodeConfig = Field(default_factory=NodeConfig)
+    cloud: CloudConfig = Field(default_factory=CloudConfig)
     devices: list[DeviceConfig] = Field(default_factory=list)
     # JSON paths whose value came from a ${VAR} reference: (path -> original text).
     _env_refs: dict[tuple, tuple[str, Any]] = PrivateAttr(default_factory=dict)

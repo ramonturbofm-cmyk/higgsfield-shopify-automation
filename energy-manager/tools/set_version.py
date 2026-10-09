@@ -4,7 +4,8 @@
     python tools/set_version.py --check   # fail if any file differs (also a unit test)
 
 Files: pyproject.toml, windows-app/package.json + package-lock.json, src-tauri/tauri.conf.json,
-src-tauri/Cargo.toml, windows/installer.iss (default AppVersion). The release workflow builds the
+src-tauri/Cargo.toml, windows/installer.iss (default AppVersion),
+cloud/pyproject.toml, cloud/emcloud/__init__.py. The release workflow builds the
 installer with the version from ems.__version__.
 """
 
@@ -42,6 +43,9 @@ def found_versions() -> dict[str, str]:
     if lockfile.exists():
         out["src-tauri/Cargo.lock"] = re.search(r'name = "energy-manager"\nversion = "([^"]+)"', _read(lockfile)).group(1)
     out["windows/installer.iss"] = re.search(r'#define AppVersion "([^"]+)"', _read(ROOT / "windows" / "installer.iss")).group(1)
+    out["cloud/pyproject.toml"] = re.search(r'(?m)^version = "([^"]+)"', _read(ROOT / "cloud" / "pyproject.toml")).group(1)
+    cloud_init = _read(ROOT / "cloud" / "emcloud" / "__init__.py")
+    out["cloud/emcloud/__init__.py"] = re.search(r'__version__ = "([^"]+)"', cloud_init).group(1)
     return out
 
 
@@ -68,6 +72,8 @@ def set_version(v: str) -> None:
     if lockfile.exists():
         sub(lockfile, r'(name = "energy-manager"\nversion = )"[^"]+"', rf'\g<1>"{v}"')
     sub(ROOT / "windows" / "installer.iss", r'#define AppVersion "[^"]+"', f'#define AppVersion "{v}"')
+    sub(ROOT / "cloud" / "pyproject.toml", r'(?m)^version = "[^"]+"', f'version = "{v}"')
+    sub(ROOT / "cloud" / "emcloud" / "__init__.py", r'__version__ = "[^"]+"', f'__version__ = "{v}"')
 
 
 if __name__ == "__main__":

@@ -5,13 +5,13 @@ De EMS-server draait 24/7 zelfstandig op een **Raspberry Pi 4/5** (of andere Lin
 plant en logt. De **Windows-app** en de **webinterface** (telefoon/tablet) zijn alleen bediening:
 het EMS blijft werken als de app dicht is.
 
-> **Versie 0.4.0 — UNSIGNED TEST BUILD.** Audit-remediatie van 0.2.0/0.3.0: zie
-> [AUDIT_REMEDIATION.md](AUDIT_REMEDIATION.md). Volledige server, optimizer, webinterface, Windows-app en Demo
-> Mode werken. Uitlezen van echte apparaten: HomeWizard P1, DSMR P1 en generieke Modbus TCP/HTTP/MQTT
-> (alleen-lezen). Er is nog **niets met echte hardware getest** en er zijn bewust **geen schrijvende
-> drivers** voor echte apparaten (geen verzonnen protocollen); volledige regeling van echte apparaten is
-> geblokkeerd tot een driver op hardware is bewezen. Status: [DEVELOPMENT.md](DEVELOPMENT.md), beperkingen:
-> [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).
+> **Versie 0.5.0 — UNSIGNED TEST BUILD.** Nieuw: marktgegevens gescheiden van het energiecontract, officiële
+> EnergyZero-API zonder token, prijsstatussen en -prognoses, en het optionele **Energy Manager Cloud**-platform
+> (accounts, organisaties, koppelen, portalen, licenties) — zie [CHANGELOG.md](CHANGELOG.md). Uitlezen van
+> echte apparaten: HomeWizard P1, DSMR P1 en generieke Modbus TCP/HTTP/MQTT (alleen-lezen). Er is nog
+> **niets met echte hardware getest** en er zijn bewust **geen schrijvende drivers** voor echte apparaten.
+> De cloud is **niet productierijp verklaard** (hosting, e-mail, betalingen en juridische documenten
+> ontbreken nog: [cloud/DEPLOYMENT.md](cloud/DEPLOYMENT.md)). Beperkingen: [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).
 
 ## Wat het doet
 
@@ -117,6 +117,14 @@ Rol instellen: *Instellingen → Algemeen → Deze computer (node)* (ADVANCED). 
 koppelcode; een nieuwe node krijgt nooit automatisch toegang. Er regelt altijd maar één controller per
 apparaat; valt de verbinding weg, dan gaan de apparaten terug naar hun eigen regeling.
 
+## Energy Manager Cloud (optioneel)
+
+Op afstand bekijken en — als u dat zelf toestaat — bedienen, met accounts, organisaties en licenties. Uw
+installatie maakt alleen een uitgaande HTTPS-verbinding; er gaan geen poorten open op uw router. Koppelen:
+maak in de cloudportal bij uw locatie een koppelcode en vul die lokaal in bij *Instellingen → Cloud*
+(Uitgebreid). Zonder cloud werkt alles lokaal precies hetzelfde. Server installeren: [cloud/DEPLOYMENT.md](cloud/DEPLOYMENT.md);
+privacy: [PRIVACY_COMPLIANCE.md](PRIVACY_COMPLIANCE.md).
+
 ## Apparaten koppelen
 
 In de webinterface: **Apparaten → Apparaat toevoegen**: soort → merk en model (of "Mijn apparaat staat er niet
@@ -192,4 +200,6 @@ energy-manager/
 * [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) — bekende beperkingen
 * [INSTALL_WINDOWS.md](INSTALL_WINDOWS.md), [INSTALL_LINUX.md](INSTALL_LINUX.md), [INSTALL_RASPBERRY_PI.md](INSTALL_RASPBERRY_PI.md)
 * [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) — controle vóór een release
+* [cloud/DEPLOYMENT.md](cloud/DEPLOYMENT.md) — Energy Manager Cloud installeren, wat nog ontbreekt
+* [PRIVACY_COMPLIANCE.md](PRIVACY_COMPLIANCE.md) — AVG-maatregelen en punten voor juridische toetsing
 * [CHANGELOG.md](CHANGELOG.md)

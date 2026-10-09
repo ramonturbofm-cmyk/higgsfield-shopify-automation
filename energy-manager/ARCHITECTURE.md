@@ -366,3 +366,64 @@ in de database.
 de drempel. De planning stopt bij het eerste onbruikbare kwartier (`inputs_summary.price_stop`). Op niet-
 gepubliceerde prijzen plant de optimizer geen laden uit het net (`grid_charge_allowed`), tenzij
 "Batterijhandel op prognoses" bewust aan staat. Bij een contract met vaste prijs zijn marktprijzen niet nodig.
+
+## 21. Energy Manager Cloud (0.5.0)
+
+**Scheiding.** LOKAAL (EMS): apparaten, metingen, optimizer, veiligheid, historie, contract en prijzen.
+CLOUD (`cloud/`, pakket `emcloud`, eigen database): accounts, authenticatie, organisaties, locaties, nodes,
+licenties, abonnementen, beheer, rechten, optionele synchronisatie, opdrachten op afstand, status. De
+cloud vervangt de lokale optimizer nooit; een cloudstoring raakt lokale regeling en veiligheid niet
+(getest: `tests/test_cloud_link.py`).
+
+**Datamodel** (`emcloud/db.py`): Organization, User, Membership (rol + optioneel beperkt tot locaties),
+Site, Node, Device (alleen metadata), Telemetry (alleen met toestemming), Subscription, License, Plan
+(prijzen als data), Invoice (geen betaalgegevens), Invitation, AuthSession, EmailToken, PairingCode,
+SupportGrant, RemoteCommand, AuditLog, Outbox. Elke tenant-rij heeft `org_id`; SQLite (ontwikkeling) en
+PostgreSQL 16 (productie) getest.
+
+**Rollen en rechten** (`emcloud/authz.py`): PLATFORM_ADMIN (vlag op de gebruiker, alleen beheerportaal),
+ORGANIZATION_OWNER, ORGANIZATION_ADMIN, INSTALLER, OPERATOR, VIEWER, SUPPORT (alleen via tijdelijke,
+door de klant verleende grant). Rechten o.a. `sites.read`, `sites.manage`, `devices.read`,
+`devices.control`, `tariffs.manage`, `users.invite`, `users.manage`, `subscriptions.manage`,
+`remote_access.grant`, `nodes.pair`, `audit.read`. Geen escalatie: niemand kent een hogere rol toe dan
+de eigen rol, alleen eigenaren maken eigenaren, de laatste eigenaar blijft. Toegang tot een andere tenant
+geeft 404.
+
+**Authenticatie** (`emcloud/api/auth.py`, `security.py`): e-mail + wachtwoord (Argon2id) of
+wachtwoordloos (eenmalige e-maillink), e-mailverificatie, wachtwoordreset (beëindigt alle sessies), TOTP-
+MFA met replaybescherming (verplicht voor platformbeheer, instelbaar per organisatie), sessies bekijken en
+intrekken, export, verwijderen. Geen eigen cryptografie: `argon2-cffi`, `pyotp`, `cryptography` (Fernet).
+
+**Koppelen** (`emcloud/api/nodes.py` + `ems/cloud/link.py`): in de portal "Koppelcode maken" (8 tekens,
+15 min, eenmalig) → lokaal *Instellingen → Cloud → "Deze installatie aan mijn account koppelen"*. De node
+krijgt een eigen token (`emn_…`, alleen de hash in de cloud, lokaal in de versleutelde secret store),
+roteert dat elke 30 dagen (oud token nog 10 min geldig) en kan door de klant worden ingetrokken. Alle
+verkeer is uitgaand HTTPS van de installatie: heartbeat (status, versie, apparaatnamen), long-poll voor
+opdrachten, bevestiging.
+
+**Opdrachten op afstand.** Vier sloten: (1) recht `devices.control`, (2) locatie-instelling
+`remote_control_enabled` (alleen eigenaar/beheerder), (3) licentie met `remote_control`, (4) lokaal
+`cloud.remote_control_allowed`. De installatie voert een opdracht uit via `engine.check` (`can_execute`)
+en het gewone override-pad, dus door dezelfde SafetyValidator als lokale handmatige bediening; het
+resultaat (geaccepteerd/geweigerd + reden) gaat terug naar de cloud. Opdrachten verlopen na 2 minuten.
+
+**Licenties en abonnementen** (`emcloud/billing.py`): BASIC/PRO/BUSINESS/ENTERPRISE met entitlements en
+limieten uit `plans_default.json`, prijzen alleen in de database (beheerportaal). Proefperiode, maand/jaar,
+upgrade direct, downgrade per periode-einde, opzeggen per periode-einde, achterstand (14 dagen respijt),
+verlopen. Een ongeldige licentie laat alleen `cloud_status` over; het lokale EMS werkt door. Betalingen
+via een `PaymentProvider`-koppeling (nog niet aangesloten; handmatig verlengen kan).
+
+**Portalen** (`emcloud/web/`): klant — Mijn installaties (online/offline), locatie (apparaten, koppelen,
+bediening op afstand, opdrachten), organisatie (leden, uitnodigingen, privacy, abonnement, support,
+logboek), account (MFA, sessies, export, verwijderen). Platformbeheer — totalen, versies, abonnementen,
+verlopende licenties, registraties, installaties met fouten, klant toevoegen (met uitnodiging), prijzen.
+Strikte CSP zonder inline scripts.
+
+**Centrale prijsdienst (alleen ontwerp, niet gebouwd).** Een cloudcomponent zou day-aheadprijzen één
+keer per marktgebied kunnen ophalen en aan installaties leveren. Voorwaarden: licentie/toestemming van de
+bron voor herdistributie, prijzen alleen als marktgegevens (leverancierstarieven blijven per klant lokaal),
+en lokale bronnen blijven werken als die dienst ontbreekt. Tot die voorwaarden geregeld zijn haalt elke
+installatie zelf op.
+
+**Deployment**: `cloud/Dockerfile`, `cloud/docker-compose.yml` (Caddy TLS → API → PostgreSQL),
+`cloud/DEPLOYMENT.md`; privacy: `PRIVACY_COMPLIANCE.md`.

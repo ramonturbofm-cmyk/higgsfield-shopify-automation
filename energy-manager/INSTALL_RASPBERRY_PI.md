@@ -39,3 +39,11 @@ Valt de verbinding weg, dan gaan de apparaten binnen 30 seconden terug naar hun 
 `./install.sh update` maakt eerst een back-up en rolt automatisch terug als de nieuwe versie niet gezond
 start. Verhuizen naar een nieuwe Pi: *Systeem → Back-up* met sleutels én wachtwoord, nieuwe Pi installeren,
 back-up herstellen.
+
+## Prijzen en cloud (0.5.0)
+
+* Prijsbron: *Instellingen → Marktgegevens & prognoses*. EnergyZero werkt zonder account of token
+  ("Verbinding testen" laat zien of de prijzen binnenkomen). Wat u zelf betaalt stelt u in bij
+  *Energiecontract*.
+* Energy Manager Cloud is optioneel (*Instellingen → Cloud*, niveau Uitgebreid): alleen een uitgaande
+  HTTPS-verbinding, geen open poorten. Lokaal werkt alles ook zonder cloud.

@@ -7,7 +7,7 @@
 ; Expects: dist\app\Energy Manager.exe  and  dist\EnergyManagerServer\ (PyInstaller one-folder)
 
 #ifndef AppVersion
-  #define AppVersion "0.4.0"
+  #define AppVersion "0.5.0"
 #endif
 
 [Setup]

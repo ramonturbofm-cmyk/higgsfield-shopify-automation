@@ -1,4 +1,4 @@
-# Bekende beperkingen — Energy Manager 0.4.0
+# Bekende beperkingen — Energy Manager 0.5.0
 
 Eerlijk overzicht van wat (nog) niet kan of niet bewezen is. Zie ook [AUDIT_REMEDIATION.md](AUDIT_REMEDIATION.md).
 
@@ -53,6 +53,37 @@ Eerlijk overzicht van wat (nog) niet kan of niet bewezen is. Zie ook [AUDIT_REME
   (of `X-Forwarded-Proto: https`) wordt benaderd.
 * Ingetrokken sessies (uitloggen) worden in het geheugen bijgehouden; na een herstart van de server
   verlopen oude sessies alleen nog op hun vervaltijd (max. 8 uur).
+
+## Prijzen en prognoses (0.5.0)
+
+* De EnergyZero-documentatie en -API zijn niet bereikbaar vanuit de ontwikkelomgeving; het officiële
+  endpoint en het antwoordformaat worden in CI tegen de live dienst gecontroleerd (schema + dekking van
+  vandaag). EnergyZero publiceert geen dataversie; ENTSO-E wel (`revisionNumber`).
+* Prijsprognoses zijn statistisch (zelfde kwartier/weekdag in het verleden) en houden geen rekening met
+  weer, wind of feestdagen. De betrouwbaarheid is een heuristiek (spreiding en afstand), geen kalibratie.
+  Standaard plant de optimizer niet op prognoses met betrouwbaarheid < 0,5 en laadt hij op prognoses nooit
+  uit het net.
+* Status STALE gaat uit van "bron faalt > 26 uur"; een herziening van al gepubliceerde prijzen door de bron
+  wordt alleen opgepikt bij een volgende geslaagde synchronisatie.
+* "Eigen API" ondersteunt alleen JSON met een lijst van {begintijd, prijs}; geen paginering of OAuth.
+
+## Energy Manager Cloud (0.5.0)
+
+* **Niet productierijp verklaard.** Code, tests (SQLite + PostgreSQL 16) en Docker-image zijn gecontroleerd;
+  hosting, DNS, e-mail (SMTP), back-ups, monitoring, betalingen, juridische documenten en een
+  end-to-endtest op een echte omgeving zijn nog niet gedaan (zie `cloud/DEPLOYMENT.md`).
+* Geen betaalprovider gekoppeld: verlengen gaat handmatig door platformbeheer; geen online checkout.
+* Rate limiting is per proces; voor meerdere API-instanties is een gedeelde opslag (bijv. Redis) nodig.
+* MFA alleen via TOTP-app (geen WebAuthn/passkeys, geen herstelcodes); verlies van het toestel vereist
+  herstel via support.
+* Het QR-codebeeld voor MFA ontbreekt (sleutel en otpauth-URI worden als tekst getoond).
+* E-mailadres wijzigen kan nog niet in de portal.
+* Geen SSO/OIDC voor zakelijke klanten.
+* Opdrachten op afstand zijn alleen getest met het gesimuleerde huis (Demo Mode), niet met echte hardware.
+* Synchronisatie van historie is beperkt tot actuele kernwaarden (met toestemming); geen volledige historie.
+* De centrale prijsdienst is alleen ontworpen, niet gebouwd.
+* De cloud-Docker-compose (Caddy + PostgreSQL) is niet als geheel lokaal gestart (Docker Hub-limiet in de
+  ontwikkelomgeving); het API-image is gebouwd en tegen PostgreSQL 16 gestart, en CI bouwt en start het.
 
 ## Interface
 

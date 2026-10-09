@@ -38,7 +38,7 @@ jobs:
           workspaces: energy-manager/windows-app/src-tauri -> target
 
       - name: Install Python packages
-        run: python -m pip install ".[dev]" pyinstaller
+        run: python -m pip install ".[dev]" "./cloud" pyinstaller
 
       - name: Tests (Windows)
         run: python -m pytest -q --timeout 300 -p no:warnings
