@@ -2,13 +2,16 @@ import { api, can, dateTime, eur, field, guard, h, num, state } from "../lib.js"
 
 const SECTION_LABEL = { site: "Woning", grid: "Netaansluiting", battery: "Batterij", heatpump: "Warmtepomp", strategy: "Strategie",
   optimizer: "Optimizer", control: "Regeling", forecast: "Prognoses", notifications: "Meldingen", runtime: "Systeem", tariff: "Energiecontract",
-  prices: "Prijzen", node: "Deze computer (node)" };
+  prices: "Marktgegevens (prijsbron)", node: "Deze computer (node)" };
 const LEVELS = ["simple", "advanced", "expert"];
 const ENUM_LABEL = { lowest_cost: "Laagste kosten", maximum_profit: "Maximale opbrengst", maximum_self_consumption: "Maximale zelfconsumptie",
   zero_export: "Geen teruglevering", battery_saver: "Batterij sparen", peak_shaving: "Piekbegrenzing", comfort: "Comfort", eco: "Eco",
   backup_priority: "Noodstroom eerst", custom: "Aangepast", balanced: "Gebalanceerd", profit: "Winst", aggressive: "Agressief",
   unlimited: "Onbeperkt", smart: "Smart Export", zero: "Zero Export", dynamic: "Dynamisch", fixed: "Vast", variable: "Variabel",
-  production: "Productie", demo: "Demo", none: "Geen", energyzero: "EnergyZero (Nederland, geen token nodig)", quarter: "Kwartier (15 min)", hour: "Uur", entsoe: "ENTSO-E (token nodig)", manual: "Handmatig", open_meteo: "Open-Meteo" };
+  production: "Productie", demo: "Demo", none: "Geen", energyzero: "EnergyZero (Nederland, geen token nodig)", quarter: "Kwartier (15 min)", hour: "Uur", entsoe: "ENTSO-E (token nodig)", manual: "Handmatig", open_meteo: "Open-Meteo",
+  custom_api: "Eigen API (expert)", eur_kwh: "€/kWh", eur_mwh: "€/MWh", same_slot_7d: "Zelfde kwartier, afgelopen 7 dagen",
+  weekday_profile_4w: "Zelfde weekdag, afgelopen 4 weken", stop_plan: "Planning stoppen", use_forecast: "Schatting gebruiken", NL: "Nederland" };
+const EXPERT_ONLY_OPTIONS = { provider: ["custom_api"], fallback_provider: ["custom_api"] };
 
 function resolve(schema, prop) {
   if (prop.$ref) return schema.$defs[prop.$ref.split("/").pop()];
@@ -16,7 +19,7 @@ function resolve(schema, prop) {
   return prop;
 }
 
-function sectionForm(schema, section, values) {
+function sectionForm(schema, section, values, { only = null, onChange = null } = {}) {
   const def = resolve(schema, schema.properties[section]);
   const level = LEVELS.indexOf(state.level);
   const inputs = {};
@@ -25,6 +28,7 @@ function sectionForm(schema, section, values) {
     const p = resolve(schema, raw);
     const lvl = LEVELS.indexOf(raw.level || p.level || "expert");
     if (lvl > level) continue;
+    if (only && !only.includes(key)) continue;    // e.g. no ENTSO-E token when EnergyZero is chosen
     const label = (raw.label_nl || key) + (raw.unit ? ` (${raw.unit})` : "");
     const nullable = Array.isArray(raw.anyOf) && raw.anyOf.some((a) => a.type === "null");
     const base = nullable ? raw.anyOf.find((a) => a.type !== "null") : p;
@@ -32,7 +36,8 @@ function sectionForm(schema, section, values) {
     let input;
     const v = values[key];
     if (base.enum || p.enum) {
-      input = h("select", {}, (base.enum || p.enum).map((e) => h("option", { value: e }, ENUM_LABEL[e] || e)));
+      const hidden = state.level === "expert" || section !== "prices" ? [] : (EXPERT_ONLY_OPTIONS[key] || []).filter((e) => e !== v);
+      input = h("select", {}, (base.enum || p.enum).filter((e) => !hidden.includes(e)).map((e) => h("option", { value: e }, ENUM_LABEL[e] || e)));
       input.value = v;
     } else if (type === "boolean") {
       input = h("input", { type: "checkbox", checked: v ? true : null });
@@ -45,8 +50,9 @@ function sectionForm(schema, section, values) {
     } else if (type === "array" || type === "object") {
       input = h("textarea", { rows: 2 }, JSON.stringify(v));
     } else {
-      input = h("input", { value: v ?? "", type: key.includes("token") ? "password" : "text" });
+      input = h("input", { value: v ?? "", type: key.includes("token") || key.includes("auth") ? "password" : "text", autocomplete: "off" });
     }
+    if (onChange) input.addEventListener("change", () => onChange(key));
     inputs[key] = { input, type, nullable };
     const rangeTxt = (type === "number" || type === "integer") && input.title ? `${input.title}.` : "";
     els.push(type === "boolean" ? h("label", { class: "f check", title: raw.help_nl || "" }, input, label)
@@ -66,9 +72,42 @@ function sectionForm(schema, section, values) {
   return { el: h("div", { class: "form" }, els.length ? els : h("div", { class: "muted small" }, "Geen instellingen op dit niveau.")), read };
 }
 
+/** Market data: only the settings of the chosen source(s) — the backend decides which (POST /prices/fields). */
+async function marketCard(schema, values, ro, howto) {
+  let current = { ...values.prices };
+  const body = h("div", {});
+  const result = h("div", { class: "small", role: "status" });
+  let form = null;
+  const build = async () => {
+    if (form) current = { ...current, ...form.read() };
+    const { visible } = await api("/prices/fields", { method: "POST", body: { values: current } });
+    form = sectionForm(schema, "prices", current, { only: visible, onChange: (k) => { if (["provider", "fallback_enabled", "fallback_provider"].includes(k)) build(); } });
+    body.replaceChildren(form.el, current.provider === "entsoe" || current.fallback_provider === "entsoe" ? howto : null);
+  };
+  await build();
+  const test = (which) => guard(async () => {
+    result.replaceChildren(h("div", { class: "muted" }, "Verbinding testen…"));
+    const r = await api("/prices/test", { method: "POST", body: { values: { ...current, ...form.read() }, which } });
+    const days = Object.entries(r.per_day || {}).map(([d, n]) => `${d}: ${n}`).join(", ");
+    result.replaceChildren(r.ok
+      ? h("div", { class: "ok" }, `Verbonden met ${r.provider}: ${r.slots} intervallen van ${r.interval_min} min (${days}). Morgen ${r.tomorrow_available ? "beschikbaar" : "nog niet (volledig) gepubliceerd"}. ${r.duration_ms} ms.${r.rejected ? ` ${r.rejected} waarden verworpen.` : ""}`)
+      : h("div", { class: "nok" }, `Test mislukt (${r.provider}): ${r.error}`));
+  });
+  return h("div", { class: "card" }, h("h3", {}, "Marktgegevens (prijsbron)"),
+    h("p", { class: "muted small" }, "Waar de beursprijzen vandaan komen. Wat u zelf betaalt (opslagen, belasting, btw, terugleververgoeding) stelt u in bij Energiecontract."),
+    body, result,
+    h("div", { class: "row", style: { marginTop: "12px" } },
+      h("button", { class: "btn", disabled: ro || null, onclick: () => test("provider") }, "Verbinding testen"),
+      current.fallback_enabled && state.level !== "simple" ? h("button", { class: "btn", disabled: ro || null, onclick: () => test("fallback_provider") }, "Reservebron testen") : null,
+      h("button", { class: "btn primary", disabled: ro || null, onclick: () => guard(async () => {
+        await api("/settings", { method: "PUT", body: { prices: form.read() } });
+        state.settings = await api("/settings");
+      }, "Marktgegevens opgeslagen") }, "Opslaan")));
+}
+
 export async function render(root, [tab = "general"]) {
   const [schema, values] = await Promise.all([api("/settings/schema"), api("/settings")]);
-  const tabs = h("div", { class: "seg" }, [["general", "Algemeen"], ["tariff", "Energiecontract"], ["prices", "Prijzen & prognoses"], ["profile", "EMS-strategie"],
+  const tabs = h("div", { class: "seg" }, [["general", "Algemeen"], ["tariff", "Energiecontract"], ["prices", "Marktgegevens & prognoses"], ["profile", "EMS-strategie"],
     ["users", "Gebruikers"]].map(([k, l]) => h("button", { class: k === tab ? "on" : "", onclick: () => { location.hash = `#/settings/${k}`; } }, l)));
   const lv = h("div", { class: "seg", title: "Hoeveel instellingen wilt u zien?" }, LEVELS.map((l) => h("button", { class: l === state.level ? "on" : "",
     onclick: () => { state.level = l; document.body.dataset.level = l; try { localStorage.setItem("ems.level", l); } catch { /* ignore */ } root.replaceChildren(); render(root, [tab]); } },
@@ -126,7 +165,7 @@ export async function render(root, [tab = "general"]) {
         h("li", {}, "Na goedkeuring (meestal binnen enkele werkdagen): log in → My Account Settings → Generate a new token."),
         h("li", {}, "Kopieer het token hierboven, kies prijsbron ENTSO-E en klik op Opslaan.")),
       h("p", { class: "muted" }, "Makkelijker: kies prijsbron „EnergyZero” — dezelfde Nederlandse marktprijzen, zonder account of token."));
-    root.append(h("div", { class: "grid cols-2" }, card("prices", howto), card("forecast"), h("div", { class: "card" }, h("h3", {}, "Prijzen handmatig invoeren"),
+    root.append(h("div", { class: "grid cols-2" }, await marketCard(schema, values, ro, howto), card("forecast"), h("div", { class: "card" }, h("h3", {}, "Prijzen handmatig invoeren"),
       h("p", { class: "muted small" }, "Eén regel per interval: tijdstip mét tijdzone (bijv. +02:00);marktprijs in €/kWh excl. btw. Rond de zomer-/wintertijd heeft een dag 92 of 100 kwartieren."),
       h("div", { class: "row" }, h("label", { class: "f" }, "Resolutie", res), h("label", { class: "f" }, "Of CSV-bestand", file)), csv,
       h("div", { class: "row", style: { marginTop: "10px" } },

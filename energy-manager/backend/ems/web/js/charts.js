@@ -126,3 +126,70 @@ export function priceBars({ times, values, unit = "€/kWh", height = 200, marke
   s.addEventListener("mouseleave", () => { tip.hidden = true; });
   return wrap;
 }
+
+/**
+ * Price line by status: solid = published (OFFICIAL_DAY_AHEAD), dashed = forecast/estimate (with the p10–p90
+ * band as uncertainty), grey = stale; MISSING intervals are a gap with a grey strip on the axis.
+ * priceLine({times, values, status, low, high, marker, unit})
+ */
+export function priceLine({ times, values, status, low = [], high = [], unit = "€/kWh", height = 220, marker = null, title = "prijzen" }) {
+  const W = 900, H = height, L = 50, R = 14, T = 10, B = 26;
+  const wrap = h("div", { class: "chart" });
+  const vals = [...values, ...low, ...high].filter((v) => v !== null && v !== undefined);
+  if (!vals.length) { wrap.append(h("div", { class: "empty" }, "Geen prijsdata beschikbaar")); return wrap; }
+  const ticks = niceTicks(Math.min(0, ...vals), Math.max(0, ...vals));
+  const lo = ticks[0], hi = ticks[ticks.length - 1], n = values.length, pw = W - L - R, ph = H - T - B;
+  const x = (i) => L + (n === 1 ? pw / 2 : (pw * i) / (n - 1));
+  const y = (v) => T + ph * (1 - (v - lo) / (hi - lo));
+  const s = svg("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": title });
+  for (const t of ticks) {
+    s.append(svg("line", { class: Math.abs(t) < 1e-9 ? "zero-l" : "grid-l", x1: L, x2: W - R, y1: y(t), y2: y(t) }));
+    s.append(svg("text", { class: "ax", x: L - 6, y: y(t) + 4, "text-anchor": "end" }, num(t, 2)));
+  }
+  const kind = (st) => (st === "OFFICIAL_DAY_AHEAD" ? "official" : st === "STALE" ? "stale" : st === "MISSING" ? "missing" : "forecast");
+  // Uncertainty band (forecast intervals only).
+  let up = "", down = "";
+  for (let i = 0; i < n; i++) if (high[i] !== null && high[i] !== undefined && kind(status[i]) === "forecast") up += `${up ? "L" : "M"}${x(i).toFixed(1)},${y(high[i]).toFixed(1)}`;
+  for (let i = n - 1; i >= 0; i--) if (low[i] !== null && low[i] !== undefined && kind(status[i]) === "forecast") down += `L${x(i).toFixed(1)},${y(low[i]).toFixed(1)}`;
+  if (up && down) s.append(svg("path", { class: "price-band", d: `${up}${down}Z` }));
+  // Segments of equal kind; a segment starts at the last point of the previous one (no visual jumps).
+  let i = 0;
+  while (i < n) {
+    const k = kind(status[i]);
+    if (k === "missing" || values[i] === null || values[i] === undefined) {
+      const j0 = i;
+      while (i < n && (kind(status[i]) === "missing" || values[i] === null || values[i] === undefined)) i++;
+      s.append(svg("rect", { class: "price-missing", x: x(j0), y: H - B - 4, width: Math.max(2, x(Math.min(n - 1, i)) - x(j0)), height: 4 }));
+      continue;
+    }
+    let d = i > 0 && values[i - 1] !== null && values[i - 1] !== undefined ? `M${x(i - 1).toFixed(1)},${y(values[i - 1]).toFixed(1)}L` : "M";
+    d += `${x(i).toFixed(1)},${y(values[i]).toFixed(1)}`;
+    i++;
+    while (i < n && kind(status[i]) === k && values[i] !== null && values[i] !== undefined) { d += `L${x(i).toFixed(1)},${y(values[i]).toFixed(1)}`; i++; }
+    s.append(svg("path", { class: `price-line ${k}`, d }));
+  }
+  const step = Math.max(1, Math.ceil(n / 8));
+  for (let t = 0; t < n; t += step) s.append(svg("text", { class: "ax", x: x(t), y: H - 6, "text-anchor": "middle" }, time(times[t])));
+  if (marker !== null && marker >= 0) s.append(svg("line", { class: "zero-l", x1: x(marker), x2: x(marker), y1: T, y2: H - B, "stroke-dasharray": "3 4" }));
+  const cross = svg("line", { class: "cross", x1: 0, x2: 0, y1: T, y2: H - B, visibility: "hidden" });
+  s.append(cross);
+  const LBL = { official: "beursprijs (gepubliceerd)", forecast: "prognose", stale: "verouderd", missing: "ontbreekt" };
+  const legend = h("div", { class: "legend" }, ["official", "forecast", "stale", "missing"].filter((k) => status.some((st) => kind(st) === k))
+    .map((k) => h("span", {}, h("i", { class: `sw price-${k}` }), LBL[k])));
+  const tip = h("div", { class: "tip", hidden: true });
+  wrap.append(legend, s, tip);
+  s.addEventListener("mousemove", (ev) => {
+    const r = s.getBoundingClientRect(), sx = (ev.clientX - r.left) * W / r.width;
+    if (sx < L || sx > W - R) { tip.hidden = true; cross.setAttribute("visibility", "hidden"); return; }
+    const k = Math.max(0, Math.min(n - 1, Math.round(((sx - L) / pw) * (n - 1))));
+    cross.setAttribute("x1", x(k)); cross.setAttribute("x2", x(k)); cross.setAttribute("visibility", "visible");
+    const band = kind(status[k]) === "forecast" && low[k] !== null && low[k] !== undefined ? ` (${num(low[k], 3)} – ${num(high[k], 3)})` : "";
+    tip.replaceChildren(h("b", {}, dateTime(times[k])), values[k] === null || values[k] === undefined ? "—" : `${num(values[k], 3)} ${unit}${band}`,
+      h("div", { class: "small" }, LBL[kind(status[k])]));
+    tip.hidden = false;
+    const px = x(k) * r.width / W;
+    tip.style.left = `${px > r.width / 2 ? px - tip.offsetWidth - 12 : px + 12}px`;
+  });
+  s.addEventListener("mouseleave", () => { tip.hidden = true; cross.setAttribute("visibility", "hidden"); });
+  return wrap;
+}

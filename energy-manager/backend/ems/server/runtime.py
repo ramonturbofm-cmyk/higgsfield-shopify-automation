@@ -50,8 +50,8 @@ from ems.nodes.power import windows_sleep_settings
 from ems.nodes.service import NodeService
 from ems.optimizer.explain import aggregate
 from ems.optimizer.service import OptimizerService
-from ems.prices.providers import DemoProvider, EnergyZeroProvider, EntsoeProvider, StaticProvider
 from ems.prices.service import PriceService
+from ems.prices.settings import build_provider
 from ems.security.auth import SessionRegistry, TokenIssuer, hash_password
 from ems.security.secrets import SecretStore
 from ems.server.demo import DEMO_CONFIG, PRODUCTION_DEFAULT
@@ -180,26 +180,19 @@ class EMSRuntime:
         ctx = DriverContext(self.clock, simulator=self.site, secrets=self.secrets,  # type: ignore[arg-type]
                             nodes=self.nodes.links)
         self.devices = DeviceManager(cfg, ctx, self.registry, strict=False)
-        provider, provider_error = None, None
+        provider, fallback, provider_error = None, None, None
+        demo_env = None if self.site is None else self.site.env
         try:
-            match cfg.prices.provider:
-                case "entsoe":
-                    token = cfg.prices.entsoe_token
-                    if token.startswith("secret:"):
-                        token = self.secrets.get(token.removeprefix("secret:")) or ""
-                    provider = EntsoeProvider(token, cfg.prices.bidding_zone)
-                case "energyzero":
-                    provider = EnergyZeroProvider(cfg.prices.energyzero_interval)
-                case "manual":
-                    provider = StaticProvider()
-                case "demo":
-                    if self.site is None:
-                        provider_error = "demo-prijzen zijn alleen beschikbaar in Demo Mode"
-                    else:
-                        provider = DemoProvider(self.site.env)
+            provider = build_provider(cfg.prices.provider, cfg.prices, self.secrets.get, demo_env=demo_env)
         except ValueError as exc:
             provider_error = str(exc)
-        self.prices = PriceService(self.db, cfg.prices.bidding_zone, provider, cfg.site.timezone)
+        if cfg.prices.fallback_enabled:
+            try:
+                fallback = build_provider(cfg.prices.fallback_provider, cfg.prices, self.secrets.get)
+            except ValueError as exc:
+                provider_error = f"{provider_error + '; ' if provider_error else ''}reservebron: {exc}"
+        self.prices = PriceService(self.db, cfg.prices.bidding_zone, provider, cfg.site.timezone, fallback=fallback,
+                                   config=cfg.prices, forecast=cfg.forecast, now_fn=self.clock.now)
         self.prices.last_error = provider_error
         self.tariff = TariffEngine(cfg.tariff, self.prices.spot, cfg.site.timezone)
         weather = None
@@ -319,13 +312,31 @@ class EMSRuntime:
                 await asyncio.sleep(1)
 
     async def _price_loop(self) -> None:
+        """Normal interval; right after the expected day-ahead publication; then every
+        ``publication_retry_minutes`` until tomorrow is complete (``PriceService.next_refresh_s``)."""
         while True:
-            await asyncio.sleep(self.config.prices.refresh_minutes * 60 / self.speed)
+            await asyncio.sleep(self.prices.next_refresh_s(self.clock.now()) / self.speed)
             before = self.prices.last_known()
             n = await self.prices.refresh(self.clock.now())
             if n and self.prices.last_known() != before:
                 self.optimizer.request("nieuwe prijsdata")
                 await self._price_notifications()
+            await self._publication_notifications()
+
+    async def _publication_notifications(self) -> None:
+        now = self.clock.now()
+        pub = self.prices.publication(now)
+        if pub["state"] == "delayed" and self.prices.provider is not None and self.prices.provider.name != "manual":
+            await self.notifications.notify(
+                "warning", "prices_delayed",
+                f"Day-aheadprijzen voor {pub['date']} zijn nog niet (volledig) gepubliceerd "
+                f"({pub['known']}/{pub['intervals']} kwartieren). Het EMS controleert elke "
+                f"{self.config.prices.publication_retry_minutes} min opnieuw en plant intussen niet op onbevestigde prijzen.",
+                key=pub["date"], cooldown_s=12 * 3600)
+        if self.prices.stale(now):
+            await self.notifications.notify("warning", "prices_stale",
+                                            f"Prijsbron faalt al langer dan een dag: {self.prices.last_error}",
+                                            cooldown_s=12 * 3600)
 
     async def _forecast_loop(self) -> None:
         while True:

@@ -379,3 +379,29 @@ async def test_health_installation_status_and_quality(env):
     assert [x["rules"] for x in s["scenarios"]] == ["NL-2026", "NL-2027"]
     taxes = (await c.get("/api/v1/tariff/taxes")).json()
     assert any(t["year"] == 2025 for t in taxes["table"])
+
+
+async def test_price_fields_test_status_and_masked_auth_header(env):
+    rt, c = env
+    r = (await c.post("/api/v1/prices/fields", json={"values": {"provider": "energyzero"}})).json()
+    assert "entsoe_token" not in r["visible"] and "energyzero_url" in r["visible"]
+    r = (await c.post("/api/v1/prices/fields", json={"values": {"provider": "entsoe"}})).json()
+    assert "entsoe_token" in r["visible"]
+    # Connection test refuses internal addresses (SSRF) and never stores anything.
+    r = (await c.post("/api/v1/prices/test", json={"which": "provider", "values": {
+        "provider": "custom_api", "custom_url": "https://127.0.0.1/prices", "allow_custom_endpoints": True}})).json()
+    assert r["ok"] is False and "intern" in r["error"]
+    r = (await c.post("/api/v1/prices/test", json={"values": {"provider": "custom_api", "custom_url": "https://x.example/p"}})).json()
+    assert r["ok"] is False and "uitgeschakeld" in r["error"]
+    r = await c.post("/api/v1/prices/test", json={"values": {"provider": "demo"}})
+    assert r.json()["ok"] is True and r.json()["slots"] > 0                     # demo source works in Demo Mode
+    # Authorization header of an own API: encrypted secret, masked in the API, never in the YAML.
+    r = await c.put("/api/v1/settings", json={"prices": {"provider": "demo", "custom_auth_header": "Bearer zeer-geheim"}})
+    assert r.status_code == 200, r.text
+    assert r.json()["prices"]["custom_auth_header"] == "********"
+    assert "zeer-geheim" not in rt.config_path.read_text() and rt.secrets.get("prices.custom_auth_header") == "Bearer zeer-geheim"
+    st = (await c.get("/api/v1/prices/status")).json()
+    assert st["provider"] == "demo" and st["publication"]["state"] in ("available", "not_yet_expected", "waiting", "delayed")
+    pts = (await c.get("/api/v1/prices?hours=48")).json()["points"]
+    assert {p["status"] for p in pts} <= {"OFFICIAL_DAY_AHEAD", "FORECAST", "ESTIMATED", "STALE", "MISSING"}
+    assert all(p["confidence"] == 1.0 for p in pts if p["status"] == "OFFICIAL_DAY_AHEAD")

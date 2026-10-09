@@ -32,16 +32,33 @@ jobs:
           python - <<'PY'
           import asyncio
           from datetime import UTC, datetime, timedelta
-          from ems.prices.providers import EnergyZeroProvider
+          import httpx
+          from ems.prices.providers import ENERGYZERO_URL, EnergyZeroProvider, validate_points
+          from ems.prices.service import PriceService
           async def main():
               now = datetime.now(UTC)
+              # 1. Raw schema of the official endpoint (documented parameters only).
+              day = now.astimezone(__import__("zoneinfo").ZoneInfo("Europe/Amsterdam")).strftime("%d-%m-%Y")
+              r = httpx.get(ENERGYZERO_URL, params={"date": day, "interval": "INTERVAL_QUARTER",
+                                                    "energy_type": "ENERGY_TYPE_ELECTRICITY"}, timeout=20)
+              print("HTTP", r.status_code, "top-level keys:", sorted(r.json()) if r.status_code == 200 else r.text[:200])
+              doc = r.json()
+              assert "base" in doc and isinstance(doc["base"], list) and doc["base"], "schema: 'base' list missing"
+              item = doc["base"][0]
+              print("item keys:", sorted(item), "price keys:", sorted(item["price"]))
+              assert {"start", "end", "price"} <= set(item) and "value" in item["price"], "schema changed"
+              # 2. Provider + validation + coverage, both intervals.
               for interval in ("quarter", "hour"):
                   prov = EnergyZeroProvider(interval)
-                  pts = await prov.fetch(now - timedelta(hours=12), now + timedelta(hours=36))
-                  print(interval, "points:", len(pts), "endpoint:", prov._endpoint)
-                  for p in pts[:3] + pts[-2:]:
-                      print("  ", p.start.isoformat(), p.price_eur_kwh, "EUR/kWh", p.resolution_min, "min")
-                  assert pts, "no prices"
+                  svc = PriceService(None, "NL", prov)
+                  n = await svc.refresh(now)
+                  pts, problems = validate_points(await prov.fetch(now - timedelta(hours=12), now + timedelta(hours=36)))
+                  st = svc.status(now)
+                  print(interval, "stored:", n, "valid:", len(pts), "rejected:", len(problems), "meta:", prov.last_meta)
+                  print("  today:", st["coverage"].get("today", {}).get("known"), "/", st["coverage"].get("today", {}).get("intervals"),
+                        "tomorrow:", st["publication"]["state"])
+                  assert n and pts and not problems, "no (valid) prices"
+                  assert st["coverage"]["today"]["complete"], "today incomplete"
           asyncio.run(main())
           PY
 

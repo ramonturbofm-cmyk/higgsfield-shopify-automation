@@ -316,3 +316,53 @@ niets bij een klokverschil > 10 s.
 `ems.__version__` is de enige bron; `tools/set_version.py` schrijft hem naar pyproject, app en installer
 (`--check` in de tests). De installer weigert een oudere versie over een nieuwere; de database weigert te
 starten met een nieuwer schema dan de software kent.
+
+## 20. Marktgegevens, energiecontract en prijsprognoses (0.5.0)
+
+Drie gescheiden lagen:
+
+| Laag | Sectie | Inhoud |
+|---|---|---|
+| Marktgegevens | `prices` (`PriceConfig`) | bron, marktgebied, marktinterval, verbinding, reservebron, publicatiecontrole |
+| Energiecontract | `tariff` (`TariffConfig`) | leverancier, soort contract, contractinterval, opslagen, terugleververgoeding/-kosten, energiebelasting, btw, transactiekosten, overige voorwaarden |
+| Prognoses | `forecast` (`ForecastConfig`) | prijsprognose aan/uit, horizon, model, betrouwbaarheidsdrempel, gebruik door optimizer en batterijhandel, gedrag bij ontbrekende prijzen |
+
+**Bronafhankelijke instellingen.** Elk bronspecifiek veld draagt in het schema `providers=[...]`;
+`prices/settings.py::visible_fields` bepaalt welke velden gelden voor de gekozen bron en (alleen als
+"Reserveprijsbron gebruiken" aan staat) de reservebron. De UI vraagt dit op via `POST /prices/fields`; bij
+EnergyZero verschijnt dus geen ENTSO-E-token. Tokens/headers staan versleuteld in de secret store
+(`SECRET_FIELDS`), nooit in de YAML, en komen gemaskeerd terug.
+
+**EnergyZero.** Alleen het officiële endpoint `https://public.api.energyzero.nl/v1/prices` met `date`,
+`interval` (`INTERVAL_QUARTER`/`INTERVAL_HOUR`) en `energy_type=ENERGY_TYPE_ELECTRICITY`; geen token. Een
+ander adres vereist de expertinstelling "Aangepaste API-adressen toestaan".
+
+**Uitgaande verzoeken (SSRF).** `validate_endpoint`: alleen `https`, geen gebruikersnaam/wachtwoord in de
+URL, geen `.local/.lan/.internal/localhost`, en de host moet uitsluitend naar publieke adressen resolven
+(geen loopback, privé, link-local incl. 169.254.169.254, CGNAT, ULA, multicast, gereserveerd). Redirects
+worden nooit gevolgd; antwoorden > 5 MB worden geweigerd; retries (1/3/9 s) alleen bij netwerkfouten, 429
+en 5xx. Een Authorization-header gaat alleen naar het ingestelde adres.
+
+**Controle.** `validate_points` verwerpt niet-eindige of onwaarschijnlijke waarden (buiten −2..10 €/kWh),
+niet-uitgelijnde intervallen en tegenstrijdige dubbele intervallen. Dekking per lokale dag (92/96/100
+kwartieren) bepaalt of "morgen beschikbaar" is.
+
+**Statussen** (`PriceStatus`): `OFFICIAL_DAY_AHEAD` (gepubliceerd en gecontroleerd), `ESTIMATED` (één gat
+≤ 2 uur binnen gepubliceerde prijzen, lineair geïnterpoleerd), `FORECAST` (na de laatste beursprijs, binnen
+de horizon, met betrouwbaarheid 0–1 en p10–p90-band), `STALE` (gepubliceerde prijs voor de toekomst terwijl
+de bron > 26 uur faalt), `MISSING`. Een prognose wordt nooit als beursprijs getoond; de grafiek tekent
+gepubliceerd doorgetrokken, prognose gestippeld met band, verouderd/ontbrekend grijs.
+
+**Publicatie.** Na `publication_expected` (13:00) controleert de prijsloop elke `publication_retry_minutes`
+tot morgen volledig is; na `publication_alert_after` (15:30) status `delayed` en een melding. De laatste
+geslaagde synchronisatie per bron staat in de database (`kv: prices.sync`) en overleeft een herstart.
+
+**Reservebron.** Alleen gevraagd als de hoofdbron faalt, vandaag onvolledig is of morgen na de verwachte
+publicatie nog ontbreekt; vult alleen intervallen die de hoofdbron niet leverde; de bron staat per interval
+in de database.
+
+**Optimizer.** `OptimizerService.price_usable`: gepubliceerd (ook `STALE`) altijd; `ESTIMATED` alleen bij
+"Schatting gebruiken"; `FORECAST` alleen als "Optimizer gebruikt prognoses" aan staat én de betrouwbaarheid ≥
+de drempel. De planning stopt bij het eerste onbruikbare kwartier (`inputs_summary.price_stop`). Op niet-
+gepubliceerde prijzen plant de optimizer geen laden uit het net (`grid_charge_allowed`), tenzij
+"Batterijhandel op prognoses" bewust aan staat. Bij een contract met vaste prijs zijn marktprijzen niet nodig.

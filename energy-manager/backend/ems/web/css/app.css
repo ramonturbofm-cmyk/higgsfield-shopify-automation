@@ -155,3 +155,9 @@ tr.now td { background: var(--warn-bg); }
 .card.kpi.stale .v { opacity: .55; text-decoration: line-through dotted; }
 .card.kpi .l.row { flex-wrap: nowrap; gap: 6px; align-items: center; }
 .card.kpi .l.row .pill { padding: 1px 6px; white-space: nowrap; }
+.price-line{fill:none;stroke-width:2;stroke-linejoin:round}.price-line.official{stroke:var(--s1)}
+.price-line.forecast{stroke:var(--s1);stroke-dasharray:6 5;opacity:.85}.price-line.stale{stroke:var(--muted);stroke-dasharray:2 3}
+.price-band{fill:var(--s1);opacity:.13;stroke:none}.price-missing{fill:var(--muted);opacity:.45}
+.sw.price-official{background:var(--s1)}.sw.price-forecast{background:repeating-linear-gradient(90deg,var(--s1) 0 5px,transparent 5px 8px)}
+.sw.price-stale{background:var(--muted)}.sw.price-missing{background:var(--muted);opacity:.45}
+.pill.st-OFFICIAL_DAY_AHEAD{color:var(--good)}.pill.st-FORECAST,.pill.st-ESTIMATED{color:var(--warn)}.pill.st-STALE,.pill.st-MISSING{color:var(--muted)}

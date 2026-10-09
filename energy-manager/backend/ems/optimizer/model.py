@@ -109,6 +109,7 @@ class OptimizerInput:
     heat_pump: HeatPumpModel | None = None
     evs: list[EVModel] = field(default_factory=list)
     price_estimated: list[bool] | None = None
+    grid_charge_allowed: list[bool] | None = None   # per slot; False = no battery charging from the grid
     wear_mode: str = "balanced"
     time_limit_s: float = 20.0
 
@@ -254,7 +255,9 @@ def solve(inp: OptimizerInput) -> Plan:
         bc = m.var(T, 0, b.max_charge_w, [wear / 2 * kw + tie[t] for t in range(T)])
         bd = m.var(T, 0, b.max_discharge_w, [wear / 2 * kw + tie[t] for t in range(T)])
         soc = m.var(T, b.min_kwh, b.max_kwh)
-        bg = m.var(T, 0, b.max_charge_w if b.grid_charging else 0.0, b.min_spread_eur_kwh * kw)
+        gca = inp.grid_charge_allowed or [True] * T
+        bg = m.var(T, 0, [b.max_charge_w if b.grid_charging and gca[t] else 0.0 for t in range(T)],
+                   b.min_spread_eur_kwh * kw)
         yb = m.var(T, 0, [1 if n else 0 for n in need_yb], 0, integer=True)
     hp_el = tin = s_comf = s_min = None
     if hp:

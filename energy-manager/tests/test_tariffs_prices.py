@@ -106,11 +106,14 @@ async def test_price_service_cache_survives_outage(tmp_path):
     assert await svc2.refresh(T) == 0
     assert svc2.last_error and "offline" in svc2.last_error
     assert svc2.spot(T) == svc.spot(T)
-    # Beyond the published horizon: estimate from previous days, flagged as such.
-    far = T + timedelta(days=3)
-    assert svc2.spot(far) is None
-    value, estimated = svc2.spot_or_estimate(far)
+    # Beyond the published horizon: a forecast from previous days, flagged as such (never as published),
+    # and nothing at all beyond the forecast horizon.
+    near = svc2.last_known() + timedelta(hours=2)
+    assert svc2.spot(near) is None
+    value, estimated = svc2.spot_or_estimate(near)
     assert estimated and value is not None
+    assert svc2.point(near).status == "FORECAST" and 0 < svc2.point(near).confidence < 1
+    assert svc2.point(svc2.last_known() + timedelta(hours=25)).status == "MISSING"
 
 
 def test_series_without_estimates_has_gaps():

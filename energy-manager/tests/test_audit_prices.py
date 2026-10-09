@@ -72,7 +72,7 @@ def test_10_current_price_requires_interval_overlap():
     assert svc.current(t0 - timedelta(minutes=1)) is None
     # The 15-min series marks missing and estimated intervals instead of silently filling them.
     ser = svc.series(t0, t0 + timedelta(hours=2), include_missing=True)
-    assert [p.status for p in ser[:4]] == ["confirmed"] * 4 and ser[-1].status == "missing"
+    assert [p.status for p in ser[:4]] == ["OFFICIAL_DAY_AHEAD"] * 4 and ser[-1].status == "MISSING"
 
 
 async def test_10_api_now_price_not_available_when_expired(tmp_path):
@@ -91,8 +91,8 @@ async def test_10_api_now_price_not_available_when_expired(tmp_path):
         assert (await c.post("/api/v1/prices/manual", json=body)).json()["stored"] == 4
         data = (await c.get("/api/v1/prices?hours=6&past_hours=4")).json()
         assert data["current"] is None and "geen gepubliceerde prijs" in data["current_reason"]
-        assert {p["status"] for p in data["points"]} >= {"confirmed"}
-        assert all(p["status"] != "confirmed" for p in data["points"] if p["start"] >= now.isoformat())
+        assert {p["status"] for p in data["points"]} >= {"OFFICIAL_DAY_AHEAD"}
+        assert all(p["status"] != "OFFICIAL_DAY_AHEAD" for p in data["points"] if p["start"] >= now.isoformat())
     finally:
         await c.aclose()
         await rt.stop()

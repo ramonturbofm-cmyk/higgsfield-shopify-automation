@@ -20,7 +20,7 @@ from ems.core.models import Capability, DeviceCategory, Metric
 from ems.core.snapshot import SiteSnapshot
 from ems.forecasting.service import SLOT_MIN, Forecast, ForecastService
 from ems.optimizer.model import BatteryModel, EVModel, HeatPumpModel, OptimizerInput, Plan, solve
-from ems.prices.service import PriceService
+from ems.prices.service import PriceSeriesPoint, PriceService, PriceStatus
 from ems.tariffs import TariffEngine
 
 log = logging.getLogger(__name__)
@@ -105,6 +105,7 @@ class OptimizerService:
         self._event = asyncio.Event()
         self._pending_reason: str | None = None
         self.runs = 0
+        self.price_stop: dict | None = None       # where (and why) the last plan stopped for lack of prices
 
     # ------------------------------------------------------------- triggers
     def request(self, reason: str) -> None:
@@ -129,21 +130,29 @@ class OptimizerService:
         settings = profile_settings(cfg)
         fc = self.forecast.build(now, cfg.optimizer.horizon_hours, snap.outdoor_temp_c)
         self.last_forecast = fc
-        slots, imp, exp, est = [], [], [], []
+        slots, imp, exp, est, grid_ok = [], [], [], [], []
+        self.price_stop = None
         for t in fc.slots:
-            spot, estimated = self.prices.spot_or_estimate(t)
-            if spot is None and self.tariff.needs_spot:
+            pt = self.prices.point(t, now)
+            usable, why = self.price_usable(pt)
+            if not usable and self.tariff.needs_spot:
+                self.price_stop = {"at": t.isoformat(), "status": str(pt.status), "reason": why}
                 break
-            if spot is not None and not estimated:     # hourly contract: hourly average of known quarters
+            spot = pt.spot if usable else None
+            if spot is not None and pt.official:       # hourly contract: hourly average of known quarters
                 spot = self.tariff.contract_spot(t, spot)
             b = self.tariff.breakdown_with_spot(t, spot)
             if b.import_price is None or b.export_price is None:
                 break
             e = b.export_price if settings.export_value_cap is None else min(b.export_price, settings.export_value_cap)
-            slots.append(t), imp.append(b.import_price), exp.append(e), est.append(estimated)
+            unconfirmed = self.tariff.needs_spot and not pt.official
+            slots.append(t), imp.append(b.import_price), exp.append(e), est.append(unconfirmed)
+            # Buying from the grid to sell/use later is only planned on published prices (unless enabled).
+            grid_ok.append(not unconfirmed or cfg.forecast.battery_trading_uses_forecast)
         n = len(slots)
         if n < 4:
-            return None, "geen (of te weinig) prijsdata beschikbaar voor planning"
+            why = f": {self.price_stop['reason']}" if self.price_stop else ""
+            return None, f"geen (of te weinig) bruikbare prijsdata voor planning{why}"
         dt = SLOT_MIN / 60
         load = list(fc.load_w[:n])
         inp = OptimizerInput(
@@ -153,7 +162,7 @@ class OptimizerService:
             curtailable=any(Capability.CONTROL_PV_LIMIT in self.capabilities.get(d.id, ())
                             for d in cfg.devices_of(DeviceCategory.PV_INVERTER, DeviceCategory.HYBRID_INVERTER)),
             peak_limit_w=None if cfg.strategy.peak_limit_kw is None else cfg.strategy.peak_limit_kw * 1000,
-            price_estimated=est, wear_mode=settings.wear_mode,
+            price_estimated=est, wear_mode=settings.wear_mode, grid_charge_allowed=grid_ok,
         )
         inp.battery = self._battery(snap, settings)
         inp.heat_pump, hp_note = self._heat_pump(snap, fc, n, settings)
@@ -161,6 +170,22 @@ class OptimizerService:
             inp.load_w = [lw + hw for lw, hw in zip(load, fc.hp_w[:n], strict=True)]
         inp.evs = self._evs(snap, slots, now, tz, fc)
         return inp, hp_note
+
+    def price_usable(self, pt: PriceSeriesPoint) -> tuple[bool, str]:
+        """Which price statuses the optimizer may plan on (settings under Prognoses)."""
+        f = self.config.forecast
+        if pt.spot is None:
+            return False, "geen prijs bekend"
+        if pt.official:                              # OFFICIAL_DAY_AHEAD, or STALE (validated when fetched)
+            return True, ""
+        if pt.status == PriceStatus.ESTIMATED:
+            ok = f.missing_price_fallback == "use_forecast"
+            return ok, "" if ok else "ontbrekend kwartier in de gepubliceerde prijzen"
+        if not f.optimizer_uses_price_forecast:
+            return False, "na de laatste beursprijs (prognoses niet gebruiken)"
+        if (pt.confidence or 0) < f.price_forecast_confidence_threshold:
+            return False, f"prognose te onzeker (betrouwbaarheid {pt.confidence:.2f})"
+        return True, ""
 
     def _battery(self, snap: SiteSnapshot, settings: ProfileSettings) -> BatteryModel | None:
         cfg = self.config
@@ -247,6 +272,7 @@ class OptimizerService:
             plan.inputs_summary["heat_pump_note"] = note
             plan.inputs_summary["forecast_sources"] = self.last_forecast.sources if self.last_forecast else {}
             plan.inputs_summary["profile"] = self.config.strategy.profile.value
+            plan.inputs_summary["price_stop"] = self.price_stop
         self.plan, self.plan_created, self.plan_trigger = plan, now, trigger
         self.runs += 1
         self.run_id = f"{now:%Y%m%dT%H%M%S}-{self.runs}"     # reasons and numbers all belong to this run

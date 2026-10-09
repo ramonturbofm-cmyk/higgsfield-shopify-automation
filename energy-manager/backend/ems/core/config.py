@@ -229,6 +229,8 @@ class TariffConfig(_Base):
 
     contract_name: str = setting("Mijn contract", label="Contractnaam")
     supplier: str = setting("", label="Leverancier")
+    other_terms: str = setting("", label="Overige voorwaarden", level="advanced", max_length=2000,
+                               help="Vrije notitie, bijv. looptijd, opzegtermijn of afwijkende afspraken. Niet in berekeningen.")
     contract_type: ContractType = setting(ContractType.DYNAMIC, label="Soort contract")
     # Import (afname)
     import_markup_eur_kwh: float = setting(0.02, label="Inkoopopslag", unit="EUR/kWh",
@@ -274,18 +276,86 @@ class TariffConfig(_Base):
                                                   unit="EUR", level="advanced", ge=0, le=5000)
 
 
+PRICE_PROVIDERS = ("none", "energyzero", "entsoe", "custom_api", "manual", "demo")
+ENERGYZERO_OFFICIAL_URL = "https://public.api.energyzero.nl/v1/prices"
+
+
+def scoped(default: Any, *, providers: tuple[str, ...], **kw: Any) -> Any:
+    """A price setting that only matters for some providers (primary or reserve). The settings
+    screen only shows it when one of those providers is active (``ems.prices.settings``)."""
+    f = setting(default, **kw)
+    f.json_schema_extra["providers"] = list(providers)
+    return f
+
+
 class PriceConfig(_Base):
-    provider: Literal["none", "energyzero", "entsoe", "manual", "demo"] = setting(
-        "none", label="Prijsbron",
-        help="EnergyZero (Nederland, geen token nodig), ENTSO-E (gratis API-token nodig), "
-             "handmatig ingevoerde prijzen, of de demo-prijzen.")
-    energyzero_interval: Literal["quarter", "hour"] = setting(
-        "quarter", label="EnergyZero: prijzen per",
-        help="Kwartierprijzen (nauwkeuriger, sinds de 15-minuten-markt) of uurprijzen.")
-    entsoe_token: str = setting("", label="ENTSO-E API-token", level="simple",
-                                help="Alleen nodig bij prijsbron ENTSO-E. Wordt versleuteld opgeslagen.")
-    bidding_zone: str = setting("10YNL----------L", label="Biedzone (EIC)", level="expert")
-    refresh_minutes: int = setting(60, label="Verversen elke", unit="min", level="expert", ge=5)
+    """MARKTGEGEVENS: where the market (day-ahead) prices come from. The energy contract with the
+    supplier (markups, tax, VAT, fees) is a separate section: ``tariff``."""
+
+    provider: Literal["none", "energyzero", "entsoe", "custom_api", "manual", "demo"] = setting(
+        "none", label="Prijsbron (marktprijzen)",
+        help="EnergyZero: Nederlandse day-aheadprijzen, geen account of token nodig. ENTSO-E: Europees "
+             "transparantieplatform (gratis token nodig). Eigen API: een eigen bron (Expert). Handmatig: zelf invoeren.")
+    market_area: Literal["NL"] = setting("NL", label="Marktgebied", level="advanced",
+                                         help="Biedzone van de day-aheadmarkt. EnergyZero levert alleen Nederland.")
+    market_interval: Literal["quarter", "hour"] = setting(
+        "quarter", label="Prijsinterval markt", level="advanced",
+        help="Kwartierprijzen (sinds de 15-minutenmarkt) of uurprijzen. Hoe uw leverancier afrekent stelt u in "
+             "bij Energiecontract.")
+    # EnergyZero
+    energyzero_url: str = scoped(
+        ENERGYZERO_OFFICIAL_URL, providers=("energyzero",), label="EnergyZero API-adres", level="expert",
+        help="Standaard het officiële adres. Een ander adres werkt alleen als 'Aangepaste API-adressen toestaan' aan staat.")
+    # ENTSO-E
+    entsoe_token: str = scoped("", providers=("entsoe",), label="ENTSO-E API-token",
+                               help="Persoonlijk token van transparency.entsoe.eu. Wordt versleuteld opgeslagen.")
+    bidding_zone: str = scoped("10YNL----------L", providers=("entsoe",), label="ENTSO-E biedzone (EIC)", level="expert")
+    # Own API (expert)
+    custom_url: str = scoped("", providers=("custom_api",), label="API-adres", level="expert",
+                             help="HTTPS-adres; {date} wordt vervangen door JJJJ-MM-DD. Alleen publieke adressen.")
+    custom_items_path: str = scoped("", providers=("custom_api",), label="Pad naar de lijst (JSON)", level="expert",
+                                    help="Bijv. 'data.prices'. Leeg = het antwoord is zelf de lijst.")
+    custom_start_field: str = scoped("start", providers=("custom_api",), label="Veld begintijd", level="expert")
+    custom_price_field: str = scoped("price", providers=("custom_api",), label="Veld prijs", level="expert")
+    custom_unit: Literal["eur_kwh", "eur_mwh"] = scoped("eur_kwh", providers=("custom_api",), label="Eenheid prijs",
+                                                        level="expert")
+    custom_auth_header: str = scoped("", providers=("custom_api",), label="Authorization-header (optioneel)",
+                                     level="expert", help="Wordt versleuteld opgeslagen en alleen naar dit adres gestuurd.")
+    allow_custom_endpoints: bool = setting(
+        False, label="Aangepaste API-adressen toestaan", level="expert",
+        help="Bewust aanzetten om een ander adres dan het officiële te gebruiken. Interne netwerkadressen blijven "
+             "geweigerd (bescherming tegen misbruik van de server).")
+    # Reserve source
+    fallback_enabled: bool = setting(False, label="Reserveprijsbron gebruiken", level="advanced",
+                                     help="Als de prijsbron niet antwoordt of onvolledig is, deze bron proberen.")
+    fallback_provider: Literal["none", "energyzero", "entsoe", "custom_api"] = setting(
+        "none", label="Reserveprijsbron", level="advanced")
+    # Synchronisation / publication
+    refresh_minutes: int = setting(60, label="Verversen elke", unit="min", level="expert", ge=5, le=720)
+    publication_expected: str = setting(
+        "13:00", label="Volgende-dagprijzen verwacht vanaf", level="expert", pattern=r"^\d{2}:\d{2}$",
+        help="Lokale tijd na de day-aheadveiling. Daarna wordt vaker gecontroleerd; publicatie kan later komen.")
+    publication_retry_minutes: int = setting(15, label="Opnieuw proberen na de veiling elke", unit="min",
+                                             level="expert", ge=5, le=120)
+    publication_alert_after: str = setting(
+        "15:30", label="Melding als morgen nog ontbreekt na", level="expert", pattern=r"^\d{2}:\d{2}$")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate(cls, data: Any) -> Any:
+        """0.4.x configs: ``energyzero_interval`` -> ``market_interval``."""
+        if isinstance(data, dict) and "energyzero_interval" in data:
+            data = dict(data)
+            data["market_interval"] = data.pop("energyzero_interval")
+        return data
+
+    @model_validator(mode="after")
+    def _check(self) -> PriceConfig:
+        if self.fallback_enabled and self.fallback_provider in ("none", self.provider):
+            raise ValueError("kies een reserveprijsbron die verschilt van de prijsbron")
+        if self.energyzero_url.rstrip("/") != ENERGYZERO_OFFICIAL_URL and not self.allow_custom_endpoints:
+            raise ValueError("een ander EnergyZero-adres vereist 'Aangepaste API-adressen toestaan'")
+        return self
 
 
 class ForecastConfig(_Base):
@@ -294,6 +364,27 @@ class ForecastConfig(_Base):
         help="Open-Meteo (gratis, geen sleutel) voor zon- en temperatuurprognoses.")
     refresh_minutes: int = setting(60, label="Verversen elke", unit="min", level="expert", ge=10)
     history_days: int = setting(28, label="Historie voor verbruiksprognose", unit="dagen", level="expert", ge=3)
+    # Price forecasts (beyond the published day-ahead prices)
+    price_forecast_enabled: bool = setting(
+        True, label="Prijzen na morgen voorspellen",
+        help="Na de laatst gepubliceerde beursprijs schat het EMS de prijzen uit de afgelopen weken. Zo kan het "
+             "verder vooruit plannen. Voorspellingen worden altijd als 'prognose' getoond, nooit als beursprijs.")
+    price_forecast_horizon_hours: int = setting(24, label="Prognose na de laatste beursprijs", unit="uur",
+                                                level="expert", ge=0, le=144)
+    price_forecast_model: Literal["same_slot_7d", "weekday_profile_4w"] = setting(
+        "same_slot_7d", label="Prognosemodel", level="expert",
+        help="same_slot_7d: gemiddelde van hetzelfde kwartier in de afgelopen 7 dagen. weekday_profile_4w: zelfde "
+             "weekdag en kwartier in de afgelopen 4 weken. Beide met spreiding als onzekerheid.")
+    price_forecast_confidence_threshold: float = setting(
+        0.5, label="Minimale betrouwbaarheid", level="expert", ge=0, le=1,
+        help="Prognoses met een lagere betrouwbaarheid (0–1) gebruikt de optimizer niet.")
+    optimizer_uses_price_forecast: bool = setting(True, label="Optimizer gebruikt prognoses", level="expert")
+    battery_trading_uses_forecast: bool = setting(
+        False, label="Batterijhandel op prognoses", level="expert",
+        help="Uit (aanbevolen): laden uit het net om later te verkopen gebeurt alleen op gepubliceerde prijzen.")
+    missing_price_fallback: Literal["stop_plan", "use_forecast"] = setting(
+        "stop_plan", label="Bij ontbrekende prijzen", level="expert",
+        help="stop_plan: de planning stopt bij het eerste kwartier zonder (voldoende betrouwbare) prijs.")
 
 
 class NotificationConfig(_Base):

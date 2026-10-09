@@ -29,16 +29,15 @@ def test_parse_uses_market_price_excl_vat():
         parse_energyzero([])  # type: ignore[arg-type]
 
 
-async def test_provider_quarter_with_url_fallback_and_missing_day():
+async def test_provider_quarter_official_url_only_and_missing_day():
     calls = []
     day1 = datetime(2026, 10, 7, 22, tzinfo=UTC)   # 08-10-2026 00:00 Amsterdam
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request.url)
         q = request.url.params
-        if request.url.path == "/v1/prices":          # first URL form: pretend it does not exist
-            return httpx.Response(404, json={"error": "not found"})
-        assert q["energyType"] == "ENERGY_TYPE_ELECTRICITY" and q["interval"] == "INTERVAL_QUARTER"
+        assert request.url.host == "public.api.energyzero.nl" and request.url.path == "/v1/prices"
+        assert q["energy_type"] == "ENERGY_TYPE_ELECTRICITY" and q["interval"] == "INTERVAL_QUARTER"
         if q["date"] == "08-10-2026":
             return httpx.Response(200, json=_payload(day1, 15, 96))
         return httpx.Response(404, json={"error": "no data"})   # tomorrow not published yet
@@ -49,8 +48,8 @@ async def test_provider_quarter_with_url_fallback_and_missing_day():
     assert pts and all(p.resolution_min == 15 for p in pts)
     assert pts[0].start == datetime(2026, 10, 8, 10, tzinfo=UTC)          # filtered to the requested window
     assert pts[-1].start == datetime(2026, 10, 8, 21, 45, tzinfo=UTC)     # end of the published day
-    assert prov._endpoint[1] == "energyType"                              # working URL form remembered
     assert any(u.params.get("date") == "09-10-2026" for u in calls)
+    assert {u.host for u in calls} == {"public.api.energyzero.nl"}       # no undocumented URL variants
     await client.aclose()
 
 

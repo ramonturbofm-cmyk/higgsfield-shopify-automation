@@ -8,6 +8,7 @@ import csv
 import io
 import json
 import re
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
@@ -20,7 +21,17 @@ from ems import __version__
 from ems.api.deps import admin, clear_session_cookies, current_principal, get_runtime, operator, set_session_cookies, viewer
 from ems.core.config import ConfigError, StrategyProfile, dump_config, settings_schema
 from ems.core.models import Command, CommandAction
-from ems.prices.providers import parse_manual_prices
+from ems.prices.providers import parse_manual_prices, validate_points
+from ems.prices.service import local_day_slots
+from ems.prices.settings import (
+    MASK,
+    PROVIDER_LABELS,
+    SECRET_FIELDS,
+    EndpointError,
+    active_providers,
+    build_provider,
+    visible_fields,
+)
 from ems.security.auth import ROLES, Principal, hash_api_token, hash_password, new_api_token, verify_password
 from ems.server.history import day_bounds
 from ems.server.runtime import EMSRuntime
@@ -235,15 +246,40 @@ async def energy_live(_: Principal = Depends(viewer), rt: EMSRuntime = Depends(g
 
 
 # ---------------------------------------------------------------- settings
-ENTSOE_SECRET = "prices.entsoe_token"
+ENTSOE_SECRET = SECRET_FIELDS["entsoe_token"]
+
+
+def _mask_prices(prices: dict) -> dict:
+    for f in SECRET_FIELDS:
+        if prices.get(f):
+            prices[f] = MASK
+    return prices
+
+
+def _store_price_secrets(rt: EMSRuntime, values: dict) -> dict:
+    """Credentials of price sources go to the encrypted secret store, never into the YAML. The masked
+    value keeps the stored secret; an empty value removes it."""
+    values = dict(values)
+    for f, name in SECRET_FIELDS.items():
+        if f not in values:
+            continue
+        v = str(values[f] or "").strip()
+        if v == MASK:
+            values.pop(f)
+        elif v and not v.startswith(("${", "secret:")):
+            rt.secrets.set(name, v)
+            values[f] = f"secret:{name}"
+        elif not v:
+            rt.secrets.delete(name)
+            values[f] = ""
+    return values
 
 
 @router.get("/settings", tags=["settings"])
 async def get_settings(_: Principal = Depends(viewer), rt: EMSRuntime = Depends(get_runtime)) -> dict:
     data = rt.config.model_dump(mode="json")
     data.pop("devices", None)
-    if data.get("prices", {}).get("entsoe_token"):
-        data["prices"]["entsoe_token"] = "********"
+    _mask_prices(data.get("prices", {}))
     return data
 
 
@@ -262,16 +298,8 @@ async def put_settings(body: dict[str, dict[str, Any]], p: Principal = Depends(a
         raise HTTPException(403, "bedrijfsmodus wijzigen vereist installateursrechten")
     data = rt.config.model_dump(mode="json")
     for section, values in body.items():
-        if section == "prices" and "entsoe_token" in values:
-            token = str(values["entsoe_token"] or "").strip()
-            if token == "********":                      # masked value: keep the stored token
-                values = {k: v for k, v in values.items() if k != "entsoe_token"}
-            elif token and not token.startswith(("${", "secret:")):
-                rt.secrets.set(ENTSOE_SECRET, token)        # never written to the YAML
-                values = {**values, "entsoe_token": f"secret:{ENTSOE_SECRET}"}
-            elif not token:
-                rt.secrets.delete(ENTSOE_SECRET)
-                values = {**values, "entsoe_token": ""}
+        if section == "prices":
+            values = _store_price_secrets(rt, values)
         data[section] = {**data[section], **values}
     try:
         await rt.reload(data, p.username, f"instellingen: {', '.join(body)}")
@@ -353,11 +381,14 @@ async def get_prices(hours: float = Query(36, ge=1, le=168), past_hours: float =
     start = (now - timedelta(hours=past_hours)).replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)
     out = []
     for p in rt.prices.series(start, now + timedelta(hours=hours), estimate=True, include_missing=True):
-        spot = None if p.spot is None else rt.tariff.contract_spot(p.start, p.spot)
+        spot = None if p.spot is None else rt.tariff.contract_spot(p.start, p.spot) if p.official else p.spot
         b = rt.tariff.breakdown_with_spot(p.start, spot) if spot is not None else None
+        band = [None if v is None else rt.tariff.breakdown_with_spot(p.start, v).import_price for v in (p.low, p.high)]
         out.append({"start": p.start.isoformat(), "end": (p.start + timedelta(minutes=p.resolution_min)).isoformat(),
                     "spot": p.spot, "import": None if b is None else b.import_price,
-                    "export": None if b is None else b.export_price, "estimated": p.estimated, "status": p.status})
+                    "export": None if b is None else b.export_price, "estimated": p.estimated,
+                    "status": str(p.status), "confidence": p.confidence, "source": p.source,
+                    "spot_low": p.low, "spot_high": p.high, "import_low": band[0], "import_high": band[1]})
     cur = rt.prices.current(now)
     current = None
     if cur is not None:
@@ -365,8 +396,69 @@ async def get_prices(hours: float = Query(36, ge=1, le=168), past_hours: float =
         current = {**cur, "import": b.import_price, "export": b.export_price}
     return {"status": rt.prices.status(now), "points": out, "now": now.isoformat(), "current": current,
             "current_reason": None if current else "geen gepubliceerde prijs voor het huidige interval",
-            "market_resolution_min": 15, "contract_resolution_min": rt.config.tariff.price_resolution_min,
+            "market_resolution_min": 60 if rt.config.prices.market_interval == "hour" else 15,
+            "contract_resolution_min": rt.config.tariff.price_resolution_min,
             "timezone": rt.config.site.timezone}
+
+
+class PriceForm(BaseModel):
+    """Unsaved values of the market-data form (``prices`` section)."""
+    values: dict[str, Any] = Field(default_factory=dict)
+    which: Literal["provider", "fallback_provider"] = "provider"
+
+
+@router.post("/prices/fields", tags=["prices"])
+async def price_fields(body: PriceForm, _: Principal = Depends(viewer), rt: EMSRuntime = Depends(get_runtime)) -> dict:
+    """Which market-data settings apply to the chosen source(s): the settings screen shows only these."""
+    values = {**rt.config.prices.model_dump(mode="json"), **body.values}
+    return {"visible": visible_fields(values), "active_providers": sorted(active_providers(values)),
+            "labels": PROVIDER_LABELS}
+
+
+@router.post("/prices/test", tags=["prices"])
+async def price_test(body: PriceForm, _: Principal = Depends(admin), rt: EMSRuntime = Depends(get_runtime)) -> dict:
+    """Real connection test with the (unsaved) form values: fetches today and tomorrow, stores nothing."""
+    from ems.core.config import PriceConfig
+    values = {**rt.config.prices.model_dump(mode="json"), **body.values}
+    for f in SECRET_FIELDS:                          # masked/stored credentials: use the stored secret
+        if values.get(f) == MASK or not values.get(f):
+            values[f] = rt.config.prices.model_dump().get(f) or ""
+    kind = values.get(body.which) or "none"
+    try:
+        cfg = PriceConfig.model_validate({**values, "fallback_enabled": False, "fallback_provider": "none"})
+        prov = build_provider(kind, cfg, rt.secrets.get, demo_env=None if rt.site is None else rt.site.env)
+    except (ValueError, EndpointError) as exc:
+        return {"ok": False, "provider": kind, "error": str(exc).splitlines()[0][:300]}
+    if prov is None or kind == "manual":
+        return {"ok": False, "provider": kind, "error": "deze bron haalt niets op (geen of handmatige prijzen)"}
+    now = rt.now()
+    start, end = rt.prices.fetch_window(now)
+    t0 = time.monotonic()
+    try:
+        raw = await prov.fetch(start + timedelta(days=1), end)
+    except Exception as exc:
+        msg = str(exc) if isinstance(exc, ValueError) else type(exc).__name__
+        return {"ok": False, "provider": kind, "error": msg, "duration_ms": round((time.monotonic() - t0) * 1000)}
+    pts, problems = validate_points(raw)
+    tz = ZoneInfo(rt.config.site.timezone)
+    days: dict[str, int] = {}
+    for p in pts:
+        k = p.start.astimezone(tz).date().isoformat()
+        days[k] = days.get(k, 0) + 1
+    tomorrow = (now.astimezone(tz).date() + timedelta(days=1)).isoformat()
+    need = len(local_day_slots(now.astimezone(tz).date() + timedelta(days=1), tz,
+                               pts[0].resolution_min if pts else 15))
+    return {"ok": bool(pts), "provider": kind, "slots": len(pts), "rejected": len(problems), "problems": problems[:5],
+            "per_day": days, "interval_min": pts[0].resolution_min if pts else None,
+            "tomorrow_available": days.get(tomorrow, 0) >= need,
+            "first": pts[0].start.isoformat() if pts else None, "meta": getattr(prov, "last_meta", {}),
+            "duration_ms": round((time.monotonic() - t0) * 1000),
+            "error": None if pts else "verbinding gelukt, maar geen prijzen ontvangen"}
+
+
+@router.get("/prices/status", tags=["prices"])
+async def price_status(_: Principal = Depends(viewer), rt: EMSRuntime = Depends(get_runtime)) -> dict:
+    return rt.prices.status(rt.now())
 
 
 @router.post("/prices/refresh", tags=["prices"])
