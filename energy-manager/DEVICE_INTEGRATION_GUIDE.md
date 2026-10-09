@@ -118,6 +118,21 @@ class ExampleBatteryDriver(DeviceDriver):
 8. **`capabilities()` eerlijk**: kan een model iets niet (bijv. geen SOC via deze interface), laat de
    capability weg — de wizard toont dan ✗.
 
+## 4b. Capabilities en parameters (vanaf 0.4.0)
+
+* Declareer in het manifest alleen capabilities die de driver **echt** implementeert. Wat het apparaat in de
+  UI kan is `manifest ∩ typeschema` van de apparaatsoort (`devices/capabilities.py::TYPE_SCHEMAS`); een
+  capability die niet bij de soort hoort wordt genegeerd en een test (`test_19_*`) faalt.
+* Splits functies fijn: batterijmodus (`control_battery_mode`) is iets anders dan laden/ontladen met een
+  vermogen (`control_battery_power`) of een SOC-limiet (`control_soc_limit`).
+* Generieke protocoladapters claimen niets vooraf: capabilities volgen uit de gevalideerde mapping.
+* Apparaatlimieten (bijv. `max_charge_w`, `rated_current_a`) staan in `PARAM_SCHEMAS`; zonder ingestelde
+  limiet weigert het EMS vermogens- of stroomopdrachten.
+* `write_capable=True` alleen met een officiële documentatiebron (`documentation`); `verified=True` alleen
+  na een hardwaretest. Zonder `verified` blijft volledige regeling voor dat apparaat geblokkeerd.
+* Meld, waar het apparaat dat kan, de ingestelde waarde terug (modus, stroomlimiet, setpoint): dan toont het
+  EMS "bevestigd door apparaat" in plaats van "geen terugmelding".
+
 ## 5. Testen
 
 * Unit-tests met een **nagebootste transportlaag** (fake Modbus-client/HTTP-server) op basis van

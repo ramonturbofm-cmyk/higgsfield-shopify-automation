@@ -29,6 +29,8 @@ ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayName=Energy Manager
 UninstallDisplayIcon={app}\Energy Manager.exe
 SetupIconFile=..\windows-app\src-tauri\icons\icon.ico
+; Our own PrepareToInstall stops the EMS gracefully first; Restart Manager only closes what is left.
+CloseApplications=force
 
 [Languages]
 Name: "dutch"; MessagesFile: "compiler:Languages\Dutch.isl"
@@ -104,15 +106,39 @@ begin
   end;
 end;
 
+// True while one of our server processes is still running (tasklist via cmd; exit code 0 = found).
+function ServerRunning(): Boolean;
+var
+  Code: Integer;
+begin
+  Result := Exec(ExpandConstant('{cmd}'),
+    '/C tasklist /NH /FI "IMAGENAME eq EnergyManagerService.exe" | find /I "EnergyManager" >NUL || ' +
+    'tasklist /NH /FI "IMAGENAME eq EnergyManagerServer.exe" | find /I "EnergyManager" >NUL',
+    '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0);
+end;
+
 // Stop a running built-in server before files are replaced (update), so it can release
-// devices and Windows does not keep the files locked.
+// devices and Windows does not keep the files locked. The stop command returns when the port is
+// closed; the process may still be finishing, so wait until it has really exited (max. 60 s).
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   Exe: String;
-  Code: Integer;
+  Code, I: Integer;
 begin
   Exe := ExpandConstant('{app}\server\EnergyManagerService.exe');
   if FileExists(Exe) then
+  begin
     Exec(Exe, '--stop', '', SW_HIDE, ewWaitUntilTerminated, Code);
+    I := 0;
+    while ServerRunning() and (I < 120) do
+    begin
+      Sleep(500);
+      I := I + 1;
+    end;
+    if ServerRunning() then
+      Log('EMS still running after graceful stop; Restart Manager will close it')
+    else
+      Log('EMS stopped before replacing files');
+  end;
   Result := '';
 end;

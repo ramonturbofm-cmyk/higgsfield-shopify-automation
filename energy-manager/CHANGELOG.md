@@ -1,4 +1,6 @@
-# Changelog
+# Changelog — Energy Manager
+
+(Zelfde inhoud als `backend/ems/CHANGELOG.md`, dat met het pakket wordt meegeleverd.)
 
 ## 0.4.0 — audit-remediatie (UNSIGNED TEST BUILD)
 

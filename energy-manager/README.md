@@ -5,10 +5,13 @@ De EMS-server draait 24/7 zelfstandig op een **Raspberry Pi 4/5** (of andere Lin
 plant en logt. De **Windows-app** en de **webinterface** (telefoon/tablet) zijn alleen bediening:
 het EMS blijft werken als de app dicht is.
 
-> **Versie 0.3.0.** Volledige server, optimizer, webinterface, Windows-app en Demo Mode werken.
-> Uitlezen van echte apparaten: HomeWizard P1, DSMR P1 en generieke Modbus TCP/HTTP/MQTT
+> **Versie 0.4.0 — UNSIGNED TEST BUILD.** Audit-remediatie van 0.2.0/0.3.0: zie
+> [AUDIT_REMEDIATION.md](AUDIT_REMEDIATION.md). Volledige server, optimizer, webinterface, Windows-app en Demo
+> Mode werken. Uitlezen van echte apparaten: HomeWizard P1, DSMR P1 en generieke Modbus TCP/HTTP/MQTT
 > (alleen-lezen). Er is nog **niets met echte hardware getest** en er zijn bewust **geen schrijvende
-> drivers** voor echte apparaten (geen verzonnen protocollen). Status: [DEVELOPMENT.md](DEVELOPMENT.md).
+> drivers** voor echte apparaten (geen verzonnen protocollen); volledige regeling van echte apparaten is
+> geblokkeerd tot een driver op hardware is bewezen. Status: [DEVELOPMENT.md](DEVELOPMENT.md), beperkingen:
+> [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).
 
 ## Wat het doet
 
@@ -27,6 +30,12 @@ het EMS blijft werken als de app dicht is.
 * **Demo Mode**: een complete gesimuleerde "Demo Home" (PV 8 kWp, batterij 15 kWh, warmtepomp, EV,
   3×25 A, dynamische prijs) om alles zonder hardware te proberen. In productie worden nooit nepwaarden
   getoond.
+
+## Installeren
+
+* Windows: [INSTALL_WINDOWS.md](INSTALL_WINDOWS.md)
+* Linux (Docker of systemd): [INSTALL_LINUX.md](INSTALL_LINUX.md)
+* Raspberry Pi: [INSTALL_RASPBERRY_PI.md](INSTALL_RASPBERRY_PI.md)
 
 ## Installeren op de Raspberry Pi
 
@@ -60,8 +69,9 @@ Zonder Docker: `pip install .` en de systemd-unit `deploy/energy-manager.service
 en `EMS_DATABASE_URL` in `.env`.
 
 **Beveiliging:** zet poort 8080 nooit open naar internet. Gebruik voor toegang op afstand een VPN
-(WireGuard/Tailscale). Wachtwoorden en tokens staan versleuteld in de datamap, nooit in de configuratie;
-gebruik `${VARIABELE}` met de waarde in `.env` voor eigen geheimen.
+(WireGuard/Tailscale) en voor HTTPS een reverse proxy. Inloggen gebeurt met een HttpOnly-sessiecookie en
+CSRF-bescherming. Wachtwoorden en tokens staan versleuteld in de datamap, nooit in de configuratie;
+gebruik `${VARIABELE}` met de waarde in `.env` voor eigen geheimen. Back-ups bevatten standaard geen sleutels.
 
 ## Windows
 
@@ -69,9 +79,9 @@ gebruik `${VARIABELE}` met de waarde in `.env` voor eigen geheimen.
 https://github.com/ramonturbofm-cmyk/higgsfield-shopify-automation/releases/download/energy-manager-windows/EnergyManagerSetup.exe
 
 Iedere versie wordt op een schone Windows-machine automatisch getest (installeren, starten, Demo Mode,
-database, WebSocket, instellingen, app sluiten, herstart, upgrade, verwijderen); alleen bij succes wordt hij
-gepubliceerd. De testuitslag staat bij de download (`acceptance-results.txt`). Nog niet digitaal ondertekend:
-SmartScreen → *Meer informatie* → *Toch uitvoeren*.
+database, WebSocket, instellingen, app sluiten, herstart, upgrade, downgradeweigering, verwijderen); alleen
+bij succes wordt hij gepubliceerd, met `SHA256SUMS.txt` en de testuitslag (`acceptance-results.txt`).
+**UNSIGNED TEST BUILD** (geen code-signing-certificaat): SmartScreen → *Meer informatie* → *Toch uitvoeren*.
 
 Bij het openen kiest u **hoe u Energy Manager wilt gebruiken**:
 
@@ -109,9 +119,10 @@ apparaat; valt de verbinding weg, dan gaan de apparaten terug naar hun eigen reg
 
 ## Apparaten koppelen
 
-In de webinterface: **Apparaten → Apparaat toevoegen**. De wizard test de verbinding en toont per functie
-✓/✗. Nieuwe apparaten starten **alleen-lezen**; via *Inbedrijfstelling* gaat u stap voor stap naar
-schaduwmodus en (zodra er een schrijvende driver is) beperkte/volledige regeling.
+In de webinterface: **Apparaten → Apparaat toevoegen**: soort → merk en model (of "Mijn apparaat staat er niet
+tussen") → gegevens (met toegestane bereiken) → test. Nieuwe apparaten starten **alleen-lezen**; via
+*Inbedrijfstelling* volgt u per apparaat een procedure (verbindingstest, veiligheidsinstellingen,
+schaduwmodus, schrijftest, getypte bevestiging). Het apparaat toont alleen de bedieningen die het echt heeft.
 
 | Apparaat | Hoe |
 |---|---|
@@ -138,7 +149,7 @@ cd energy-manager
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 ems serve --demo --data-dir ./data-demo     # http://127.0.0.1:8080 (login demo/demo)
-pytest -q                                   # 171 tests
+pytest -q                                   # 306 tests
 ruff check backend tests
 ems-sim --start 2026-06-15 --days 2 --compare-native   # simulator-CLI
 ```
@@ -176,5 +187,9 @@ energy-manager/
 * [ARCHITECTURE.md](ARCHITECTURE.md) — technisch ontwerp en keuzes
 * [DEVELOPMENT.md](DEVELOPMENT.md) — status per onderdeel, teststatus, besluiten, beperkingen
 * [DEVICE_INTEGRATION_GUIDE.md](DEVICE_INTEGRATION_GUIDE.md) — apparaten en drivers
+* [AUDIT_REMEDIATION.md](AUDIT_REMEDIATION.md) — status per auditbevinding
+* [TEST_RESULTS.md](TEST_RESULTS.md) — testuitslagen van deze release
+* [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) — bekende beperkingen
+* [INSTALL_WINDOWS.md](INSTALL_WINDOWS.md), [INSTALL_LINUX.md](INSTALL_LINUX.md), [INSTALL_RASPBERRY_PI.md](INSTALL_RASPBERRY_PI.md)
 * [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) — controle vóór een release
-* [backend/ems/CHANGELOG.md](backend/ems/CHANGELOG.md)
+* [CHANGELOG.md](CHANGELOG.md)

@@ -1,123 +1,110 @@
 # DEVELOPMENT — voortgang, teststatus en besluiten
 
-Laatst bijgewerkt: versie **0.3.0** — nodes (standalone en gedistribueerd), veiligheidsvalidatie op de
-eigenaar-node, prioriteiten, settlement, datakwaliteit, Windows-acceptatietest.
+Laatst bijgewerkt: versie **0.4.0** — audit-remediatie (zie [AUDIT_REMEDIATION.md](AUDIT_REMEDIATION.md)).
 Dit bestand is de waarheid over wat werkt.
 
 ## Legenda
 
-| Teken | Betekenis |
-|---|---|
-| `[x]` | COMPLETE — klaar en getest |
-| `[~]` | PARTIAL — werkt, met bekende beperking (zie toelichting) |
-| `[ ]` | NOT STARTED |
-| `[!]` | BLOCKED — externe factor (meestal: hardware/documentatie nodig) |
+Implementatie: **COMPLETE** · **PARTIALLY IMPLEMENTED** · **UI ONLY** · **MOCK ONLY** (alleen gesimuleerd) ·
+**BROKEN** · **NOT IMPLEMENTED** · **BLOCKED BY HARDWARE** (alleen met echte apparatuur te bouwen of te bewijzen).
 
-Teststatus: **UNIT TESTED** (pytest, 171 tests), **SIMULATOR TESTED** (Demo Mode / woningsimulator),
-**HARDWARE TESTED** (met een echt apparaat). **Niets is hardware-getest**: er was geen hardware beschikbaar.
-Windows-onderdelen zijn getest op een schone Windows-machine in GitHub Actions (`windows/acceptance.ps1`).
+Test: **TESTED** (geautomatiseerd: unit/API/simulator/browser/CI) of **NOT TESTED**. Waar relevant staat erbij
+*hoe*. **Niets is HARDWARE TESTED**: er was geen hardware beschikbaar. Windows-onderdelen zijn getest op een
+schone Windows-runner (`windows/acceptance.ps1`), Linux op een schone Ubuntu-runner
+(`deploy/acceptance-linux.sh`: Docker amd64, Docker arm64 onder QEMU, systemd).
+
+Tests: 306 pytest-tests (Linux en Windows), 5 browser-acceptatiechecks (`tests/ui/ui_acceptance.py`),
+Windows- en Linux-acceptatiescripts in CI.
 
 ## Platformen en nodes
 
-| Onderdeel | Status | Test |
+| Onderdeel | Implementatie | Test |
 |---|---|---|
-| Windows alles-in-één (UI + EMS op de achtergrond + database + drivers) | `[x]` | Windows-acceptatietest in CI: installeren, starten, Demo, database, WebSocket, instellingen, app sluiten → EMS draait door, herstart via autostart, upgrade, verwijderen |
-| Raspberry Pi / Linux standalone (Docker of systemd) | `[~]` | Docker amd64+arm64 gebouwd en healthcheck in CI; **niet op een fysieke Pi gedraaid** |
-| Node-identiteit (UUID, platform, OS, versie, rollen, hartslag) | `[x]` | UNIT |
-| Rollen: all_in_one / controller / gateway | `[x]` | UNIT, gedistribueerde acceptatietest |
-| Ontdekken via mDNS (`_energymanager._tcp`), geen netwerkscans | `[~]` | Code getest op parsing; mDNS in CI/sandbox niet end-to-end (geen multicast) |
-| Koppelen met 6-cijferige code (10 min, eenmalig, blokkade na 5 pogingen), tokens gehasht/versleuteld | `[x]` | UNIT, gedistribueerde test, browser (twee servers) |
-| Regelrecht (lease + epoch-fencing): nooit twee controllers op één apparaat | `[x]` | UNIT + test met tweede controller en vervalste epoch |
-| Apparaat-eigenaar-node (`node.remote`): P1 Pi → controller, opdracht controller → Pi | `[x]` | Gedistribueerde acceptatietest |
-| Veiligheidscontrole op de eigenaar-node (online, verse data, capability, inbedrijfstelling, bereik, SOC, rate limit) | `[x]` | UNIT + gedistribueerd |
-| Netwerkuitval: lease verloopt → apparaten terug naar eigen regeling; geen oude opdrachten (max. leeftijd) | `[x]` | Gedistribueerde test |
-| Historie bufferen op de gateway en na herstel synchroniseren zonder dubbele records | `[x]` | Gedistribueerde test |
-| Automatische failover van de primaire controller | `[ ]` | Bewust niet: handmatige overdracht (veiligheid boven snelle failover) |
-| Migratie Windows → Pi | `[~]` | Via back-up/restore (instellingen, apparaten, tarieven, automatiseringen, historie); geen aparte wizard |
+| Windows alles-in-één (app + EMS op de achtergrond, autostart bij aanmelden) | COMPLETE | TESTED — Windows-acceptatie in CI |
+| Windows: downgradebescherming installer | COMPLETE | TESTED — acceptatiestap 9b |
+| Windows-service vóór aanmelden | NOT IMPLEMENTED | — (autostart bij aanmelden) |
+| Code signing | BLOCKED (geen certificaat) | — UNSIGNED TEST BUILD |
+| Linux standalone (Docker, systemd) | COMPLETE | TESTED — CI (start, herstart, crash, upgrade, persistentie) |
+| Raspberry Pi standalone | COMPLETE (arm64-image) | TESTED onder QEMU; fysieke Pi: NOT TESTED (BLOCKED BY HARDWARE) |
+| Node-identiteit, rollen, mDNS, koppelcode | COMPLETE | TESTED (mDNS niet end-to-end: geen multicast in CI) |
+| Regelrecht (lease + epoch), opdracht-ID's tegen replay, klokverschilcontrole | COMPLETE | TESTED |
+| `node.remote`, gateway valideert zelf, historie-synchronisatie na uitval | COMPLETE | TESTED (in-process, niet op meerdere machines) |
+| Automatische controller-failover | NOT IMPLEMENTED | — bewust (veiligheid) |
+| Multi-site | NOT IMPLEMENTED | — |
 
-## Kern, regeling en veiligheid
+## Veiligheid en regeling
 
-| Onderdeel | Status | Test |
+| Onderdeel | Implementatie | Test |
 |---|---|---|
-| EMS-kern: regelcyclus, snapshot, validatie, bevroren data, fail-safe, watchdog, journaal | `[x]` | UNIT, SIMULATOR |
-| CommandGate + SafetyValidator vóór iedere schrijfactie | `[x]` | UNIT |
-| Prioriteitenscheduler (veiligheid … standaard) met uitleg welke aanvraag won | `[x]` | UNIT |
-| Netbeveiliging: begrenst EV-laden en batterijladen (ook handmatig) bij overbelasting | `[x]` | UNIT |
-| Inbedrijfstelling CONNECTION TEST → READ ONLY → SHADOW → LIMITED → FULL (ook afgedwongen op de gateway) | `[x]` | UNIT, gedistribueerd |
-| Schaduwmodus: optimizer draait echt, "EMS zou …" vs. werkelijk | `[x]` | UNIT, SIMULATOR |
-| Handmatige bediening met verlooptijd (30 min … tot stoppen), "AUTO om …" | `[x]` | UNIT |
-| Datakwaliteit per grootheid (GOOD/CALCULATED/STALE/INVALID/MISSING/UNKNOWN), N/A in de UI | `[x]` | UNIT, browser |
-| Energiebalanscontrole met mogelijke oorzaken | `[x]` | UNIT |
-| EMS-status (AUTOMATISCH/SCHADUW/HANDMATIG/BEPERKT/VEILIGE MODUS/STORING), gezondheidsscore | `[x]` | UNIT, browser |
-| Configuratiecontrole (bijv. max. afname > aansluiting, zero-export zonder netmeter) | `[x]` | UNIT |
-| Windows-slaapstandwaarschuwing (alleen lezen, `powercfg`) | `[~]` | UNIT (parser, NL/EN-uitvoer); op Windows-CI draait de check, waarde afhankelijk van de runner |
-| Audit: elke hardwareactie in het journaal (wie/wat/waarom/resultaat, run-id, bron incl. node) | `[x]` | UNIT |
+| Typegebonden capabilityschema's (één bron) | COMPLETE | TESTED |
+| Centrale `can_execute` (rol, capability, bereik, control state, gate-modus) | COMPLETE | TESTED |
+| Control state (READ_ONLY … ERROR), "EMS zou" vs "EMS doet", uitvoeringsbevestiging | COMPLETE | TESTED (bevestiging alleen bij terugmelding van het apparaat) |
+| CommandGate + SafetyValidator, testmatrix commandotype × storing | COMPLETE | TESTED (75 matrix-tests) |
+| Fail-safe op verouderde netmeting, alleen vrijgave-opdrachten | COMPLETE | TESTED (simulatie); hardware-in-the-loop: BLOCKED BY HARDWARE |
+| Inbedrijfstelling per apparaat met schrijftest en getypte bevestiging | COMPLETE | TESTED |
+| Volledige regeling op echte hardware | BLOCKED BY HARDWARE | vereist een op hardware bewezen schrijvende driver |
+| Automatiseringen met apparaatgebonden acties | COMPLETE | TESTED |
+| Primaire netmeter alleen expliciet vervangen | COMPLETE | TESTED |
+| Prioriteitenscheduler, netbeveiliging, overrides met verlooptijd | COMPLETE | TESTED |
+| Datakwaliteit, energiebalans, EMS-status | COMPLETE | TESTED |
 
-## Prijzen, tarieven, settlement, optimizer
+## Beveiliging
 
-| Onderdeel | Status | Test |
+| Onderdeel | Implementatie | Test |
 |---|---|---|
-| Prijsbronnen: EnergyZero (NL, kwartier/uur, geen token), ENTSO-E (token), handmatig, demo; cache + schatting | `[x]` | UNIT; EnergyZero live gecontroleerd in CI |
-| Kwartierprijzen, DST: 92/96/100 kwartieren, ontbrekende kwartieren gedetecteerd | `[x]` | UNIT |
-| Drie prijzen: markt, werkelijke afname, werkelijke teruglevering (marginaal; vaste kosten niet marginaal) | `[x]` | UNIT, browser |
-| Tariefengine dynamisch/vast/variabel, opslagen, afslagen, transactiekosten, btw | `[x]` | UNIT |
-| Energiebelasting versieerbaar per land/jaar (NL 2023–2026; 2026 gemarkeerd "controleer") | `[~]` | UNIT — controleer het 2026-tarief op belastingdienst.nl |
-| Settlement engine: NL 2026 (salderen) vs. 2027 (zonder), scenariovergelijking | `[~]` | UNIT — salderen benaderd met de gemiddelde afnameprijs |
-| Leveranciersprofielen | `[ ]` | Handmatige contractinstelling volstaat; geen profielen van leveranciers opgenomen (geen bronnen geverifieerd) |
-| Rolling-horizon MILP-optimizer (HiGHS), 36 h × 15 min, herplannen elke 5 min + events | `[x]` | UNIT, SIMULATOR, E2E 12:00 / 19:00 |
-| Strategieën (laagste kosten, max. opbrengst, max. zelfconsumptie, gebalanceerd, eco, comfort, zero export, piekbegrenzing, batterij sparen, noodstroom, aangepast) + "Simuleer wijziging" | `[x]` | UNIT, browser |
-| Batterij: SOC-grenzen, reserve, slijtage, cycli, PV-ruimte (optimizer houdt ruimte vrij bij veel PV) | `[x]` | UNIT, SIMULATOR |
-| Warmtepomp (RC-model, comfort), EV (vertrektijd, doel, min. stroom), zero-export (gesloten lus) | `[x]` | UNIT, SIMULATOR |
-| COP-afhankelijke warmtekosten, ontdooien, tapwater, legionella | `[~]` | COP-schatting in de optimizer; ontdooien/tapwater/legionella niet gemodelleerd |
-| V2H/V2G | `[ ]` | Architectuur laat het toe; geen implementatie |
-| Backtesting (1–365 dagen), Auto-Tune (IGNORE/TEST/APPLY), financieel met/zonder EMS | `[x]` | UNIT, SIMULATOR |
+| HttpOnly-sessiecookie, CSRF, rotatie, uitloggen, WS-ticket | COMPLETE | TESTED |
+| API-tokens (Bearer) voor scripts | COMPLETE | TESTED |
+| Back-up zonder sleutels standaard; met sleutels versleuteld + wachtwoord | COMPLETE | TESTED |
+| Geheimen versleuteld (Fernet), nooit in YAML | COMPLETE | TESTED |
+| HTTPS in de server zelf | NOT IMPLEMENTED | — reverse proxy (INSTALL_LINUX.md) |
+
+## Prijzen, tarieven, financiën, optimizer
+
+| Onderdeel | Implementatie | Test |
+|---|---|---|
+| Prijsbronnen EnergyZero, ENTSO-E, handmatig (15/60 min, CSV), demo | COMPLETE | TESTED (EnergyZero live-check in CI) |
+| "Nu"-prijs uit lopend interval, status per interval | COMPLETE | TESTED |
+| Contractprijs per kwartier of uur, los van marktresolutie | COMPLETE | TESTED |
+| Energiebelasting per jaar met schijven (NL 2026 € 0,09161) | COMPLETE | TESTED — hogere schijven 2026 "nog controleren" |
+| Afrekening contractafhankelijk, per jaar, negatieve teruglevering | COMPLETE | TESTED — schatting, geen factuur |
+| Financiële baselines B0–B3, reconciliatie, datadekking | COMPLETE | TESTED |
+| Backtest eigen periode, DST, reproduceerbaar, Auto-Tune | COMPLETE | TESTED |
+| Optimizer (MILP), redencodes per run, WP-actie, horizon, aggregatie | COMPLETE | TESTED (5/15/60 min) |
+| Break-even incl. verlies en slijtage | COMPLETE | TESTED |
+| Leveranciersprofielen | NOT IMPLEMENTED | — contract handmatig |
+| WP ontdooien/tapwater/legionella, V2H/V2G | NOT IMPLEMENTED | — |
 
 ## Apparaten en protocollen
 
-| Integratie | Status | Classificatie | Test |
-|---|---|---|---|
-| HomeWizard P1 (API v1 + v2, mDNS, knop-koppeling, token, HTTPS met HomeWizard-CA, WebSocket) | `[~]` | OFFICIAL (officiële API-docs) | UNIT — **niet HARDWARE TESTED** |
-| DSMR P1 direct (USB/COM-poort of TCP-bridge), CRC | `[~]` | OFFICIAL (DSMR 5.0.2) | UNIT — **niet HARDWARE TESTED** |
-| Generiek Modbus TCP / HTTP-JSON / MQTT (alleen lezen, mapping uit eigen documentatie) | `[~]` | GENERIC | UNIT (+ echte Mosquitto) — **niet HARDWARE TESTED** |
-| Generiek Modbus RTU/RS485, WebSocket, serieel, Home Assistant-entiteit | `[ ]` | GENERIC | Nog niet gebouwd (Modbus TCP-client kan hergebruikt worden voor RTU) |
-| OCPP, SG Ready | `[!]` | — | Vereist hardware/specificatie van de gebruiker |
-| Schrijvende drivers voor echte omvormers/batterijen/warmtepompen/laadpalen | `[!]` | — | Merk, model, firmware, interface en officiële documentatie nodig |
-| Mockdrivers (Demo Mode) | `[x]` | — | UNIT, SIMULATOR |
-
-## Bediening, installatie, release
-
-| Onderdeel | Status | Test |
+| Integratie | Implementatie | Test |
 |---|---|---|
-| Webinterface (18 schermen): dashboard met "wat/waarom/tot wanneer/voordeel/grenzen", Mijn installatie, Nodes, planning met "Waarom?", financiën + salderen 2026/2027 | `[x]` | Browser (Playwright): alle pagina's zonder consolefouten, licht/donker/mobiel |
-| SIMPLE / ADVANCED / EXPERT met uitleg per instelling | `[x]` | Browser |
-| Windows-app: start-keuze (alles op deze computer / verbinden / node toevoegen), EMS starten/stoppen | `[x]` | Chromium-test van het startscherm met echte server; app-start op Windows in CI |
-| Windows-installer (per gebruiker, autostart, upgrade stopt het EMS eerst, verwijderen behoudt data) | `[x]` | Windows-acceptatietest in CI |
-| Windows-service die vóór aanmelden start | `[~]` | Autostart bij aanmelden (HKCU Run); echte service vereist beheerdersrechten — niet gebouwd |
-| Code signing | `[!]` | Voorbereid in CI; zonder certificaat: **UNSIGNED DEVELOPMENT BUILD** |
-| Raspberry Pi/Linux: `install.sh`, Docker (amd64/arm64), systemd | `[~]` | CI (Docker + healthcheck); niet op een fysieke Pi |
-| Back-up/restore (incl. migratie naar andere node) | `[x]` | UNIT (Linux + Windows CI) |
+| HomeWizard P1 (API v1/v2, mDNS, koppelen, TLS met eigen CA, WebSocket) | COMPLETE (alleen lezen) | TESTED tegen nep-apparaat; HARDWARE: NOT TESTED |
+| DSMR P1 (USB/TCP, CRC) | COMPLETE (alleen lezen) | TESTED met telegrammen; HARDWARE: NOT TESTED |
+| Generiek Modbus TCP / HTTP-JSON / MQTT (capabilities alleen uit mapping) | COMPLETE (alleen lezen) | TESTED (+ echte Mosquitto); HARDWARE: NOT TESTED |
+| Modbus RTU/RS485, OCPP, SG Ready | NOT IMPLEMENTED | — |
+| Schrijvende drivers voor echte apparaten | BLOCKED BY HARDWARE | merk, model, firmware en officiële documentatie nodig |
+| Demo-apparaten | MOCK ONLY | TESTED |
+
+## Interface
+
+| Onderdeel | Implementatie | Test |
+|---|---|---|
+| Wizard merk/model, "staat er niet tussen", schema-velden met bereiken, bewerken | COMPLETE | TESTED (API + browser) |
+| Niveaus Eenvoudig/Uitgebreid/Expert app-breed, dynamisch menu | PARTIALLY IMPLEMENTED | TESTED — niet alle teksten per niveau herschreven |
+| Dashboard dynamisch, tijdigheidslabels, "wat doet het EMS" | COMPLETE | TESTED (browser) |
+| Grafieken met tijdemmers en min/max | COMPLETE | TESTED |
+| Time-outs, offline-indicator | COMPLETE | TESTED (browser, trage en offline API) |
+| Toegankelijkheid (toetsenbord, focus, reduced motion, tabellen, resoluties, touch) | PARTIALLY IMPLEMENTED | TESTED — geen volledige WCAG-contrastaudit |
 
 ## Openstaande punten / wat de gebruiker moet aanleveren
 
-1. **Hardware voor schrijvende drivers** `[!]`: per apparaat merk, model, firmware, aansluiting en officiële
-   documentatie.
-2. **Hardwaretest** HomeWizard P1 / DSMR P1 op de echte installatie; daarna `verified=True` en deze tabel bijwerken.
-3. **Code-signing-certificaat** (optioneel) als repository-secrets `WINDOWS_SIGNING_PFX_BASE64` +
-   `WINDOWS_SIGNING_PASSWORD`.
-4. Controle van het energiebelastingtarief 2026 (gemarkeerd in de app).
+1. **Hardware voor schrijvende drivers**: per apparaat merk, model, firmware, aansluiting en officiële
+   documentatie. Daarna hardwaretest en `verified=True`.
+2. **Hardwaretest** HomeWizard P1 / DSMR P1 en een fysieke Raspberry Pi.
+3. **Code-signing-certificaat** (optioneel) als repository-secrets.
+4. Controle van de hogere energiebelastingschijven 2026.
 
-## Bekende beperkingen
-
-* Zonder schrijvende driver kan het EMS niets aansturen; inbedrijfstelling blijft op READ ONLY / SHADOW.
-* Windows: het EMS start bij aanmelden van de gebruiker, niet al bij het opstarten vóór aanmelden; de pc
-  moet aan blijven en mag niet slapen (de app waarschuwt).
-* mDNS-ontdekking kan door firewalls of gescheiden netwerken (gast-wifi, VLAN) geblokkeerd worden; koppelen
-  met adres + code werkt altijd.
-* Geen automatische controller-failover; bij uitval van de controller vallen apparaten terug op hun eigen
-  regeling tot de controller terug is (of een andere controller het regelrecht krijgt na verlopen lease).
-* MQTT-driver op een Windows-host niet getest.
-* Simulator: geen ontdooicycli, tapwater of batterijveroudering in de fysica.
-* HomeWizard-API: licentie voor persoonlijk, niet-commercieel gebruik.
+Volledige lijst: [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).
 
 ## Architectuurbesluiten (ADR-log)
 
@@ -167,19 +154,32 @@ Windows-onderdelen zijn getest op een schone Windows-machine in GitHub Actions (
     beheerdersrechten) i.p.v. een Windows-service: werkt zonder admin en zonder wachtwoord op te slaan;
     nadeel: start pas na aanmelden (zie beperkingen).
 
+23. **Capabilities typegebonden, één bron** (`devices/capabilities.py`): wat een apparaat kan = driver ∩
+    typeschema; UI-knoppen, automatiseringen, overrides en commissioning lezen allemaal dezelfde bron.
+24. **`can_execute` als enige poort voor menselijke en geautomatiseerde opdrachten** vóór de CommandGate;
+    de gate blijft de laatste controle (inbedrijfstelling, veiligheid, lease).
+25. **Sessies via HttpOnly-cookie + CSRF** i.p.v. tokens in de browser; scripts houden Bearer-tokens.
+26. **Financiën als baseline-ladder** (B0–B3): elke post is een verschil tussen twee baselines, dus nooit
+    dubbel geteld.
+27. **Redenen in de optimizer, niet in de browser**: elke planregel draagt redencodes uit dezelfde run.
+28. **Volledige regeling alleen voor op hardware bewezen drivers**: zolang hardware-in-the-loop ontbreekt
+    blijft FULL voor echte apparaten geblokkeerd.
+
 ## Testen
 
 ```bash
 cd energy-manager
 pip install -e ".[dev]"
 ruff check backend tests
-pytest -q                 # 171 tests, ~1,5 min
+pytest -q                 # 306 tests, ~2 min
 ems selftest              # snelle zelftest van een geïnstalleerde build
 ```
 
 CI (`.github/workflows/energy-manager-ci.yml`): lint, tests (met Mosquitto), selftest, Docker
-amd64+arm64 en container-healthcheck. Windows (`energy-manager-windows.yml`): tests op Windows,
+amd64+arm64, Linux-acceptatie (Docker amd64, Docker arm64 onder QEMU, systemd). Windows (`energy-manager-windows.yml`): tests op Windows,
 PyInstaller-server + selftest, Tauri-app, Inno Setup-installer en de Windows-acceptatietest
 (`windows/acceptance.ps1`); alleen bij succes wordt de installer gepubliceerd.
 
 Releaseprocedure: [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
+
+Browser-acceptatie (lokaal, tegen een Demo-server): `python tests/ui/ui_acceptance.py http://127.0.0.1:8795 <map>`.

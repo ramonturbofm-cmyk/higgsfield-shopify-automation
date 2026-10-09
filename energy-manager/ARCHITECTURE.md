@@ -266,3 +266,53 @@ Elke uitkomst komt in het journaal met bron (optimizer, handmatig, automatiserin
   CONTROL (10 s / apparaatafhankelijk). Lokale dagen hebben 92/96/100 kwartieren rond zomer-/wintertijd.
 * Tariefengine = marginale prijzen per kWh (vaste kosten nooit marginaal); energiebelasting per land/jaar.
 * Settlement engine = verrekening over een periode volgens landregels (NL 2026 salderen, 2027 niet).
+
+## 17. Capabilities, toegang en uitvoering (0.4.0)
+
+**Capabilities — één bron.** `devices/capabilities.py` beschrijft per apparaatsoort (`TYPE_SCHEMAS`) welke
+functies bestaan, welke parameters (met eenheid, bereik, hulptekst, `required_for_control`) erbij horen en
+of de fase relevant is. Wat een concreet apparaat kan is `driver.capabilities() ∩ typeschema`
+(`device_capabilities()`); generieke drivers leiden hun capabilities alleen af uit de gevalideerde mapping.
+UI-knoppen, automatiseringen, overrides, commissioning en controllers lezen allemaal deze ene bron.
+
+**Toegang per actie.** `control/authority.py::can_execute(device, command, user, control_state)` controleert
+rol, type- en drivercapability, waarde t.o.v. de eigen apparaatlimieten, control state en gate-modus, en
+zegt of de opdracht echt wordt uitgevoerd of alleen als "EMS zou …" verschijnt. Daarna volgt de bestaande
+route: OverrideManager → prioriteiten → netbeveiliging → CommandGate (inbedrijfstelling → beperkt →
+SafetyValidator → schaduw → lease → dedupe → modus → driver).
+
+**Control state** is één waarde per apparaat (READ_ONLY, SHADOW, LIMITED_CONTROL, FULL_CONTROL,
+MANUAL_OVERRIDE, SAFE_MODE, OFFLINE, ERROR), berekend door de engine. De `ConfirmationTracker` volgt per
+opdracht gewenst → gevalideerd → verzonden → bevestigd / onbevestigd (90 s) / geen terugmelding, op basis
+van de volgende meting van het apparaat.
+
+**Inbedrijfstelling** (`server/commissioning.py`): niveaus hebben harde voorwaarden. Beperkt: schrijvende
+driver met documentatiebron, veiligheidsparameters van het type ingevuld, schaduwmodus waargenomen. Volledig:
+daarnaast een geslaagde schrijftest (vrijgeven + teruglezen), een op hardware bewezen driver en de getypte
+apparaatnaam. Een gateway-node controleert zijn eigen apparaten opnieuw (`node_level_problem`).
+
+**Sessies.** Browsers krijgen een HttpOnly-cookie (SameSite=Strict, Secure op HTTPS) plus een leesbare
+CSRF-cookie die bij elke wijziging als `X-CSRF-Token` mee moet; de sessie schuift mee (rotatie na 15 min) en
+uitloggen trekt haar in. De WebSocket opent met een eenmalig ticket (30 s). Scripts gebruiken Bearer-tokens.
+
+**Node-opdrachten** dragen een opdracht-ID (eenmalig), epoch, uitgiftetijd en TTL; de controller verstuurt
+niets bij een klokverschil > 10 s.
+
+## 18. Prijzen, afrekening, financiën en planningsuitleg (0.4.0)
+
+* Markt per 15 min; het contract rekent per 15 of 60 min (`price_resolution_min`); de optimizerstap en de
+  UI-aggregatie zijn daar los van. De "nu"-prijs is altijd het gepubliceerde interval met `start ≤ nu < einde`.
+* Energiebelasting per jaar met schijven (`tariffs/taxes.py`); afrekening per kalenderjaar met de regels van
+  dat jaar en een contractafhankelijke saldeermethode (`services/settlement.py`). Uitkomsten zijn
+  `estimate` (factuurschatting) of `scenario` (vergelijking), nooit "factuur".
+* Financiën: baseline-ladder B0 (geen PV/batterij) → B1 (PV) → B2 (batterij op eigen regeling, gesimuleerd)
+  → B3 (werkelijk). Posten zijn verschillen tussen opeenvolgende baselines en tellen dus exact op.
+* Planningsuitleg komt uit de optimizer (`optimizer/explain.py`): per slot redencodes met de gebruikte
+  getallen en actieve grenzen, gekoppeld aan de run-id; vensters op tijdstempels; uur-aggregatie met sommen
+  en tijdgewogen gemiddelden; de warmtepompactie is een expliciet planveld dat ook de controller gebruikt.
+
+## 19. Versies en upgrades (0.4.0)
+
+`ems.__version__` is de enige bron; `tools/set_version.py` schrijft hem naar pyproject, app en installer
+(`--check` in de tests). De installer weigert een oudere versie over een nieuwere; de database weigert te
+starten met een nieuwer schema dan de software kent.

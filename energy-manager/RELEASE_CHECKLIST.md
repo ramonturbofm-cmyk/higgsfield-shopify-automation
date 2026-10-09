@@ -8,8 +8,12 @@ Werk deze lijst af vóór elke release. Vink alleen af wat echt is gecontroleerd
 - [ ] `pytest -q` volledig groen (Linux) — incl. E2E-scenario's 12:00 en 19:00 en MQTT tegen Mosquitto
 - [ ] CI *Energy Manager — tests and Raspberry Pi image* groen (tests, selftest, Docker amd64 + arm64, healthcheck)
 - [ ] CI *Energy Manager — Windows installer* groen (tests op Windows, server-selftest, Tauri, installer)
-- [ ] Versie verhoogd in `backend/ems/__init__.py` en `pyproject.toml`; `backend/ems/CHANGELOG.md` bijgewerkt
+- [ ] Versie verhoogd met `python tools/set_version.py <nieuw>` (nooit een oud nummer hergebruiken);
+      `python tools/set_version.py --check` groen; CHANGELOG.md en `backend/ems/CHANGELOG.md` bijgewerkt
 - [ ] Databasemigraties: nieuwe migratie toegevoegd én getest op een database van de vorige versie
+- [ ] CI-job *Linux acceptance* groen (Docker amd64, Docker arm64/QEMU, systemd)
+- [ ] Browser-acceptatie `tests/ui/ui_acceptance.py` groen (resoluties, touch, toetsenbord, offline/trage API)
+- [ ] AUDIT_REMEDIATION.md, TEST_RESULTS.md, KNOWN_LIMITATIONS.md bijgewerkt — alleen FIXED wat getest is
 
 ## 2. Veiligheid
 
@@ -17,6 +21,8 @@ Werk deze lijst af vóór elke release. Vink alleen af wat echt is gecontroleerd
 - [ ] Opgeslagen YAML bevat alleen `${VAR}`- of `secret:`-verwijzingen (test `test_config` / `test_generic_device_password_goes_to_secret_store`)
 - [ ] Geen nieuwe schrijvende driver zonder officiële documentatie; `verified=True` alleen na hardwaretest
 - [ ] CommandGate: SIMULATION_MODE / DRY_RUN / inbedrijfstellingsniveaus ongewijzigd of getest
+      (`test_safety_matrix.py`); volledige regeling alleen voor `verified` drivers
+- [ ] Geen tokens in localStorage of URL's (`test_p0_06_*`); back-up standaard zonder sleutels
 - [ ] Fail-safe getest: netmeter weg → apparaten vrijgegeven (test `test_engine`)
 - [ ] CORS alleen voor de app-origin; CSP ongewijzigd; geen poorten naar internet in compose
 - [ ] Afhankelijkheden: geen bekende kwetsbaarheden (`pip-audit` of vergelijkbaar)
@@ -46,7 +52,8 @@ Werk deze lijst af vóór elke release. Vink alleen af wat echt is gecontroleerd
 - [ ] Alles-in-één: "Op deze computer" → Starten (eigen installatie én Demo), app sluiten → EMS blijft draaien, herstart Windows → EMS start vanzelf (autostart), "EMS stoppen" werkt
 - [ ] Bijwerken terwijl het EMS op de achtergrond draait: installer stopt het eerst; daarna start de app het weer
 - [ ] Bijwerken over de vorige versie heen behoudt instellingen; verwijderen werkt
-- [ ] (Indien beschikbaar) installer en exe ondertekend
+- [ ] (Indien beschikbaar) installer en exe ondertekend; zo niet: release vermeldt **UNSIGNED TEST BUILD**
+- [ ] Downgradeweigering (acceptatiestap 9b) en SHA256SUMS.txt bij de release
 
 - [ ] CI-stap *Windows acceptance test* groen (automatisch: installeren, Demo, database, WebSocket, instellingen, herstart via autostart, upgrade, verwijderen)
 - [ ] Slaapstandwaarschuwing verschijnt op een pc met slaapstand aan
