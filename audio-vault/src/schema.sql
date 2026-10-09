@@ -151,3 +151,32 @@ ALTER TABLE audio_files ADD COLUMN IF NOT EXISTS segue BOOLEAN NOT NULL DEFAULT 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS plan TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS access_until TIMESTAMPTZ;
 ALTER TABLE collections ADD COLUMN IF NOT EXISTS min_plan TEXT;
+-- Track feedback: a listener/DJ/customer reports a track that is not right (bad
+-- quality, wrong title, starts or ends wrong, …); the owner/admins fix it and close it.
+CREATE TABLE IF NOT EXISTS track_reports (
+  id          SERIAL PRIMARY KEY,
+  file_id     INTEGER NOT NULL REFERENCES audio_files(id) ON DELETE CASCADE,
+  user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  reason      TEXT NOT NULL,
+  note        TEXT NOT NULL DEFAULT '',
+  status      TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'done')),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  resolved_at TIMESTAMPTZ,
+  resolved_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS track_reports_open_idx ON track_reports (created_at DESC) WHERE status = 'open';
+
+-- Music wishes: tracks people miss in the database. The owner/admins add them (or not)
+-- and the person sees what became of the wish.
+CREATE TABLE IF NOT EXISTS music_wishes (
+  id         SERIAL PRIMARY KEY,
+  user_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  artist     TEXT NOT NULL DEFAULT '',
+  title      TEXT NOT NULL DEFAULT '',
+  note       TEXT NOT NULL DEFAULT '',
+  status     TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'added', 'rejected')),
+  reply      TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  handled_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS music_wishes_open_idx ON music_wishes (created_at DESC) WHERE status = 'open';

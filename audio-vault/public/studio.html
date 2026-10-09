@@ -31,6 +31,8 @@
   <div class="clock"><div id="clock-time">00:00:00</div><div id="clock-date" class="clock-date"></div></div>
   <div class="top-actions">
     <button class="icon-btn" id="btn-dashboard" title="Dashboard: alles in één overzicht (D)">▦</button>
+    <a class="icon-btn report-badge hidden" id="btn-reports" href="/#meldingen" target="aot-beheer" title="Meldingen over nummers">⚑<span id="reports-count"></span></a>
+    <button class="icon-btn" id="btn-wishes" title="Muziek wensen: geef door welk nummer je mist in de database">♪</button>
     <button class="icon-btn update-btn hidden" id="btn-update" title="Updates">⬆</button>
     <button class="icon-btn" id="btn-settings" title="Instellingen">⚙</button>
     <a class="icon-btn" href="/klok.html" target="aot-beheer" title="Uurklokken (eigen venster; de muziek speelt door)">◔</a>
@@ -83,6 +85,9 @@
     <div class="lib-selbar" id="lib-selbar"></div>
     <div class="library" id="library"></div>
     <div class="lib-details hidden" id="lib-details"></div>
+    <div class="report-drop" id="report-drop" title="Sleep een nummer uit de database of de playlist hierheen">
+      <strong>⚑ Probleem melden</strong><span>sleep een nummer hierheen — de beheerder verbetert het</span>
+    </div>
     <div class="hint">Ctrl/Shift+klik = meerdere kiezen · ⤴ = als volgende · + = achteraan · dubbelklik = achteraan · rechtsklik = meer · sleep naar playlist of jingle-knop · 🎧 = voorbeluisteren</div>
   </section>
 
@@ -135,6 +140,41 @@
 </dialog>
 
 <div class="menu hidden" id="slot-menu"></div>
+
+<dialog id="report">
+  <form method="dialog" class="settings report-form">
+    <h2>⚑ Probleem melden</h2>
+    <p class="report-track" id="report-track"></p>
+    <label>Wat is er niet goed?</label>
+    <div class="report-reasons" id="report-reasons"></div>
+    <label>Toelichting (optioneel)</label>
+    <textarea id="report-note" rows="3" maxlength="1000" placeholder="bijv. kraakt na 1 minuut, het is de live-versie, …"></textarea>
+    <div class="dialog-actions">
+      <button type="button" class="tbtn" id="report-cancel">Annuleren</button>
+      <button type="button" class="tbtn start" id="report-send">Doorgeven aan de beheerder</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="wishes">
+  <form method="dialog" class="settings wish-form">
+    <h2>♪ Muziek wensen</h2>
+    <p class="muted" style="margin:0 0 10px">Mis je een nummer in de database? Geef het door; de beheerder voegt het toe.</p>
+    <div class="grid2">
+      <div><label>Artiest</label><input id="wish-artist" maxlength="200" placeholder="bijv. De Muiters"></div>
+      <div><label>Titel</label><input id="wish-title" maxlength="200" placeholder="bijv. Bella Marie"></div>
+    </div>
+    <label>Toelichting (optioneel)</label>
+    <input id="wish-note" maxlength="1000" placeholder="bijv. de originele versie uit 1985">
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button type="button" class="tbtn start" id="wish-send">Wens doorgeven</button>
+      <span class="muted" id="wish-msg" style="align-self:center"></span>
+    </div>
+    <h3>Mijn wensen</h3>
+    <div class="wish-list" id="wish-list"></div>
+    <div class="dialog-actions"><button class="tbtn" value="close">Sluiten</button></div>
+  </form>
+</dialog>
 
 <dialog id="settings">
   <form method="dialog" class="settings">

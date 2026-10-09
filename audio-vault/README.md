@@ -382,6 +382,32 @@ je een heel album tegelijk selecteren.
 - Aanzetten mag de beheerder, of iemand met uploadrechten op die collectie. Het
   geldt voor iedereen die het nummer draait.
 
+## Probleem melden (feedback op nummers)
+
+Klanten en dj's kunnen in de studio een nummer dat niet goed is **doorgeven aan de
+beheerder**: sleep het (uit de database of de playlist) naar het vak **⚑ Probleem
+melden**, of rechtsklik → *Probleem melden…*. Ze kiezen wat er mis is (slechte
+kwaliteit, verkeerde titel/artiest, begint of stopt verkeerd, te zacht/hard, verkeerd
+nummer, anders) en kunnen een toelichting typen.
+
+De eigenaar en beheerders zien rechtsboven in de studio een oranje **⚑** met het aantal
+open meldingen (en een Windows-melding bij een nieuwe). Klik erop → *Meldingen* in de
+bibliotheek: beluister het nummer, pas titel/artiest aan, of **vervang het bestand**
+door een goede versie. Het blijft hetzelfde nummer, dus playlists, jingle-knoppen en
+uurklokken blijven werken; cue-punten, volume en genre worden opnieuw gemeten. Zet de
+melding daarna op *Opgelost*.
+
+## Muziek wensen
+
+Mis je een nummer in de database? In de studio rechtsboven op **♪** (of in het menu:
+*Muziek wensen…*): vul artiest, titel en eventueel een toelichting in en klik op
+*Wens doorgeven*. Onder *Mijn wensen* zie je wat ermee gebeurd is: *aangevraagd*,
+*✓ toegevoegd* of *niet mogelijk*, met het bericht van de beheerder. Een open wens kun
+je intrekken met ✕.
+
+De beheerder ziet de wensen bij *⚑ Meldingen & wensen* in de bibliotheek (en telt ze
+mee in de oranje ⚑ in de studio) en zet ze op *Toegevoegd* of *Niet mogelijk*.
+
 ## Nonstop-filter (wat je nooit in de uurklok wilt)
 
 Per persoon stel je in wat de automatische planning (uurklok / 24/7) nooit kiest.

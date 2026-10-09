@@ -167,6 +167,7 @@ function buildMenu() {
         { label: 'Uurklokken', accelerator: 'CmdOrCtrl+2', click: go('/klok.html') },
         { label: 'Bibliotheek en gebruikers', accelerator: 'CmdOrCtrl+3', click: go('/') },
         { label: 'Nu op de radio', accelerator: 'CmdOrCtrl+4', click: go('/nu.html') },
+        { label: 'Muziek wensen…', click: () => { if (studioOpen()) win.webContents.executeJavaScript('openWishes()').catch(() => {}); else if (serverOrigin) openStudio(); } },
         { type: 'separator' },
         { label: 'Server beheren (deze pc)…', accelerator: 'CmdOrCtrl+5', click: () => showServer() },
         { label: 'Andere server kiezen…', click: () => showConnect() },

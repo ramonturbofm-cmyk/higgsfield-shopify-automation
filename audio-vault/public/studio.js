@@ -1125,6 +1125,7 @@ function fileMenu(e, f, { playlist = false } = {}) {
       item('✕  Selectie opheffen', clearSelection));
   } else if (playlist) menu.replaceChildren(
     h('div', { class: 'ctx-title' }, label(f)),
+    item('⚑  Probleem melden…', () => openReport(f.id)),
     ...nonstopMenuItems(f, item));
   else menu.replaceChildren(
     h('div', { class: 'ctx-title' }, label(f)),
@@ -1134,6 +1135,7 @@ function fileMenu(e, f, { playlist = false } = {}) {
     item('🎧  Voorbeluisteren', () => togglePfl(f)),
     item('🎵  Op een jingle-knop zetten', () => assignToCart([f.id])),
     item(isFav(f.id) ? '☆  Uit favorieten' : '★  Favoriet', () => setFav([f.id], !isFav(f.id))),
+    item('⚑  Probleem melden…', () => openReport(f.id)),
     ...nonstopMenuItems(f, item));
   menu.style.left = `${Math.min(e.clientX, innerWidth - 240)}px`;
   menu.style.top = `${Math.min(e.clientY, innerHeight - 200)}px`;
@@ -1444,7 +1446,8 @@ function bindSettings() {
 
 document.addEventListener('keydown', (e) => {
   if (e.target.matches('input, select, textarea') || e.ctrlKey || e.metaKey || e.altKey) return;
-  if ($('settings').open || $('slot-info').open) return;
+  // No studio shortcuts while a window (settings, jingle info, report, wishes, …) is open.
+  if (document.querySelector('dialog[open]:not(#dashboard)')) return;
   const k = e.key.toLowerCase();
   if (k === 'd') { toggleDashboard(); return; }
   if ($('dashboard').open) return;
@@ -1499,6 +1502,99 @@ function setupUpdateButton() {
   });
 }
 
+// ---------- problem reports ----------
+// Anyone drags a track (or right-clicks it) to report what is wrong with it; the
+// owner/admins see a ⚑ with the number of open reports and fix them in the library.
+const REPORT_REASONS = [
+  ['quality', 'Slechte geluidskwaliteit'], ['tags', 'Verkeerde titel of artiest'], ['cue', 'Begint of stopt verkeerd'],
+  ['volume', 'Te zacht of te hard'], ['wrong', 'Verkeerd nummer / kapot bestand'], ['other', 'Anders'],
+];
+let reportFile = null;
+function openReport(fileId) {
+  const f = S.files.get(fileId);
+  if (!f) return;
+  reportFile = f;
+  $('report-track').textContent = label(f);
+  $('report-note').value = '';
+  $('report-reasons').replaceChildren(...REPORT_REASONS.map(([value, text], i) => h('label', { class: 'check' },
+    h('input', { type: 'radio', name: 'report-reason', value, checked: i === 0 }), ` ${text}`)));
+  $('report').showModal();
+}
+async function sendReport() {
+  const reason = (document.querySelector('input[name="report-reason"]:checked') || {}).value;
+  try {
+    await api('POST', `/api/files/${reportFile.id}/report`, { reason, note: $('report-note').value });
+    $('report').close();
+    status(`⚑ Doorgegeven aan de beheerder: ${label(reportFile)}`);
+  } catch (e) { status(`Melden mislukt: ${e.message}`); }
+}
+// ---------- music wishes ----------
+const WISH_STATUS = { open: ['Aangevraagd', 'open'], added: ['✓ Toegevoegd', 'added'], rejected: ['Niet mogelijk', 'rejected'] };
+async function renderWishes() {
+  try {
+    const { wishes } = await api('GET', '/api/wishes/mine');
+    $('wish-list').replaceChildren(...(wishes.length ? wishes.map((w) => h('div', { class: 'wish-row' },
+      h('div', {}, h('strong', {}, [w.artist, w.title].filter(Boolean).join(' – ')),
+        w.note ? h('div', { class: 'muted' }, w.note) : null,
+        w.reply ? h('div', { class: 'wish-reply' }, `Beheerder: ${w.reply}`) : null),
+      h('span', { class: `wish-status ${WISH_STATUS[w.status][1]}` }, WISH_STATUS[w.status][0]),
+      w.status === 'open' ? h('button', { type: 'button', class: 'mini', title: 'Wens intrekken', onclick: async () => { await api('DELETE', `/api/wishes/${w.id}`); renderWishes(); } }, '✕') : h('span')))
+      : [h('p', { class: 'muted', style: { margin: '4px 0' } }, 'Nog geen wensen doorgegeven.')]));
+  } catch (e) { $('wish-list').textContent = e.message; }
+}
+function openWishes() {
+  $('wish-msg').textContent = '';
+  $('wishes').showModal();
+  renderWishes();
+  $('wish-artist').focus();
+}
+async function sendWish() {
+  try {
+    await api('POST', '/api/wishes', { artist: $('wish-artist').value, title: $('wish-title').value, note: $('wish-note').value });
+    $('wish-msg').textContent = '✓ Doorgegeven aan de beheerder';
+    $('wish-artist').value = ''; $('wish-title').value = ''; $('wish-note').value = '';
+    $('wish-artist').focus();
+    renderWishes();
+  } catch (e) { $('wish-msg').textContent = e.message; }
+}
+
+function setupReports() {
+  $('btn-wishes').addEventListener('click', openWishes);
+  $('wish-send').addEventListener('click', sendWish);
+  for (const id of ['wish-artist', 'wish-title', 'wish-note']) $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); sendWish(); } });
+  const drop = $('report-drop');
+  drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', (e) => {
+    e.preventDefault(); drop.classList.remove('over');
+    const uid = e.dataTransfer.getData('text/aot-item');
+    const item = uid && S.playlist.find((i) => i.uid === uid);
+    const id = item ? item.id : Number(e.dataTransfer.getData('text/aot-file'));
+    if (id) openReport(id);
+  });
+  $('report-send').addEventListener('click', sendReport);
+  $('report-cancel').addEventListener('click', () => $('report').close());
+  if (!S.me || !['owner', 'admin'].includes(S.me.role)) return;
+  // Admins: badge with the number of open reports, and a notice when a new one comes in.
+  let last = null;
+  const check = async () => {
+    try {
+      const { open, reports, wishes } = await api('GET', '/api/reports/count');
+      $('btn-reports').classList.toggle('hidden', !open);
+      $('reports-count').textContent = open ? String(open) : '';
+      $('btn-reports').title = `${reports} ${reports === 1 ? 'melding' : 'meldingen'} en ${wishes} muziek${wishes === 1 ? 'wens' : 'wensen'} — klik om ze te bekijken`;
+      if (last !== null && open > last) {
+        status(`⚑ Nieuw: ${reports} melding(en), ${wishes} muziekwens(en) open`);
+        try { if (Notification.permission === 'granted') new Notification('Audio OnAir Turbo Database', { body: 'Er is een nieuwe melding of muziekwens.' }); } catch { /* no notifications */ }
+      }
+      last = open;
+    } catch { /* try again later */ }
+  };
+  try { if (typeof Notification !== 'undefined' && Notification.permission === 'default') Notification.requestPermission(); } catch { /* ignore */ }
+  check();
+  setInterval(check, 60 * 1000);
+}
+
 async function boot() {
   setupUpdateButton();
   try { S.me = (await api('GET', '/api/me')).user; } catch { location.href = '/'; return; }
@@ -1506,6 +1602,7 @@ async function boot() {
   S.settings = { ...DEFAULT_SETTINGS, ...settings };
   S.collections = collections;
   loadNonstopBlocks();
+  setupReports();
   await ensureFiles([...(S.settings.playlist || []).map((i) => i.id), ...(S.settings.cart || []).filter(Boolean).map((s) => s.id)]);
   S.playlist = (S.settings.playlist || []).filter((i) => i.marker || S.files.has(i.id))
     .map((i) => (i.marker
