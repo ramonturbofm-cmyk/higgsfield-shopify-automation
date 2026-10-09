@@ -1,6 +1,6 @@
 # DEVELOPMENT — voortgang, teststatus en besluiten
 
-Laatst bijgewerkt: versie **0.4.0** — audit-remediatie (zie [AUDIT_REMEDIATION.md](AUDIT_REMEDIATION.md)).
+Laatst bijgewerkt: versie **0.5.0** — prijzen/prognoses en Energy Manager Cloud (0.4.0: audit-remediatie, zie [AUDIT_REMEDIATION.md](AUDIT_REMEDIATION.md)).
 Dit bestand is de waarheid over wat werkt.
 
 ## Legenda
@@ -13,8 +13,8 @@ Test: **TESTED** (geautomatiseerd: unit/API/simulator/browser/CI) of **NOT TESTE
 schone Windows-runner (`windows/acceptance.ps1`), Linux op een schone Ubuntu-runner
 (`deploy/acceptance-linux.sh`: Docker amd64, Docker arm64 onder QEMU, systemd).
 
-Tests: 306 pytest-tests (Linux en Windows), 5 browser-acceptatiechecks (`tests/ui/ui_acceptance.py`),
-Windows- en Linux-acceptatiescripts in CI.
+Tests: 340 pytest-tests EMS (Linux en Windows), 26 cloudtests (SQLite en PostgreSQL 16), 5
+browser-acceptatiechecks (`tests/ui/ui_acceptance.py`), Windows- en Linux-acceptatiescripts in CI.
 
 ## Platformen en nodes
 
@@ -62,7 +62,10 @@ Windows- en Linux-acceptatiescripts in CI.
 
 | Onderdeel | Implementatie | Test |
 |---|---|---|
-| Prijsbronnen EnergyZero, ENTSO-E, handmatig (15/60 min, CSV), demo | COMPLETE | TESTED (EnergyZero live-check in CI) |
+| Prijsbronnen EnergyZero (officieel endpoint), ENTSO-E, eigen API (expert), handmatig, demo | COMPLETE | TESTED (EnergyZero live-schemacheck in CI) |
+| Instellingen per bron, reservebron, SSRF-bescherming, verbindingstest | COMPLETE | TESTED |
+| Prijscontrole, publicatiebewaking 13:00/15:30, statussen beursprijs/prognose/geschat/verouderd/ontbreekt | COMPLETE | TESTED |
+| Prijsprognose (same_slot_7d, weekday_profile_4w) met band en betrouwbaarheid | COMPLETE | TESTED — statistisch, niet gekalibreerd |
 | "Nu"-prijs uit lopend interval, status per interval | COMPLETE | TESTED |
 | Contractprijs per kwartier of uur, los van marktresolutie | COMPLETE | TESTED |
 | Energiebelasting per jaar met schijven (NL 2026 € 0,09161) | COMPLETE | TESTED — hogere schijven 2026 "nog controleren" |
@@ -73,6 +76,20 @@ Windows- en Linux-acceptatiescripts in CI.
 | Break-even incl. verlies en slijtage | COMPLETE | TESTED |
 | Leveranciersprofielen | NOT IMPLEMENTED | — contract handmatig |
 | WP ontdooien/tapwater/legionella, V2H/V2G | NOT IMPLEMENTED | — |
+
+## Energy Manager Cloud (0.5.0)
+
+| Onderdeel | Implementatie | Test |
+|---|---|---|
+| Accounts (registratie, verificatie, wachtwoord/e-maillink, reset, MFA, sessies, export, verwijderen) | COMPLETE | TESTED |
+| Organisaties, rollen, rechten, tenant-isolatie, auditlog | COMPLETE | TESTED |
+| Koppelen lokaal ↔ cloud, node-token, rotatie, intrekken | COMPLETE | TESTED (in-process, echte EMS-runtime) |
+| Opdrachten op afstand via lokale veiligheidscontrole | COMPLETE | TESTED (Demo Mode) — niet met hardware |
+| Licenties, abonnementen, limieten, prijzen als data | COMPLETE | TESTED |
+| Betaalprovider (Mollie/Stripe) | NOT IMPLEMENTED | — interface aanwezig, handmatig verlengen |
+| Klantportaal en beheerportaal | COMPLETE | TESTED (browser, lokaal) |
+| Deployment (Docker, compose met Caddy + PostgreSQL) | COMPLETE | PARTIALLY — image gebouwd/gestart tegen PostgreSQL; compose niet als geheel gestart; geen echte hosting |
+| Centrale prijsdienst | NOT IMPLEMENTED | — alleen ontwerp (ARCHITECTURE §21) |
 
 ## Apparaten en protocollen
 
@@ -103,6 +120,8 @@ Windows- en Linux-acceptatiescripts in CI.
 2. **Hardwaretest** HomeWizard P1 / DSMR P1 en een fysieke Raspberry Pi.
 3. **Code-signing-certificaat** (optioneel) als repository-secrets.
 4. Controle van de hogere energiebelastingschijven 2026.
+5. **Cloud live zetten**: domein, hosting (EU), SMTP-dienst, later een betaalprovider, juridische documenten
+   (zie `cloud/DEPLOYMENT.md` en `PRIVACY_COMPLIANCE.md`). Geheimen genereert de beheerder op de server.
 
 Volledige lijst: [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).
 
