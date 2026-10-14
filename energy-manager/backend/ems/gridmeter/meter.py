@@ -121,6 +121,9 @@ class GridMeterSelection:
                 "needs_confirmation": self.needs_confirmation, "candidates": self.candidates}
 
 
+METER_CATEGORIES = ("smart_meter", "energy_meter")
+
+
 def select_primary_grid_meter(config: EMSConfig, registry: DriverRegistry) -> GridMeterSelection:
     candidates = []
     for dev in config.devices:
@@ -131,6 +134,10 @@ def select_primary_grid_meter(config: EMSConfig, registry: DriverRegistry) -> Gr
         except KeyError:
             continue
         kind = manifest.grid_meter_kind
+        # Multi-category drivers (Modbus library, Home Assistant …) can read a grid meter, but only a device
+        # that *is* a meter is a candidate — a heat pump on the same driver never is.
+        if kind is not None and str(getattr(dev.category, "value", dev.category)) not in METER_CATEGORIES:
+            kind = None
         if kind is None and dev.role not in ("primary_grid_meter", "grid_reference"):
             continue
         candidates.append({"device_id": dev.id, "name": dev.name, "kind": kind, "driver": dev.driver})

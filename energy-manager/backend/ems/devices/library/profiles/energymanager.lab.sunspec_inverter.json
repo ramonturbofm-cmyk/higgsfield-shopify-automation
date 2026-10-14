@@ -1,0 +1,44 @@
+{
+ "profile_id": "energymanager.lab.sunspec_inverter",
+ "driver_id": "library.sunspec",
+ "manufacturer": "Energy Manager Testomgeving",
+ "model": "Virtuele SunSpec-omvormer 5 kW",
+ "model_aliases": [
+  "EM-VPV-5"
+ ],
+ "device_category": "pv_inverter",
+ "protocol": "sunspec",
+ "connection_parameters": {
+  "port": 15502,
+  "unit_id": 1
+ },
+ "discovery_signatures": [
+  {
+   "kind": "sunspec",
+   "manufacturer": "Energy Manager Lab",
+   "model_regex": "^EM-VPV"
+  }
+ ],
+ "capabilities": [
+  "read_pv_power",
+  "control_pv_limit"
+ ],
+ "documentation_sources": [
+  {
+   "title": "SunSpec Information Model Specification (modellen 1, 103, 120, 123)",
+   "url": "https://github.com/sunspec/models",
+   "license": "Apache-2.0"
+  },
+  {
+   "title": "Energy Manager Testomgeving — registerkaart virtuele apparaten (DEVICE_CATALOG.md, sectie Testomgeving)",
+   "license": "eigen documentatie"
+  }
+ ],
+ "test_status": "SIMULATOR_TESTED",
+ "simulator_only": true,
+ "default_params": {
+  "peak_power_kw": 5.0,
+  "max_power_w": 5000
+ },
+ "description": "Gesimuleerde omvormer met echte SunSpec-modellen (common, omvormer, nameplate, besturing)."
+}

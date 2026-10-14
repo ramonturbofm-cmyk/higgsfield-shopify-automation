@@ -143,7 +143,7 @@ class EMSEngine:
             self.heartbeat = now
             return result
 
-        ctx = ControlContext(self.config, now, self._capabilities(), run_id)
+        ctx = ControlContext(self.config, now, self._capabilities(), run_id, self._modes())
         try:
             decisions = self.controller.decide(snap, ctx)
         except Exception:
@@ -210,6 +210,17 @@ class EMSEngine:
                 why = f" ({state.status}: {state.error})" if state and state.error else ""
                 issues.append(f"netmeting {snap.grid_device_id} ontbreekt of is onbetrouwbaar{why}")
         return issues
+
+    def _modes(self) -> dict[str, list[str]]:
+        out = {}
+        for dev_id, d in self.devices.devices.items():
+            fn = getattr(d.driver, "modes", None)
+            if callable(fn):
+                try:
+                    out[dev_id] = list(fn())
+                except Exception:   # noqa: BLE001 — a driver without a valid profile simply has no modes
+                    out[dev_id] = []
+        return out
 
     def _capabilities(self):
         return {dev_id: d.driver.device_capabilities() for dev_id, d in self.devices.devices.items()

@@ -44,7 +44,8 @@ class GenericHTTPJSONDriver(DeviceDriver):
         connection_schema={
             "url": {"type": "string", "label_nl": "URL (http:// of https://)"},
             "auth_header": {"type": "string", "default": "Authorization", "label_nl": "Header voor authenticatie (optioneel)"},
-            "auth_token": {"type": "string", "default": "", "label_nl": "Waarde/token voor die header (optioneel)"},
+            "auth_token": {"type": "string", "default": "", "label_nl": "Waarde/token voor die header (optioneel)",
+                           "secret": True},
             "verify_tls": {"type": "boolean", "default": True, "label_nl": "HTTPS-certificaat controleren"},
             "timeout_s": {"type": "integer", "default": 5, "label_nl": "Time-out (s)"},
             "values": {**VALUES_SCHEMA, "example": [{"metric": "grid_power_w", "path": "data.active_power_w"}]},

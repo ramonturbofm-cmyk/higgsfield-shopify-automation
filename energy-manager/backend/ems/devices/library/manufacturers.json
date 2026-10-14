@@ -1,0 +1,448 @@
+{
+ "schema_version": 1,
+ "entries": [
+  {
+   "manufacturer": "Energy Manager Testomgeving",
+   "categories": [
+    "smart_meter",
+    "pv_inverter",
+    "battery",
+    "heat_pump",
+    "ev_charger",
+    "smart_relay",
+    "boiler",
+    "energy_meter"
+   ],
+   "note": "Virtuele apparaten op deze computer — alleen in de Testomgeving.",
+   "models": [
+    {
+     "model": "Virtuele P1-meter (HomeWizard API v1)",
+     "categories": [
+      "smart_meter"
+     ],
+     "driver_id": "homewizard.p1",
+     "support": "simulator",
+     "lab": "p1"
+    },
+    {
+     "model": "Virtuele SunSpec-omvormer 5 kW",
+     "categories": [
+      "pv_inverter"
+     ],
+     "profile_id": "energymanager.lab.sunspec_inverter",
+     "support": "simulator"
+    },
+    {
+     "model": "Virtuele thuisbatterij 10 kWh",
+     "categories": [
+      "battery"
+     ],
+     "profile_id": "energymanager.lab.battery",
+     "support": "simulator"
+    },
+    {
+     "model": "Virtuele warmtepomp (Modbus TCP)",
+     "categories": [
+      "heat_pump"
+     ],
+     "profile_id": "energymanager.lab.heat_pump",
+     "support": "simulator"
+    },
+    {
+     "model": "Virtuele warmtepomp via SG Ready-relais",
+     "categories": [
+      "heat_pump"
+     ],
+     "driver_id": "sgready.relay",
+     "support": "simulator",
+     "lab": "sgready"
+    },
+    {
+     "model": "Virtuele laadpaal 11 kW",
+     "categories": [
+      "ev_charger"
+     ],
+     "profile_id": "energymanager.lab.ev_charger",
+     "support": "simulator"
+    },
+    {
+     "model": "Virtuele boiler via slim relais (Shelly-API)",
+     "categories": [
+      "boiler",
+      "smart_relay"
+     ],
+     "driver_id": "shelly.switch",
+     "support": "simulator",
+     "lab": "boiler"
+    }
+   ]
+  },
+  {
+   "manufacturer": "HomeWizard",
+   "categories": [
+    "smart_meter"
+   ],
+   "models": [
+    {
+     "model": "P1 Meter (HWE-P1)",
+     "driver_id": "homewizard.p1",
+     "support": "supported",
+     "note": "Officiële lokale API v1/v2; niet op echte hardware getest door ons."
+    }
+   ]
+  },
+  {
+   "manufacturer": "Slimme meter (DSMR)",
+   "categories": [
+    "smart_meter"
+   ],
+   "models": [
+    {
+     "model": "P1-kabel (USB) op de slimme meter",
+     "driver_id": "dsmr.p1",
+     "support": "supported",
+     "note": "DSMR 4/5 via seriële P1-kabel."
+    }
+   ]
+  },
+  {
+   "manufacturer": "Shelly",
+   "categories": [
+    "smart_plug",
+    "smart_relay",
+    "boiler",
+    "flexible_load",
+    "heat_pump"
+   ],
+   "models": [
+    {
+     "model": "Gen2+ relais/stekker (Plus 1PM, Plus 2PM, Pro 1PM/2PM/4PM, Plus Plug S)",
+     "categories": [
+      "smart_plug",
+      "smart_relay",
+      "boiler",
+      "flexible_load"
+     ],
+     "driver_id": "shelly.switch",
+     "support": "supported",
+     "note": "Lokale Gen2-API: aan/uit + vermogen. Let op de belastbaarheid van het relais."
+    },
+    {
+     "model": "Gen2+ met 2 relais als SG Ready-schakelaar (bijv. Plus 2PM, Pro 2)",
+     "categories": [
+      "heat_pump"
+     ],
+     "driver_id": "sgready.relay",
+     "support": "via_sg_ready",
+     "note": "Twee potentiaalvrije contacten op de SG Ready-ingangen; bedrading volgens de handleiding van de warmtepomp."
+    },
+    {
+     "model": "Gen1-apparaten",
+     "support": "not_supported",
+     "note": "Gen1-API wordt niet ondersteund.",
+     "categories": [
+      "smart_plug",
+      "smart_relay"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Fronius",
+   "categories": [
+    "pv_inverter",
+    "hybrid_inverter",
+    "smart_meter"
+   ],
+   "models": [
+    {
+     "model": "Symo / Primo / Tauro / GEN24 (SunSpec Modbus TCP)",
+     "categories": [
+      "pv_inverter",
+      "hybrid_inverter"
+     ],
+     "profile_id": "sunspec.inverter",
+     "support": "read_only",
+     "note": "Via de SunSpec-standaard. Begrenzing alleen als model 123 beschikbaar is; niet op hardware getest."
+    },
+    {
+     "model": "Fronius Smart Meter (via datamanager, SunSpec)",
+     "categories": [
+      "smart_meter"
+     ],
+     "profile_id": "sunspec.meter",
+     "support": "read_only"
+    }
+   ]
+  },
+  {
+   "manufacturer": "SMA",
+   "categories": [
+    "pv_inverter",
+    "smart_meter"
+   ],
+   "models": [
+    {
+     "model": "Sunny Boy / Tripower met SunSpec Modbus",
+     "categories": [
+      "pv_inverter"
+     ],
+     "profile_id": "sunspec.inverter",
+     "support": "read_only",
+     "note": "SunSpec moet in het apparaat zijn ingeschakeld; unit-ID vaak 126 (zie handleiding)."
+    }
+   ]
+  },
+  {
+   "manufacturer": "SolarEdge",
+   "categories": [
+    "pv_inverter",
+    "smart_meter"
+   ],
+   "models": [
+    {
+     "model": "Omvormers met SunSpec Modbus TCP",
+     "categories": [
+      "pv_inverter"
+     ],
+     "profile_id": "sunspec.inverter",
+     "support": "read_only",
+     "note": "Uitlezen via SunSpec. Vermogensregeling van SolarEdge loopt niet altijd via model 123: niet geïmplementeerd."
+    },
+    {
+     "model": "SolarEdge-meter via omvormer (SunSpec)",
+     "categories": [
+      "smart_meter"
+     ],
+     "profile_id": "sunspec.meter",
+     "support": "read_only"
+    }
+   ]
+  },
+  {
+   "manufacturer": "Kostal",
+   "categories": [
+    "pv_inverter"
+   ],
+   "models": [
+    {
+     "model": "Plenticore / Piko IQ (SunSpec)",
+     "profile_id": "sunspec.inverter",
+     "support": "read_only"
+    }
+   ]
+  },
+  {
+   "manufacturer": "Victron Energy",
+   "categories": [
+    "hybrid_inverter",
+    "battery",
+    "pv_inverter",
+    "smart_meter"
+   ],
+   "models": [
+    {
+     "model": "GX-apparaat (Cerbo GX, Venus GX, Ekrano) — systeemwaarden",
+     "profile_id": "victron.gx",
+     "support": "community_read_only",
+     "note": "Registers uit een community-bron (evcc, MIT); alleen lezen, niet op hardware getest."
+    }
+   ]
+  },
+  {
+   "manufacturer": "Solis",
+   "categories": [
+    "pv_inverter",
+    "hybrid_inverter"
+   ],
+   "models": [
+    {
+     "model": "Alle modellen",
+     "support": "not_supported",
+     "note": "Geen directe lokale koppeling in deze versie; wel via Home Assistant als uw Home Assistant dit apparaat al kent."
+    }
+   ]
+  },
+  {
+   "manufacturer": "GoodWe",
+   "categories": [
+    "pv_inverter",
+    "hybrid_inverter"
+   ],
+   "models": [
+    {
+     "model": "Alle modellen",
+     "support": "not_supported",
+     "note": "Geen directe lokale koppeling in deze versie; wel via Home Assistant als uw Home Assistant dit apparaat al kent."
+    }
+   ]
+  },
+  {
+   "manufacturer": "Sungrow",
+   "categories": [
+    "pv_inverter",
+    "hybrid_inverter",
+    "battery"
+   ],
+   "models": [
+    {
+     "model": "Alle modellen",
+     "support": "not_supported",
+     "note": "Geen directe lokale koppeling in deze versie; wel via Home Assistant als uw Home Assistant dit apparaat al kent."
+    }
+   ]
+  },
+  {
+   "manufacturer": "SolaX",
+   "categories": [
+    "pv_inverter",
+    "hybrid_inverter",
+    "battery"
+   ],
+   "models": [
+    {
+     "model": "Alle modellen",
+     "support": "not_supported",
+     "note": "Geen directe lokale koppeling in deze versie; wel via Home Assistant als uw Home Assistant dit apparaat al kent."
+    }
+   ]
+  },
+  {
+   "manufacturer": "Huawei",
+   "categories": [
+    "pv_inverter",
+    "hybrid_inverter",
+    "battery"
+   ],
+   "models": [
+    {
+     "model": "SUN2000 / LUNA2000",
+     "support": "not_supported",
+     "note": "Geen directe lokale koppeling in deze versie; wel via Home Assistant als uw Home Assistant dit apparaat al kent. Geen SunSpec."
+    }
+   ]
+  },
+  {
+   "manufacturer": "NIBE",
+   "categories": [
+    "heat_pump"
+   ],
+   "models": [
+    {
+     "model": "S-serie (S1155, S1255, S2125, …)",
+     "support": "not_supported",
+     "note": "Modbus TCP-registers van de S-serie zijn nog niet geïmplementeerd. Wel mogelijk: SG Ready via relais (als uw model het ondersteunt) of Home Assistant."
+    }
+   ]
+  },
+  {
+   "manufacturer": "Daikin",
+   "categories": [
+    "heat_pump"
+   ],
+   "models": [
+    {
+     "model": "Altherma (alle varianten)",
+     "support": "not_supported",
+     "note": "Geen gedocumenteerde lokale schrijf-API beschikbaar. Mogelijk: SG Ready (als uw model het ondersteunt) of Home Assistant."
+    }
+   ]
+  },
+  {
+   "manufacturer": "Weheat",
+   "categories": [
+    "heat_pump"
+   ],
+   "models": [
+    {
+     "model": "Blackbird / Sparrow / Flint",
+     "support": "not_supported",
+     "note": "Geen lokale interface bekend; de Weheat-API is cloudgebaseerd. Geen besturing geclaimd."
+    }
+   ]
+  },
+  {
+   "manufacturer": "SG Ready (alle merken)",
+   "categories": [
+    "heat_pump",
+    "heat_pump_boiler"
+   ],
+   "models": [
+    {
+     "model": "Warmtepomp met SG Ready-ingang + netwerkrelais (Shelly Gen2+)",
+     "driver_id": "sgready.relay",
+     "support": "via_sg_ready",
+     "note": "Bedrijfsverzoeken (normaal / aanbevolen aan / optioneel blokkeren of geforceerd). Geen vermogensregeling."
+    }
+   ]
+  },
+  {
+   "manufacturer": "SunSpec-compatibel (overige merken)",
+   "categories": [
+    "pv_inverter",
+    "smart_meter",
+    "energy_meter"
+   ],
+   "models": [
+    {
+     "model": "Omvormer met SunSpec Modbus",
+     "categories": [
+      "pv_inverter"
+     ],
+     "profile_id": "sunspec.inverter",
+     "support": "read_only"
+    },
+    {
+     "model": "Meter met SunSpec Modbus",
+     "categories": [
+      "smart_meter",
+      "energy_meter"
+     ],
+     "profile_id": "sunspec.meter",
+     "support": "read_only"
+    }
+   ]
+  },
+  {
+   "manufacturer": "Laadpalen (OCPP)",
+   "categories": [
+    "ev_charger"
+   ],
+   "models": [
+    {
+     "model": "OCPP 1.6J-laadpaal",
+     "support": "not_supported",
+     "note": "OCPP is in deze versie nog niet geïmplementeerd. Via Home Assistant mogelijk als die de laadpaal kent."
+    }
+   ]
+  },
+  {
+   "manufacturer": "Home Assistant",
+   "categories": [
+    "smart_meter",
+    "energy_meter",
+    "pv_inverter",
+    "hybrid_inverter",
+    "battery",
+    "heat_pump",
+    "heat_pump_boiler",
+    "boiler",
+    "ev_charger",
+    "ev",
+    "airco",
+    "ventilation",
+    "smart_plug",
+    "smart_relay",
+    "flexible_load"
+   ],
+   "models": [
+    {
+     "model": "Entiteiten uit uw eigen Home Assistant",
+     "driver_id": "homeassistant.entities",
+     "support": "via_home_assistant",
+     "note": "Optioneel. Meetwaarden en (na bevestiging) bediening via de officiële Home Assistant-API."
+    }
+   ]
+  }
+ ]
+}

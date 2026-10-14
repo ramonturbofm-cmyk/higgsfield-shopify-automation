@@ -42,6 +42,17 @@ class ManagedDevice:
     error: str | None = None
 
 
+def is_virtual(driver) -> bool:
+    """Demo driver, or a real protocol driver talking to a virtual device of the Testomgeving on this computer."""
+    if driver.manifest.simulated:
+        return True
+    fn = getattr(driver, "simulated_target", None)
+    try:
+        return bool(callable(fn) and fn())
+    except Exception:  # noqa: BLE001 — unknown means: treat as real hardware
+        return False
+
+
 class DeviceManager:
     def __init__(self, config: EMSConfig, context: DriverContext,
                  registry: DriverRegistry = default_registry, strict: bool = True) -> None:
@@ -155,7 +166,7 @@ class DeviceManager:
 
     def is_simulated(self, device_id: str) -> bool:
         d = self.devices.get(device_id)
-        return bool(d and d.driver and d.driver.manifest.simulated)
+        return bool(d and d.driver and is_virtual(d.driver))
 
     async def apply(self, command: Command) -> None:
         d = self.devices.get(command.device_id)

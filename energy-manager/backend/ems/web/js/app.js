@@ -4,7 +4,7 @@ const NAV = [
   ["dashboard", "Dashboard", "⚡"], ["installation", "Mijn installatie", "🏠"], ["energy", "Energie", "📈"], ["planning", "Planning", "🗓"],
   ["prices", "Prijzen", "€"], ["battery", "Batterij", "🔋"], ["pv", "Zonnepanelen", "☀"],
   ["heatpump", "Warmtepomp", "🌡"], ["ev", "Laadpaal / EV", "🚗"], "-",
-  ["devices", "Apparaten", "🔌"], ["automations", "Automatiseringen", "⚙"], ["finance", "Financiën", "💶"],
+  ["devices", "Apparaten", "🔌"], ["lab", "Testomgeving", "🧫"], ["automations", "Automatiseringen", "⚙"], ["finance", "Financiën", "💶"],
   ["backtest", "Backtest & Auto-Tune", "🧪"], ["notifications", "Meldingen", "🔔"], "-",
   ["settings", "Instellingen", "🛠"], ["nodes", "Nodes", "🖧"], ["system", "Systeem", "🖥"],
 ];
@@ -17,7 +17,7 @@ const VIEWS = {
   finance: () => import("./views/finance.js"), backtest: () => import("./views/backtest.js"),
   notifications: () => import("./views/notifications.js"), settings: () => import("./views/settings.js"),
   system: () => import("./views/system.js"), installation: () => import("./views/installation.js"),
-  nodes: () => import("./views/nodes.js"),
+  nodes: () => import("./views/nodes.js"), lab: () => import("./views/lab.js"),
 };
 const TITLES = Object.fromEntries(NAV.filter((n) => n !== "-").map(([k, t]) => [k, t]));
 let cleanup = null;
@@ -47,6 +47,7 @@ const LEVELS = ["simple", "advanced", "expert"];
 const LEVEL_LABEL = { simple: "Eenvoudig", advanced: "Uitgebreid", expert: "Expert" };
 
 function visible(key) {
+  if (key === "lab") return state.info?.profile === "lab";
   if (LEVEL_MIN[key] && LEVELS.indexOf(state.level) < LEVELS.indexOf(LEVEL_MIN[key])) return false;
   const need = NEEDS[key];
   if (!need) return true;
@@ -86,7 +87,8 @@ function renderTopbar(title) {
   const theme = (() => { try { return localStorage.getItem("ems.theme") || "auto"; } catch { return "auto"; } })();
   const gm = live?.grid_meter;
   const pills = [];
-  if (state.info?.mode === "demo") pills.push(h("span", { class: "pill warn mode-tag", title: "Gesimuleerde woning" }, "Demo Mode"));
+  if (state.info?.profile === "lab") pills.push(h("span", { class: "pill warn mode-tag", title: "Virtuele apparaten via echte protocollen op deze computer — geen echte apparaten" }, "Testomgeving"));
+  else if (state.info?.mode === "demo") pills.push(h("span", { class: "pill warn mode-tag", title: "Gesimuleerde woning" }, "Demo Mode"));
   if (gm) {
     pills.push(gm.status === "no_primary_grid_meter"
       ? h("span", { class: "pill warn", title: gm.reason }, "Geen netmeter")

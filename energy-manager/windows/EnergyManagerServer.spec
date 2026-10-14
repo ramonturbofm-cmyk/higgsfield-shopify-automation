@@ -3,6 +3,7 @@
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 hiddenimports = (collect_submodules("ems") + collect_submodules("uvicorn") + collect_submodules("websockets")
+                 + collect_submodules("pymodbus") + collect_submodules("serial")
                  + ["zeroconf._utils.ipaddress", "zeroconf._handlers.answers", "aiomqtt", "paho.mqtt.client"])
 datas = collect_data_files("ems", include_py_files=False) + collect_data_files("tzdata")
 

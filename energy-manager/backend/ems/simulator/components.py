@@ -301,3 +301,32 @@ class SimEVCharger(Component):
 
     def power_w(self) -> float:
         return self.output_w
+
+
+# ------------------------------------------------------------ switched load
+@dataclass
+class SimSwitchLoad(Component):
+    """Resistive boiler behind a relay: its own thermostat keeps the tank between 55 and 65 °C."""
+    rated_w: float = 2000.0
+    tank_l: float = 80.0
+    tank_c: float = 55.0
+    loss_w: float = 60.0
+    relay_on: bool = True
+    heating: bool = False
+    output_w: float = 0.0
+    energy_kwh: float = 0.0
+
+    def update(self, env: Environment, t: datetime) -> None:
+        if self.tank_c < 55.0:
+            self.heating = True
+        elif self.tank_c >= 65.0:
+            self.heating = False
+        self.output_w = self.rated_w if (self.relay_on and self.heating) else 0.0
+
+    def integrate(self, dt: float) -> None:
+        heat_j = (self.output_w - self.loss_w) * dt
+        self.tank_c += heat_j / (self.tank_l * 4186.0)
+        self.energy_kwh += self.output_w * dt / 3.6e6
+
+    def power_w(self) -> float:
+        return self.output_w

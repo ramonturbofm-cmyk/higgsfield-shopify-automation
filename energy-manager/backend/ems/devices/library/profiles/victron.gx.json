@@ -1,0 +1,133 @@
+{
+ "profile_id": "victron.gx",
+ "driver_id": "library.modbus",
+ "manufacturer": "Victron Energy",
+ "model": "GX-apparaat (Cerbo GX, Venus GX, Ekrano) — systeemwaarden",
+ "model_aliases": [
+  "Cerbo GX",
+  "Venus GX",
+  "Ekrano GX"
+ ],
+ "device_category": "hybrid_inverter",
+ "supported_roles": [
+  "smart_meter",
+  "battery",
+  "pv_inverter"
+ ],
+ "protocol": "modbus_tcp",
+ "connection_parameters": {
+  "port": 502,
+  "unit_id": 100
+ },
+ "points": [
+  {
+   "metric": "grid_power_l1_w",
+   "table": "input",
+   "address": 820,
+   "type": "int16"
+  },
+  {
+   "metric": "grid_power_l2_w",
+   "table": "input",
+   "address": 821,
+   "type": "int16"
+  },
+  {
+   "metric": "grid_power_l3_w",
+   "table": "input",
+   "address": 822,
+   "type": "int16"
+  },
+  {
+   "metric": "pv_power_w",
+   "table": "input",
+   "address": 808,
+   "type": "uint16",
+   "combine": "sum"
+  },
+  {
+   "metric": "pv_power_w",
+   "table": "input",
+   "address": 809,
+   "type": "uint16",
+   "combine": "sum"
+  },
+  {
+   "metric": "pv_power_w",
+   "table": "input",
+   "address": 810,
+   "type": "uint16",
+   "combine": "sum"
+  },
+  {
+   "metric": "pv_power_w",
+   "table": "input",
+   "address": 811,
+   "type": "uint16",
+   "combine": "sum"
+  },
+  {
+   "metric": "pv_power_w",
+   "table": "input",
+   "address": 812,
+   "type": "uint16",
+   "combine": "sum"
+  },
+  {
+   "metric": "pv_power_w",
+   "table": "input",
+   "address": 813,
+   "type": "uint16",
+   "combine": "sum"
+  },
+  {
+   "metric": "pv_power_w",
+   "table": "input",
+   "address": 850,
+   "type": "uint16",
+   "combine": "sum"
+  },
+  {
+   "metric": "battery_power_w",
+   "table": "input",
+   "address": 842,
+   "type": "int16"
+  },
+  {
+   "metric": "battery_soc_pct",
+   "table": "input",
+   "address": 843,
+   "type": "uint16"
+  }
+ ],
+ "writable_controls": [
+  {
+   "action": "battery_soc_limit",
+   "address": 2901,
+   "type": "uint16",
+   "scale": 0.1,
+   "min": 10,
+   "max": 100,
+   "status": "COMMUNITY",
+   "note": "Alleen in de community-bron; niet geverifieerd — wordt niet geschreven."
+  }
+ ],
+ "documentation_sources": [
+  {
+   "title": "evcc-template 'victron-energy' (community, MIT-licentie), gebaseerd op de Victron GX Modbus-TCP-registerlijst",
+   "url": "https://github.com/evcc-io/evcc/blob/master/templates/definition/meter/victron-energy.yaml",
+   "license": "MIT",
+   "retrieved": "2026-10-14"
+  }
+ ],
+ "test_status": "COMMUNITY",
+ "requirements": [
+  "Modbus TCP aanzetten op het GX-apparaat (Services → Modbus TCP)."
+ ],
+ "known_limitations": [
+  "Alleen lezen: registers uit een community-bron, niet op hardware getest.",
+  "Unit-ID 100 = systeemwaarden (com.victronenergy.system).",
+  "ESS-regeling (setpoint/modus) is niet geïmplementeerd."
+ ],
+ "description": "Victron-systeemwaarden: net per fase, PV (AC + DC), batterijvermogen en SOC."
+}

@@ -19,6 +19,9 @@ function normalize(input) {
   return `${u.protocol}//${u.host}`;
 }
 
+const modeOf = (info) => (info.profile === "lab" ? "lab" : info.mode);
+const MODE_LABEL = { demo: "Demo Mode", lab: "Testomgeving", production: "productie" };
+
 async function probe(base, ms = 3000) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), ms);
@@ -46,7 +49,7 @@ function item(base, info) {
   title.textContent = info ? info.site : base;
   const sub = document.createElement("div");
   sub.className = "small muted";
-  sub.textContent = info ? `${base} · versie ${info.version} · ${info.mode === "demo" ? "Demo Mode" : "productie"}` : `${base} · niet bereikbaar`;
+  sub.textContent = info ? `${base} · versie ${info.version} · ${MODE_LABEL[modeOf(info)] || info.mode}` : `${base} · niet bereikbaar`;
   left.append(title, sub);
   const btn = document.createElement("button");
   btn.className = "btn primary";
@@ -97,7 +100,7 @@ async function startLocal(mode, hash) {
   $("startLocal").disabled = true;
   try {
     let info = await probe(LOCAL, 1500);
-    if (info && info.mode !== mode) {           // running in the other mode: restart
+    if (info && modeOf(info) !== mode) {        // running in another mode: restart
       localMsg("EMS wordt herstart in de gekozen modus…");
       await tauri.invoke("stop_local_server");
       info = null;
@@ -141,7 +144,7 @@ async function initLocal() {
   const info = await probe(LOCAL, 1500);
   if (info) {
     $("stopLocal").hidden = false;
-    localMsg(`Het EMS draait al op deze computer (${info.mode === "demo" ? "Demo" : "eigen installatie"}).`);
+    localMsg(`Het EMS draait al op deze computer (${{ demo: "Demo", lab: "Testomgeving" }[modeOf(info)] || "eigen installatie"}).`);
   }
   return true;
 }

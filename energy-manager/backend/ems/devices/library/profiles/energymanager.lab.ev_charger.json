@@ -1,0 +1,118 @@
+{
+ "profile_id": "energymanager.lab.ev_charger",
+ "driver_id": "library.modbus",
+ "manufacturer": "Energy Manager Testomgeving",
+ "model": "Virtuele laadpaal 11 kW",
+ "model_aliases": [
+  "EM-VEVSE-11"
+ ],
+ "device_category": "ev_charger",
+ "protocol": "modbus_tcp",
+ "connection_parameters": {
+  "port": 15505,
+  "unit_id": 1
+ },
+ "discovery_signatures": [
+  {
+   "kind": "modbus_string",
+   "address": 8,
+   "size": 8,
+   "equals": "EM-VEVSE-11",
+   "unit_id": 1
+  }
+ ],
+ "points": [
+  {
+   "name": "manufacturer",
+   "table": "holding",
+   "address": 0,
+   "type": "string",
+   "size": 8
+  },
+  {
+   "name": "model",
+   "table": "holding",
+   "address": 8,
+   "type": "string",
+   "size": 8
+  },
+  {
+   "name": "serial_number",
+   "table": "holding",
+   "address": 16,
+   "type": "string",
+   "size": 8
+  },
+  {
+   "name": "firmware_version",
+   "table": "holding",
+   "address": 24,
+   "type": "string",
+   "size": 4
+  },
+  {
+   "metric": "ev_power_w",
+   "table": "input",
+   "address": 0,
+   "type": "uint16"
+  },
+  {
+   "metric": "ev_connected",
+   "table": "input",
+   "address": 1,
+   "type": "uint16"
+  },
+  {
+   "metric": "ev_session_energy_kwh",
+   "table": "input",
+   "address": 2,
+   "type": "uint16",
+   "scale": 0.01
+  },
+  {
+   "metric": "ev_current_limit_a",
+   "table": "holding",
+   "address": 100,
+   "type": "uint16",
+   "scale": 0.1
+  }
+ ],
+ "writable_controls": [
+  {
+   "action": "ev_current",
+   "address": 100,
+   "type": "uint16",
+   "scale": 0.1,
+   "min": 0,
+   "max": 16,
+   "status": "SIMULATOR",
+   "expires_s": 900,
+   "expiry_register": 110
+  }
+ ],
+ "release_writes": [
+  {
+   "address": 100,
+   "value": 160
+  }
+ ],
+ "documentation_sources": [
+  {
+   "title": "Energy Manager Testomgeving — registerkaart virtuele apparaten (DEVICE_CATALOG.md, sectie Testomgeving)",
+   "license": "eigen documentatie"
+  }
+ ],
+ "test_status": "SIMULATOR_TESTED",
+ "simulator_only": true,
+ "default_params": {
+  "rated_current_a": 16,
+  "min_current_a": 6,
+  "max_current_a": 16,
+  "charge_mode": "smart",
+  "session_target_kwh": 20
+ },
+ "known_limitations": [
+  "Deze laadpaal meldt geen laadtoestand (SOC) van de auto: laden op kWh-doel."
+ ],
+ "description": "Gesimuleerde laadpaal zonder auto-SOC: laadstroom 0 (pauze) of 6–16 A."
+}

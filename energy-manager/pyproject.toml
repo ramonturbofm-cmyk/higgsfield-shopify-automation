@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "energy-manager"
-version = "0.5.0"
+version = "0.6.0"
 description = "Universeel, vooruitkijkend Energy Management System voor Raspberry Pi / Linux"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -25,6 +25,7 @@ dependencies = [
     "scipy>=1.11",
     "pyserial>=3.5",
     "aiomqtt>=2.0",
+    "pymodbus>=3.11,<3.12",
 ]
 
 [project.optional-dependencies]
@@ -45,6 +46,8 @@ where = ["backend"]
 [tool.setuptools.package-data]
 ems = ["CHANGELOG.md", "web/*", "web/css/*", "web/js/*.js", "web/js/views/*.js"]
 "ems.integrations.homewizard" = ["*.pem"]
+"ems.devices.library" = ["*.json", "profiles/*.json"]
+"ems.integrations.sunspec" = ["models/*.json", "models/LICENSE"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

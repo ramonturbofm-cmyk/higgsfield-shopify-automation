@@ -2,6 +2,59 @@
 
 (Zelfde inhoud als `backend/ems/CHANGELOG.md`, dat met het pakket wordt meegeleverd.)
 
+## 0.6.0 — apparatenbibliotheek, echte protocollen en Testomgeving (UNSIGNED TEST BUILD)
+
+**Apparaat toevoegen: kies uw apparaat, niet een protocol**
+- Nieuwe wizard: 15 soorten apparaten → automatisch zoeken · merk en model · via een gateway
+  (SG Ready-relais, Home Assistant, Shelly, Modbus-gateway) · handmatig (Expert) → gegevens → testen
+- Na de verbindingstest: identiteit van het apparaat (merk, model, serienummer, firmware) en een eerlijk
+  functierapport per functie (uitleesbaar / bestuurbaar / na inbedrijfstelling / configuratie nodig /
+  niet ondersteund / niet geverifieerd)
+- Velden per niveau (Eenvoudig / Uitgebreid / Expert); velden die alleen bij RTU of TCP horen worden verborgen;
+  geheime velden (wachtwoord, token) volgen uit de driver-metadata, niet uit de veldnaam
+- Datablad-standaarden van het gekozen profiel worden vooraf ingevuld (bijv. capaciteit, maximale stroom)
+- Herkend apparaat met nieuw IP-adres: "Adres bijwerken" (zelfde apparaat, historie en inbedrijfstelling blijven)
+
+**Apparatenbibliotheek (lokaal, gevalideerd)**
+- Drie lagen: transport (Modbus TCP/RTU via pymodbus, HTTP) → driver → modelprofiel (JSON, gevalideerd schema)
+- Profielen met bron (documentatie verplicht), teststatus, bekende beperkingen; schrijffuncties alleen met
+  status "officiële documentatie" of "simulator"; community- en eigen profielen zetten nooit schrijven aan
+- Importeren, versiebeheer en terugdraaien van eigen profielen (geen code, alleen JSON); nieuwe
+  schrijffuncties in een profiel zetten een apparaat terug naar schaduwmodus (opnieuw in bedrijf stellen)
+- Merk-/modellijst met eerlijke status: ondersteund, alleen uitlezen, via SG Ready, via Home Assistant,
+  nog niet ondersteund (met alternatief)
+
+**Nieuwe koppelingen**
+- SunSpec (officiële modellen 1, 101–103, 111–113, 120–124, 160, 201–204, 802): automatische modelketen,
+  uitlezen omvormer/meter/opslag; vermogensbegrenzing via model 123 met terugvaltijd (alleen als het apparaat
+  het aanbiedt)
+- Modbus-profieldriver met alle gangbare datatypes, byte-/woordvolgorde, blokuitlezing, terugleescontrole na
+  schrijven, geen herhaling van schrijfopdrachten bij onbekende uitkomst
+- Shelly Gen2+ (RPC): schakelen met minimale aan-/uittijd en terugmelding
+- SG Ready via twee netwerkrelais: veilige standaardstand 2, door de gebruiker gekozen toegestane standen,
+  watchdog op het relais, minimale tijd per stand; een verzoek, geen vermogensregeling
+- Home Assistant-brug (optioneel): entiteiten ophalen, meetwaarden; bediening alleen na bevestiging van
+  exclusieve regeling, via de gewone validatie
+- Zoeken op het netwerk: mDNS (HomeWizard, Shelly, Home Assistant), identiteit op een opgegeven adres
+  (HTTP, Modbus/SunSpec poort 502); geen poortscan; herkenning exact model / fabrikant / alleen protocol
+
+**Testomgeving (nieuwe startmodus naast Demo en Eigen installatie)**
+- Virtuele woning op deze computer met virtuele apparaten die echte protocollen spreken: SunSpec-omvormer,
+  thuisbatterij, warmtepomp en laadpaal (Modbus TCP), P1-meter (HomeWizard API v1), SG Ready-relais en
+  boilerrelais (Shelly RPC), plus een onbekend Modbus-apparaat
+- Zelf toevoegen via de wizard, inbedrijfstelling doorlopen tot volledige regeling (alleen voor virtuele
+  apparaten), storingen inschakelen (offline, Modbus-foutcode, vertraging) op de pagina Testomgeving
+- Duidelijk gemarkeerd ("Testomgeving") in de app en op het startscherm van de Windows-app
+
+**Verbeteringen en reparaties**
+- Bewerkformulier van een apparaat wordt niet meer gewist door live-updates
+- Laadpaal: laadtoestand (SOC) van de auto alleen als een bron die meldt; anders een doel in kWh per sessie
+- Fasebewakingstekst alleen als er echt actuele fasestromen zijn
+- Warmtepomp: uitleg toont planning als planning en meting als meting; nooit een stand vragen die het apparaat
+  (bijv. SG Ready zonder "blokkeren") niet toestaat
+- Alleen echte meters kunnen primaire netmeter worden (niet een warmtepomp op een Modbus-driver)
+- Volledige regeling op echte hardware blijft geblokkeerd zolang een profiel niet op hardware is getest
+
 ## 0.5.0 — prijzen, prognoses, accounts en cloudplatform (UNSIGNED TEST BUILD)
 
 **Marktgegevens, contract en prognoses gescheiden**

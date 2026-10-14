@@ -12,6 +12,7 @@ from ems.simulator.components import (
     SimEVCharger,
     SimHeatPump,
     SimPV,
+    SimSwitchLoad,
     phase_split,
 )
 from ems.simulator.environment import Environment, EnvironmentState, hours_since_epoch, smooth_noise
@@ -52,6 +53,7 @@ class SimulatedSite:
     meter: MeterState = field(default_factory=MeterState)
     totals: SiteTotals = field(default_factory=SiteTotals)
     env_state: EnvironmentState | None = None
+    lab: object | None = None              # LabDevices when this is the Testomgeving
 
     def __post_init__(self) -> None:
         self.now = self.start
@@ -68,6 +70,7 @@ class SimulatedSite:
         "SimEVCharger": ("connected", "soc_pct", "energy_kwh", "session_kwh"),
         "SimPV": ("energy_kwh", "curtailed_kwh"),
         "SimBaseLoad": ("energy_kwh",),
+        "SimSwitchLoad": ("tank_c", "energy_kwh", "relay_on"),
     }
 
     def carry_state_from(self, old: SimulatedSite) -> None:
@@ -103,6 +106,10 @@ class SimulatedSite:
             hp.update(self.env, t, env_state)
         for ev in self.of_type(SimEVCharger):
             ev.update(self.env, t)
+        for sl in self.of_type(SimSwitchLoad):
+            sl.update(self.env, t)
+        if self.lab is not None:
+            self.lab.expire(t)
 
         batteries: list[SimBattery] = self.of_type(SimBattery)
         non_battery = sum(c.power_w() for c in self.components.values() if not isinstance(c, SimBattery))

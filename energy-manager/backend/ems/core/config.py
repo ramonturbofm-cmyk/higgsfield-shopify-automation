@@ -40,6 +40,10 @@ class RuntimeConfig(_Base):
     mode: Literal["production", "demo"] = setting(
         "production", label="Bedrijfsmodus", level="advanced",
         help="'demo' draait een complete gesimuleerde woning; 'production' werkt alleen met echte apparaten.")
+    demo_profile: Literal["home", "lab"] = setting(
+        "home", label="Soort demo", level="expert",
+        help="'home': complete, al ingerichte demowoning. 'lab': Testomgeving — virtuele apparaten die u zelf via de "
+             "apparatenwizard en echte protocollen (Modbus, SunSpec, HTTP) toevoegt.")
     demo_speed: float = setting(1.0, label="Demo-snelheid", level="expert", gt=0, le=120,
                                 help="1 = realtime; hoger = versneld afspelen van de demowoning.")
     simulation_mode: bool = setting(

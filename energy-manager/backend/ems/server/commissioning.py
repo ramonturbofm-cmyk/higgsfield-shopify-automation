@@ -48,15 +48,28 @@ def driver_facts(rt, device_id: str) -> dict:
             info = drv._link().devices.get(drv.remote_id) or {}
         except Exception:
             info = {}
-    simulated = bool(manifest and manifest.simulated)
+    mock = bool(manifest and manifest.simulated)                  # Demo mock driver (no network at all)
+    # Library drivers decide per instance (profile): documented writes, hardware proof, test environment.
+    lab = bool(drv is not None and hasattr(drv, "simulated_target") and drv.simulated_target())
+    simulated = mock or lab
+    per_instance = drv is not None and hasattr(drv, "write_documented")
     writes = bool(info.get("write_capable")) if remote else bool(manifest and (manifest.write_capable or simulated))
-    documented = bool(info.get("documented", info.get("write_capable"))) if remote else \
-        bool(manifest and (simulated or (manifest.write_capable and manifest.documentation)))
+    if remote:
+        documented = bool(info.get("documented", info.get("write_capable")))
+    elif per_instance:
+        documented = simulated or bool(manifest.write_capable and drv.write_documented())
+    else:
+        documented = bool(manifest and (simulated or (manifest.write_capable and manifest.documentation)))
     controls = [] if drv is None else sorted(c.value for c in drv.device_capabilities() if c.value.startswith("control_"))
-    verified = bool(info.get("verified")) if remote else bool(manifest and (manifest.verified or simulated))
-    return {"remote": remote, "simulated": simulated, "writes": writes, "documented": documented,
-            "controls": controls, "verified": verified,
-            "documentation": None if manifest is None else manifest.documentation}
+    if remote:
+        verified = bool(info.get("verified"))
+    elif per_instance:
+        verified = simulated or bool(drv.hardware_verified())
+    else:
+        verified = bool(manifest and (manifest.verified or simulated))
+    doc = drv.documentation_ref() if per_instance else (None if manifest is None else manifest.documentation)
+    return {"remote": remote, "simulated": simulated, "mock": mock, "lab": lab, "writes": writes,
+            "documented": documented, "controls": controls, "verified": verified, "documentation": doc}
 
 
 def node_level_problem(rt, device_id: str, level: str) -> str | None:
@@ -87,7 +100,7 @@ def build_view(rt, device_id: str) -> dict:
     shadow_seen = bool(shadow_since and decision and decision.get("ts", "") >= shadow_since
                        and decision.get("outcome") in ("shadow", "skipped", "dry_run"))
     missing = missing_control_params(cfg.category, cfg.params)
-    reachable = f["simulated"] or bool(test and test.get("reachable"))
+    reachable = f["mock"] or bool(test and test.get("reachable"))
 
     steps = [
         {"id": "connection", "label": "Verbindingstest geslaagd", "done": reachable,
@@ -95,15 +108,18 @@ def build_view(rt, device_id: str) -> dict:
         {"id": "controls", "label": "Bestuurbare functies aanwezig", "done": bool(f["controls"]),
          "detail": ", ".join(CAPABILITY_LABELS_NL.get(Capability(c), c) for c in f["controls"]) or "alleen meten"},
         {"id": "driver", "label": "Driver schrijft volgens documentatie", "done": f["writes"] and f["documented"],
-         "detail": "Demo (gesimuleerd)" if f["simulated"] else (f["documentation"] or "geen schrijvende driver")},
+         "detail": "Testomgeving (virtueel apparaat)" if f["lab"] else "Demo (gesimuleerd)" if f["mock"]
+         else (f["documentation"] or "geen schrijvende driver")},
         {"id": "safety_params", "label": f"Veiligheidsinstellingen {TYPE_SCHEMAS[cfg.category].label.lower()}",
          "done": not missing, "detail": ("ontbreekt: " + ", ".join(missing)) if missing else "volledig"},
         {"id": "shadow", "label": "Schaduwmodus waargenomen (EMS zou …)", "done": shadow_seen,
          "detail": f"sinds {shadow_since}" if shadow_since else "nog niet in schaduwmodus geweest"},
         {"id": "write_test", "label": "Schrijftest geslaagd", "done": bool(write_test and write_test.get("ok")),
          "detail": None if write_test is None else write_test.get("detail")},
-        {"id": "hardware_verified", "label": "Driver bewezen op echte hardware (vereist voor volledige regeling)",
-         "done": f["verified"], "detail": "Demo (gesimuleerd)" if f["simulated"] else (
+        {"id": "hardware_verified", "label": "Virtueel apparaat — volledige regeling alleen in de Test-/Demo-omgeving"
+         if f["simulated"] else "Driver bewezen op echte hardware (vereist voor volledige regeling)",
+         "done": f["verified"],
+         "detail": "Testomgeving (virtueel apparaat)" if f["lab"] else "Demo (gesimuleerd)" if f["mock"] else (
              "getest" if f["verified"] else "nog niet met echte hardware getest — volledige regeling geblokkeerd")},
     ]
     done = {s["id"]: s["done"] for s in steps}

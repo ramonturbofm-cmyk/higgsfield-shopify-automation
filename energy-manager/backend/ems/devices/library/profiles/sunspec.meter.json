@@ -1,0 +1,37 @@
+{
+ "profile_id": "sunspec.meter",
+ "driver_id": "library.sunspec",
+ "manufacturer": "SunSpec-compatibel",
+ "model": "Energiemeter (SunSpec-modellen 201–204)",
+ "device_category": "smart_meter",
+ "supported_roles": [
+  "energy_meter"
+ ],
+ "protocol": "sunspec",
+ "connection_parameters": {
+  "port": 502,
+  "unit_id": 1
+ },
+ "discovery_signatures": [
+  {
+   "kind": "sunspec"
+  }
+ ],
+ "capabilities": [
+  "read_grid_power",
+  "read_grid_phases",
+  "read_grid_energy"
+ ],
+ "documentation_sources": [
+  {
+   "title": "SunSpec Information Model Specification; officiële modeldefinities",
+   "url": "https://github.com/sunspec/models",
+   "license": "Apache-2.0"
+  }
+ ],
+ "test_status": "UNVERIFIED",
+ "known_limitations": [
+  "Tekenconventie van het netvermogen verschilt per apparaat; controleer met de verbindingstest (Expert: 'teken omdraaien')."
+ ],
+ "description": "SunSpec-meter (vaak via de omvormer/datamanager bereikbaar)."
+}

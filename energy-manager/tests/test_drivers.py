@@ -13,7 +13,8 @@ def test_registry_discovers_mock_drivers():
     ids = {d.manifest.driver_id for d in registry.list()}
     assert {"mock.smart_meter", "mock.pv_inverter", "mock.battery", "mock.heat_pump", "mock.ev_charger"} <= ids
     battery = {d.manifest.driver_id for d in registry.list(DeviceCategory.BATTERY)}
-    assert battery == {"mock.battery", "generic.modbus_tcp", "generic.http_json", "generic.mqtt", "node.remote"}
+    assert battery == {"mock.battery", "generic.modbus_tcp", "generic.http_json", "generic.mqtt", "node.remote",
+                       "library.modbus", "library.sunspec", "homeassistant.entities"}
     with pytest.raises(KeyError, match="beschikbaar"):
         registry.get("vendor.does_not_exist")
 
@@ -34,8 +35,9 @@ def test_all_manifests_are_honest():
     for drv in registry.list():
         m = drv.manifest
         assert m.categories
-        # Generic drivers claim nothing up front: capabilities come only from a validated mapping.
-        assert m.capabilities or m.driver_id.startswith("generic.")
+        # Generic, library and bridge drivers claim nothing up front: capabilities come only from a validated
+        # mapping or a validated device profile.
+        assert m.capabilities or m.driver_id.startswith(("generic.", "library.", "homeassistant."))
         if m.verified:
             assert m.documentation, f"{m.driver_id}: verified driver needs a documentation source"
 

@@ -74,6 +74,7 @@ def _err(exc: Exception, code: int = 422) -> HTTPException:
 async def system_info(rt: EMSRuntime = Depends(get_runtime)) -> dict:
     users = await asyncio.to_thread(rt.db.count_users)
     return {"product": "Energy Manager", "version": __version__, "mode": rt.config.runtime.mode,
+            "profile": "lab" if rt.lab_mode else ("demo" if rt.demo else "production"),
             "site": rt.config.site.name, "setup_required": users == 0,
             "demo_login": {"username": "demo", "password": "demo"} if rt.demo else None}
 

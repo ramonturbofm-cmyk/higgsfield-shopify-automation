@@ -1,0 +1,208 @@
+{
+ "profile_id": "energymanager.lab.heat_pump",
+ "driver_id": "library.modbus",
+ "manufacturer": "Energy Manager Testomgeving",
+ "model": "Virtuele warmtepomp",
+ "model_aliases": [
+  "EM-VWP-1"
+ ],
+ "device_category": "heat_pump",
+ "protocol": "modbus_tcp",
+ "connection_parameters": {
+  "port": 15503,
+  "unit_id": 1
+ },
+ "discovery_signatures": [
+  {
+   "kind": "modbus_string",
+   "address": 8,
+   "size": 8,
+   "equals": "EM-VWP-1",
+   "unit_id": 1
+  }
+ ],
+ "points": [
+  {
+   "name": "manufacturer",
+   "table": "holding",
+   "address": 0,
+   "type": "string",
+   "size": 8
+  },
+  {
+   "name": "model",
+   "table": "holding",
+   "address": 8,
+   "type": "string",
+   "size": 8
+  },
+  {
+   "name": "serial_number",
+   "table": "holding",
+   "address": 16,
+   "type": "string",
+   "size": 8
+  },
+  {
+   "name": "firmware_version",
+   "table": "holding",
+   "address": 24,
+   "type": "string",
+   "size": 4
+  },
+  {
+   "metric": "hp_power_w",
+   "table": "input",
+   "address": 0,
+   "type": "uint16"
+  },
+  {
+   "metric": "hp_thermal_power_w",
+   "table": "input",
+   "address": 1,
+   "type": "uint16"
+  },
+  {
+   "metric": "indoor_temp_c",
+   "table": "input",
+   "address": 2,
+   "type": "int16",
+   "scale": 0.1
+  },
+  {
+   "metric": "outdoor_temp_c",
+   "table": "input",
+   "address": 3,
+   "type": "int16",
+   "scale": 0.1
+  },
+  {
+   "metric": "flow_temp_c",
+   "table": "input",
+   "address": 4,
+   "type": "int16",
+   "scale": 0.1
+  },
+  {
+   "metric": "return_temp_c",
+   "table": "input",
+   "address": 5,
+   "type": "int16",
+   "scale": 0.1
+  },
+  {
+   "metric": "dhw_temp_c",
+   "table": "input",
+   "address": 6,
+   "type": "int16",
+   "scale": 0.1
+  },
+  {
+   "metric": "hp_cop",
+   "table": "input",
+   "address": 7,
+   "type": "uint16",
+   "scale": 0.01
+  },
+  {
+   "metric": "hp_compressor_on",
+   "table": "input",
+   "address": 8,
+   "type": "uint16"
+  },
+  {
+   "name": "compressor_frequency_hz",
+   "table": "input",
+   "address": 9,
+   "type": "uint16",
+   "unit": "Hz"
+  },
+  {
+   "name": "defrost_active",
+   "table": "input",
+   "address": 10,
+   "type": "uint16",
+   "enum": {
+    "0": "nee",
+    "1": "ja"
+   }
+  },
+  {
+   "name": "error_code",
+   "table": "input",
+   "address": 11,
+   "type": "uint16"
+  },
+  {
+   "metric": "hp_mode",
+   "table": "holding",
+   "address": 100,
+   "type": "uint16",
+   "enum": {
+    "1": "normal",
+    "2": "boost",
+    "3": "eco"
+   }
+  },
+  {
+   "metric": "hp_setpoint_c",
+   "table": "holding",
+   "address": 101,
+   "type": "int16",
+   "scale": 0.1
+  }
+ ],
+ "writable_controls": [
+  {
+   "action": "hp_mode",
+   "address": 100,
+   "type": "uint16",
+   "values": {
+    "normal": 1,
+    "boost": 2,
+    "eco": 3
+   },
+   "status": "SIMULATOR",
+   "expires_s": 900,
+   "expiry_register": 110,
+   "note": "Bedrijfsverzoek; de virtuele warmtepomp houdt zelf minimale looptijden en vorstbeveiliging aan."
+  },
+  {
+   "action": "temp_setpoint",
+   "address": 101,
+   "type": "int16",
+   "scale": 0.1,
+   "min": 15,
+   "max": 24,
+   "status": "SIMULATOR",
+   "expires_s": 900,
+   "expiry_register": 110
+  }
+ ],
+ "release_writes": [
+  {
+   "address": 100,
+   "value": 1
+  }
+ ],
+ "safety_constraints": {
+  "min_command_interval_s": 0
+ },
+ "documentation_sources": [
+  {
+   "title": "Energy Manager Testomgeving — registerkaart virtuele apparaten (DEVICE_CATALOG.md, sectie Testomgeving)",
+   "license": "eigen documentatie"
+  }
+ ],
+ "test_status": "SIMULATOR_TESTED",
+ "simulator_only": true,
+ "default_params": {
+  "heat_loss_w_per_k": 150,
+  "thermal_capacity_kwh_per_k": 7.5,
+  "thermal_max_w": 6000
+ },
+ "known_limitations": [
+  "Alleen voor de Testomgeving op deze computer."
+ ],
+ "description": "Gesimuleerde warmtepomp met Modbus TCP: meetwaarden, bedrijfsmodus en setpoint met teruglezen en terugvaltijd."
+}

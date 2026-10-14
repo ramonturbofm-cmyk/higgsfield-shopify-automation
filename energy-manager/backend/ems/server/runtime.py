@@ -55,7 +55,7 @@ from ems.prices.service import PriceService
 from ems.prices.settings import build_provider
 from ems.security.auth import SessionRegistry, TokenIssuer, hash_password
 from ems.security.secrets import SecretStore
-from ems.server.demo import DEMO_CONFIG, PRODUCTION_DEFAULT
+from ems.server.demo import DEMO_CONFIG, LAB_CONFIG, PRODUCTION_DEFAULT
 from ems.server.history import HistoryRecorder
 from ems.server.logbuffer import RingBufferHandler
 from ems.server.notifications import NotificationService
@@ -98,9 +98,12 @@ def _jsonable(value: Any) -> Any:
 
 class EMSRuntime:
     def __init__(self, data_dir: str | Path, *, mode: str | None = None, db_url: str | None = None,
-                 registry: DriverRegistry = default_registry, env: dict[str, str] | None = None) -> None:
+                 registry: DriverRegistry = default_registry, env: dict[str, str] | None = None,
+                 profile: str | None = None) -> None:
         self.data_dir = Path(data_dir)
         self.mode_override = mode
+        self.profile_override = profile            # "lab" = Testomgeving
+        self.lab = None
         self.db_url = db_url or os.environ.get("EMS_DATABASE_URL") or f"sqlite:///{self.data_dir / 'ems.db'}"
         self.registry = registry
         self.env = dict(os.environ) if env is None else env
@@ -125,6 +128,8 @@ class EMSRuntime:
         logging.getLogger().addHandler(self.log_buffer)
         if not self.config_path.exists():
             default = DEMO_CONFIG if (self.mode_override or self.env.get("EMS_MODE")) == "demo" else PRODUCTION_DEFAULT
+            if self.profile_override == "lab":
+                default = LAB_CONFIG
             self.config_path.write_text(yaml.safe_dump(default, sort_keys=False, allow_unicode=True), encoding="utf-8")
         self.config = self._load_config()
         self.db = Database(self.db_url)
@@ -156,9 +161,17 @@ class EMSRuntime:
         cfg = load_config(self.config_path, env=self.env)
         if self.mode_override:
             cfg.runtime.mode = self.mode_override
+        if self.profile_override == "lab":
+            cfg.runtime.demo_profile = "lab"
         if cfg.runtime.mode == "demo":
             cfg.runtime.simulation_mode = True
+        else:
+            cfg.runtime.demo_profile = "home"       # the Testomgeving never exists in production
         return cfg
+
+    @property
+    def lab_mode(self) -> bool:
+        return self.demo and self.config.runtime.demo_profile == "lab"
 
     @property
     def demo(self) -> bool:
@@ -174,6 +187,12 @@ class EMSRuntime:
             self.site = build_site(cfg, start)
             if old_site is not None:
                 self.site.carry_state_from(old_site)
+            if self.lab_mode:
+                if self.lab is None:
+                    from ems.simulator.lab import LabDevices
+                    self.lab = LabDevices(lambda: self.site)
+                    await self.lab.start()
+                self.site.lab = self.lab
             self.site.advance(0)
         else:
             self.clock = SystemClock()
@@ -252,6 +271,12 @@ class EMSRuntime:
             await self.nodes.stop()
         except Exception:
             log.exception("node service stop failed")
+        if self.lab is not None:
+            try:
+                await self.lab.stop()
+            except Exception:
+                log.exception("lab stop failed")
+            self.lab = None
         logging.getLogger().removeHandler(self.log_buffer)
         self.db.close()
 
@@ -479,6 +504,7 @@ class EMSRuntime:
         sel = self.engine.grid_selection
         out: dict[str, Any] = {
             "timestamp": now.isoformat(), "mode": self.config.runtime.mode, "site": self.config.site.name,
+            "profile": "lab" if self.lab_mode else self.config.runtime.mode,
             "failsafe": {"active": self.engine.failsafe_active, "reason": self.engine.failsafe_reason},
             "price": {"spot": br.spot, "import": br.import_price, "export": br.export_price},
             "grid_meter": {**sel.to_dict(), "available": False, "age_s": None},
@@ -866,6 +892,8 @@ class EMSRuntime:
         snap = self.engine.last_snapshot
         return {
             "version": __version__, "mode": self.config.runtime.mode, "site": self.config.site.name,
+            "profile": "lab" if self.lab_mode else self.config.runtime.mode,
+            "lab": None if not self.lab_mode or self.lab is None else self.lab.overview(),
             "uptime_s": round(time.time() - self.started_at), "running": self.running,
             "gate_mode": self.engine.gate.mode.value, "controller": self.engine.controller.name,
             "failsafe": {"active": self.engine.failsafe_active, "reason": self.engine.failsafe_reason,

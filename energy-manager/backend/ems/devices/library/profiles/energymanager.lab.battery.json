@@ -1,0 +1,180 @@
+{
+ "profile_id": "energymanager.lab.battery",
+ "driver_id": "library.modbus",
+ "manufacturer": "Energy Manager Testomgeving",
+ "model": "Virtuele thuisbatterij 10 kWh",
+ "model_aliases": [
+  "EM-VBAT-10"
+ ],
+ "device_category": "battery",
+ "protocol": "modbus_tcp",
+ "connection_parameters": {
+  "port": 15504,
+  "unit_id": 1
+ },
+ "discovery_signatures": [
+  {
+   "kind": "modbus_string",
+   "address": 8,
+   "size": 8,
+   "equals": "EM-VBAT-10",
+   "unit_id": 1
+  }
+ ],
+ "points": [
+  {
+   "name": "manufacturer",
+   "table": "holding",
+   "address": 0,
+   "type": "string",
+   "size": 8
+  },
+  {
+   "name": "model",
+   "table": "holding",
+   "address": 8,
+   "type": "string",
+   "size": 8
+  },
+  {
+   "name": "serial_number",
+   "table": "holding",
+   "address": 16,
+   "type": "string",
+   "size": 8
+  },
+  {
+   "name": "firmware_version",
+   "table": "holding",
+   "address": 24,
+   "type": "string",
+   "size": 4
+  },
+  {
+   "metric": "battery_power_w",
+   "table": "input",
+   "address": 0,
+   "type": "int16"
+  },
+  {
+   "metric": "battery_soc_pct",
+   "table": "input",
+   "address": 1,
+   "type": "uint16",
+   "scale": 0.1
+  },
+  {
+   "metric": "battery_temperature_c",
+   "table": "input",
+   "address": 2,
+   "type": "int16",
+   "scale": 0.1
+  },
+  {
+   "metric": "battery_max_soc_pct",
+   "table": "input",
+   "address": 3,
+   "type": "uint16"
+  },
+  {
+   "name": "capacity_wh",
+   "table": "input",
+   "address": 4,
+   "type": "uint32"
+  },
+  {
+   "name": "bms_state",
+   "table": "input",
+   "address": 6,
+   "type": "uint16",
+   "enum": {
+    "0": "ok",
+    "1": "waarschuwing",
+    "2": "storing"
+   }
+  },
+  {
+   "metric": "battery_mode",
+   "table": "holding",
+   "address": 100,
+   "type": "uint16",
+   "enum": {
+    "0": "auto",
+    "1": "standby",
+    "2": "remote"
+   }
+  }
+ ],
+ "writable_controls": [
+  {
+   "action": "battery_auto",
+   "address": 100,
+   "type": "uint16",
+   "fixed_value": 0,
+   "status": "SIMULATOR"
+  },
+  {
+   "action": "battery_standby",
+   "address": 100,
+   "type": "uint16",
+   "fixed_value": 1,
+   "status": "SIMULATOR"
+  },
+  {
+   "action": "battery_charge",
+   "address": 101,
+   "type": "int16",
+   "min": 0,
+   "max": 5000,
+   "status": "SIMULATOR",
+   "expires_s": 900,
+   "expiry_register": 110
+  },
+  {
+   "action": "battery_discharge",
+   "address": 101,
+   "type": "int16",
+   "scale": -1,
+   "min": 0,
+   "max": 5000,
+   "status": "SIMULATOR",
+   "expires_s": 900,
+   "expiry_register": 110,
+   "readback": {
+    "name": "setpoint",
+    "table": "holding",
+    "address": 101,
+    "type": "int16",
+    "scale": -1
+   }
+  },
+  {
+   "action": "battery_soc_limit",
+   "address": 102,
+   "type": "uint16",
+   "min": 50,
+   "max": 100,
+   "status": "SIMULATOR"
+  }
+ ],
+ "release_writes": [
+  {
+   "address": 100,
+   "value": 0
+  }
+ ],
+ "documentation_sources": [
+  {
+   "title": "Energy Manager Testomgeving — registerkaart virtuele apparaten (DEVICE_CATALOG.md, sectie Testomgeving)",
+   "license": "eigen documentatie"
+  }
+ ],
+ "test_status": "SIMULATOR_TESTED",
+ "simulator_only": true,
+ "default_params": {
+  "capacity_kwh": 10,
+  "max_charge_w": 5000,
+  "max_discharge_w": 5000
+ },
+ "description": "Gesimuleerde batterij: vermogen instellen (laden/ontladen), stand-by, automatisch, maximale SOC."
+}

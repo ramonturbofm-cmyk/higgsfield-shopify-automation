@@ -25,6 +25,7 @@ from ems.devices.capabilities import (
     validate_params,
 )
 from ems.gridmeter.assign import PrimaryMeterConflict, claim_primary
+from ems.gridmeter.meter import METER_CATEGORIES
 from ems.integrations.homewizard import client as hw
 from ems.integrations.homewizard.discovery import discover
 from ems.security.auth import Principal
@@ -94,8 +95,8 @@ def _device_view(rt: EMSRuntime, cfg: DeviceConfig) -> dict:
     drv = None if md is None else md.driver
     sel = rt.engine.grid_selection
     data = cfg.model_dump(mode="json")
-    data["connection"] = {k: ("********" if _is_secret_key(k) and v else v)
-                          for k, v in data["connection"].items()}
+    secret = secret_keys(rt, cfg.driver)
+    data["connection"] = {k: ("********" if k in secret and v else v) for k, v in data["connection"].items()}
     data.update({
         "status": "disabled" if not cfg.enabled else (st.status.value if st else "unknown"),
         "error": None if st is None else st.error,
@@ -108,9 +109,24 @@ def _device_view(rt: EMSRuntime, cfg: DeviceConfig) -> dict:
         "last_decision": rt.engine.last_decisions.get(cfg.id),
         "capabilities": [] if drv is None else capability_view(drv.device_capabilities()),
         "missing_control_params": missing_control_params(cfg.category, cfg.params),
+        "is_meter": bool(drv is not None and type(drv).manifest.grid_meter_kind)
+        and cfg.category.value in METER_CATEGORIES,
+        "profile": _profile_summary(rt, cfg.connection.get("profile_id")),
+        "virtual": bool(drv is not None and hasattr(drv, "simulated_target") and drv.simulated_target()),
     })
     data.update(_control_view(rt, cfg.id))
     return data
+
+
+def _profile_summary(rt: EMSRuntime, profile_id: str | None) -> dict | None:
+    if not profile_id:
+        return None
+    from ems.devices.library.catalog import catalog
+    prof = catalog(rt.data_dir / "profiles").profiles.get(profile_id)
+    if prof is None:
+        return {"profile_id": profile_id, "missing": True}
+    return {"profile_id": prof.profile_id, "manufacturer": prof.manufacturer, "model": prof.model,
+            "test_status": prof.test_status, "source": prof.source, "known_limitations": prof.known_limitations}
 
 
 def _control_view(rt: EMSRuntime, device_id: str) -> dict:
@@ -192,16 +208,23 @@ def _check_driver(rt: EMSRuntime, driver: str, category: DeviceCategory):
     return cls
 
 
-def _is_secret_key(key: str) -> bool:
-    return key != "token_ref" and ("password" in key or "token" in key)
+def secret_keys(rt: EMSRuntime, driver_id: str) -> set[str]:
+    """Connection fields marked ``secret: True`` in the driver's connection schema (explicit metadata,
+    not guessed from the field name)."""
+    try:
+        schema = rt.registry.get(driver_id).manifest.connection_schema
+    except KeyError:
+        return set()
+    return {k for k, s in schema.items() if isinstance(s, dict) and s.get("secret")}
 
 
-def _store_connection_secrets(rt: EMSRuntime, dev_id: str, conn: dict[str, Any]) -> dict[str, Any]:
-    """Typed passwords/tokens go to the encrypted SecretStore; the YAML only keeps a reference.
+def _store_connection_secrets(rt: EMSRuntime, dev_id: str, conn: dict[str, Any], driver_id: str) -> dict[str, Any]:
+    """Secret fields go to the encrypted SecretStore; the YAML only keeps a reference.
     ``${VAR}`` references (.env) and existing ``secret:`` references are kept as they are."""
     out = dict(conn)
+    secret = secret_keys(rt, driver_id)
     for k, v in conn.items():
-        if _is_secret_key(k) and isinstance(v, str) and v and v != "********" \
+        if k in secret and isinstance(v, str) and v and v != "********" \
                 and not v.startswith(("${", "secret:")):
             ref = f"device.{dev_id}.{k}"
             rt.secrets.set(ref, v)
@@ -217,10 +240,12 @@ async def add_device(body: DeviceIn, p: Principal = Depends(installer), rt: EMSR
     dev_id = body.id or _slug(body.name, existing)
     if dev_id in existing:
         raise HTTPException(409, f"apparaat-id {dev_id!r} bestaat al")
-    _check_params(body.category, body.params)
+    params = {**_profile_defaults(rt, body.connection), **body.params}
+    _check_params(body.category, params)
     dev = {"id": dev_id, "name": body.name, "category": body.category.value, "driver": body.driver,
-           "phase": _phase(body.category, body.phase), "connection": _store_connection_secrets(rt, dev_id, body.connection),
-           "params": body.params,
+           "phase": _phase(body.category, body.phase),
+           "connection": _store_connection_secrets(rt, dev_id, body.connection, body.driver),
+           "params": params,
            "control_level": "full" if cls.manifest.simulated else "read_only"}
     data["devices"].append(dev)
     if body.primary_grid_meter:
@@ -245,6 +270,16 @@ def _phase(category: DeviceCategory, phase: str | None) -> str:
     if phase == "NA":
         raise HTTPException(422, "kies op welke fase(n) dit apparaat is aangesloten")
     return phase
+
+
+def _profile_defaults(rt: EMSRuntime, connection: dict) -> dict:
+    """Datasheet defaults of the chosen device profile (the user's own values always win)."""
+    pid = connection.get("profile_id")
+    if not pid:
+        return {}
+    from ems.devices.library.catalog import catalog
+    prof = catalog(rt.data_dir / "profiles").profiles.get(pid)
+    return dict(prof.default_params) if prof else {}
 
 
 def _check_params(category: DeviceCategory, params: dict) -> None:
@@ -281,7 +316,7 @@ async def update_device(device_id: str, body: DevicePatch, p: Principal = Depend
                         for kk, vv in v.items():
                             if vv == "********":
                                 d[k][kk] = rt.config.device(device_id).connection.get(kk)
-                        d[k] = _store_connection_secrets(rt, device_id, d[k])
+                        d[k] = _store_connection_secrets(rt, device_id, d[k], d["driver"])
                 else:
                     d[k] = v
     try:
@@ -411,7 +446,7 @@ async def set_primary(device_id: str, replace: bool = False, p: Principal = Depe
                       rt: EMSRuntime = Depends(get_runtime)):
     cfg = _get(rt, device_id)
     cls = rt.registry.get(cfg.driver)
-    if cls.manifest.grid_meter_kind is None and cfg.driver != "node.remote":
+    if (cls.manifest.grid_meter_kind is None or cfg.category.value not in METER_CATEGORIES) and cfg.driver != "node.remote":
         raise HTTPException(422, "dit apparaat kan geen netmeting leveren")
     data = rt.config.model_dump(mode="json")
     try:

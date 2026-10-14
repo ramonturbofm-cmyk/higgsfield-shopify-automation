@@ -194,7 +194,9 @@ class OptimizingController(Controller):
             min_a, max_a = float(dcfg.params.get("min_current_a", 6)), float(dcfg.params.get("max_current_a", 16))
             target = 0.0 if planned < min_a * w_per_a * 0.9 else min(max_a, max(min_a, math.floor(planned / w_per_a)))
             reasons = [f"Slim laden: gepland {planned / 1000:.1f} kW bij importprijs {_eur(slot['import_price'])}/kWh",
-                       f"Vertrek {dcfg.params.get('departure', '07:30')}, doel {dcfg.params.get('target_soc_pct', 80)}%"]
+                       f"Vertrek {dcfg.params.get('departure', '07:30')}, doel "
+                       + (f"{dcfg.params.get('target_soc_pct', 80)}%" if st.get(Metric.EV_SOC_PCT) is not None
+                          else f"{dcfg.params.get('session_target_kwh', 0)} kWh deze sessie")]
             if snap.features.get("phase_balancing", {}).get("available"):
                 allowed = self.fallback._allowed_current(snap, cfg, dcfg.phase, phases,
                                                          float(st.get(Metric.EV_POWER_W, 0) or 0), max_a)
@@ -222,15 +224,25 @@ class OptimizingController(Controller):
             why = {"boost": "goedkope stroom: woning wordt binnen de comfortgrenzen voorverwarmd",
                    "eco": "dure stroom: verwarming tijdelijk teruggeschaald (binnen minimumtemperatuur)"}.get(
                        mode, "normale verwarming")
+            allowed = ctx.modes.get(st.device_id)
+            if allowed is not None and mode not in allowed:
+                # e.g. SG Ready with 'eco' (blocking) not enabled by the user: never ask for a state it refused.
+                why = f"geplande stand '{mode}' is voor dit apparaat niet toegestaan; normale verwarming"
+                mode = "normal" if "normal" in allowed else (allowed[0] if allowed else "normal")
             prev = self._hp_mode.get(st.device_id)
             if prev and prev[0] != mode and snap.timestamp - prev[1] < HP_MIN_DWELL:
                 mode, why = prev[0], f"modus vastgehouden (minimaal {HP_MIN_DWELL.seconds // 60} min tussen wisselingen)"
             elif prev is None or prev[0] != mode:
                 self._hp_mode[st.device_id] = (mode, snap.timestamp)
+            # Planned figures are labelled as planned: the mode is a *request*; the heat pump decides its own
+            # compressor power. What it really does is the measured power and the mode it reports back.
             reasons = [why, f"Importprijs {_eur(slot['import_price'])}/kWh",
-                       f"Gepland vermogen {planned:.0f} W (normaal {ref:.0f} W)"]
+                       f"Planning (schatting): {planned:.0f} W elektrisch (zonder sturing ± {ref:.0f} W)"]
             if target_c is not None:
-                reasons.append(f"Verwachte binnentemperatuur {target_c:.1f} °C".replace(".", ","))
+                reasons.append(f"Verwachte binnentemperatuur (planning) {target_c:.1f} °C".replace(".", ","))
+            measured = st.get(Metric.HP_POWER_W)
+            if measured is not None:
+                reasons.append(f"Gemeten nu: {measured:.0f} W")
             out.append(Decision(Command(st.device_id, CommandAction.HP_MODE, mode), f"Warmtepomp {mode}", reasons,
                                 source=f"controller:{self.name}"))
         return out

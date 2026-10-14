@@ -47,3 +47,26 @@ PRODUCTION_DEFAULT = {
     "site": {"id": "home", "name": "Mijn woning"},
     "devices": [],
 }
+
+
+# Testomgeving: the simulated house has PV, battery, heat pump, EV charger and boiler, reachable as virtual
+# devices on 127.0.0.1 (see ems.simulator.lab). The EMS starts *without* devices: add them with the wizard.
+LAB_CONFIG = {
+    "version": 1,
+    "runtime": {"mode": "demo", "demo_profile": "lab", "simulation_mode": True, "dry_run": False, "demo_speed": 1.0},
+    "site": {"id": "testwoning", "name": "Testwoning (Testomgeving)", "latitude": 52.09, "longitude": 5.12,
+             "timezone": "Europe/Amsterdam", "annual_consumption_kwh": 3500},
+    "grid": {"phases": 3, "ampere_per_phase": 25, "max_import_kw": 17, "max_export_kw": 17},
+    "control": {"interval_s": 5},
+    "optimizer": {"interval_minutes": 5, "horizon_hours": 36},
+    "battery": {"min_soc": 10, "max_soc": 95, "reserve_soc": 15, "degradation_cost_per_kwh": 0.03,
+                "min_arbitrage_spread_eur": 0.05},
+    "heatpump": {"comfort_temperature": 21.0, "min_temperature": 20.5, "max_preheat_temperature": 22.0},
+    "strategy": {"profile": "lowest_cost", "export_mode": "smart", "export_price_threshold_eur": 0.0},
+    "tariff": {"contract_name": "Voorbeeld dynamisch contract (Testomgeving)", "supplier": "Voorbeeld",
+               "contract_type": "dynamic", "import_markup_eur_kwh": 0.02, "energy_tax_eur_kwh": 0.10, "vat_pct": 21,
+               "export_markup_eur_kwh": -0.02},
+    "prices": {"provider": "demo"},
+    "forecast": {"weather_provider": "demo"},
+    "devices": [],
+}

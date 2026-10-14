@@ -60,6 +60,7 @@ class HomeWizardP1Driver(DeviceDriver):
         connection_schema={
             "host": {"type": "string", "label_nl": "IP-adres", "required": True},
             "api": {"type": "string", "enum": ["v2", "v1"], "default": "v2", "label_nl": "API-versie"},
+            "port": {"type": "integer", "default": 80, "label_nl": "Poort (alleen API v1)", "level": "expert"},
             "serial": {"type": "string", "label_nl": "Serienummer (via ontdekken/koppelen)"},
             "token_ref": {"type": "string", "label_nl": "Token (versleuteld opgeslagen)", "readonly": True},
             "tls_verify": {"type": "boolean", "default": True, "label_nl": "Certificaat controleren"},
@@ -97,7 +98,7 @@ class HomeWizardP1Driver(DeviceDriver):
         await self.disconnect()
         try:
             if self.api == "v1":
-                self._v1 = HomeWizardV1Client(self.host)
+                self._v1 = HomeWizardV1Client(self.host, port=int(self.config.connection.get("port", 80)))
                 self.info = await self._v1.device_info()
             else:
                 token = self._token()
@@ -187,6 +188,11 @@ class HomeWizardP1Driver(DeviceDriver):
 
     async def release_control(self) -> None:
         return None
+
+    def simulated_target(self) -> bool:
+        """True only for the virtual P1 meter of the Testomgeving on this computer."""
+        host = str(self.config.connection.get("host", ""))
+        return host in ("127.0.0.1", "localhost") and getattr(self.context.simulator, "lab", None) is not None
 
     async def identify(self) -> None:
         if self._v2 is not None:

@@ -40,6 +40,10 @@ def build_site(config: EMSConfig, start: datetime, seed: int = 1,
         max_export_w=config.grid.effective_max_export_kw * 1000,
     )
     site.add(SimBaseLoad(id="__base_load__", annual_kwh=base_load_kwh, seed=seed))
+    if config.runtime.demo_profile == "lab":        # Testomgeving: the house has these devices physically
+        from ems.simulator.lab import lab_components
+        for comp in lab_components():
+            site.add(comp)
     for dev in config.devices:
         if not dev.enabled or not dev.driver.startswith("mock."):
             continue

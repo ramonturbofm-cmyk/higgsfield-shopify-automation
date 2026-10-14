@@ -22,6 +22,7 @@ class ControlContext:
     now: datetime
     capabilities: dict[str, frozenset[Capability]] = field(default_factory=dict)
     run_id: str = ""
+    modes: dict[str, list[str]] = field(default_factory=dict)   # heat-pump modes a device accepts (if known)
 
     def can(self, device_id: str, capability: Capability) -> bool:
         return capability in self.capabilities.get(device_id, frozenset())

@@ -41,6 +41,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--host", default=os.environ.get("EMS_HOST", "0.0.0.0"))
     s.add_argument("--port", type=int, default=int(os.environ.get("EMS_PORT", "8080")))
     s.add_argument("--demo", action="store_true", help="Demo Mode: complete gesimuleerde woning")
+    s.add_argument("--lab", action="store_true", help="Testomgeving: virtuele apparaten zelf toevoegen (Demo)")
     s.add_argument("--tls-cert")
     s.add_argument("--tls-key")
     s.add_argument("--log-level", default=os.environ.get("EMS_LOG_LEVEL", "info"))
@@ -70,7 +71,8 @@ def main(argv: list[str] | None = None) -> int:
         from ems.server.runtime import EMSRuntime
 
         setup_logging(args.log_level.upper(), json_output=os.environ.get("EMS_LOG_JSON", "1") == "1")
-        runtime = EMSRuntime(_data_dir(args.data_dir), mode="demo" if args.demo else None)
+        runtime = EMSRuntime(_data_dir(args.data_dir), mode="demo" if (args.demo or args.lab) else None,
+                             profile="lab" if args.lab else None)
         if not _port_free(args.host, args.port):
             print(f"Poort {args.port} is al in gebruik — draait Energy Manager al? (http://127.0.0.1:{args.port})",
                   file=sys.stderr)

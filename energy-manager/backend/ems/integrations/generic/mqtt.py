@@ -61,7 +61,7 @@ class GenericMQTTDriver(DeviceDriver):
             "host": {"type": "string", "label_nl": "MQTT-broker (IP/hostnaam)"},
             "port": {"type": "integer", "default": 1883, "label_nl": "Poort"},
             "username": {"type": "string", "default": "", "label_nl": "Gebruikersnaam (optioneel)"},
-            "password": {"type": "string", "default": "", "label_nl": "Wachtwoord (optioneel)"},
+            "password": {"type": "string", "default": "", "label_nl": "Wachtwoord (optioneel)", "secret": True},
             "tls": {"type": "boolean", "default": False, "label_nl": "TLS gebruiken"},
             "stale_after_s": {"type": "integer", "default": 60, "label_nl": "Waarde verouderd na (s)"},
             "values": {**VALUES_SCHEMA, "example": [{"metric": "grid_power_w", "topic": "meter/power", "path": "value"}]},

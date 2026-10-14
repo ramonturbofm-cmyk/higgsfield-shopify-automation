@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from ems import __version__
-from ems.api import routes_core, routes_devices, routes_more, routes_nodes
+from ems.api import routes_core, routes_devices, routes_library, routes_more, routes_nodes
 from ems.api.deps import CSRF_COOKIE, resolve_token, set_session_cookies
 from ems.core.config import ConfigError
 from ems.security.auth import LoginRateLimiter
@@ -75,11 +75,13 @@ def create_app(runtime: EMSRuntime, *, start_runtime: bool = True, loops: bool =
     app.include_router(routes_devices.router)
     app.include_router(routes_more.router)
     app.include_router(routes_nodes.router)
+    app.include_router(routes_library.router)
 
     @app.get("/healthz", include_in_schema=False)
     async def healthz():
         ok = runtime.running and not runtime.watchdog_tripped and runtime.db.ping()
-        return JSONResponse({"ok": ok, "version": __version__, "mode": runtime.config.runtime.mode},
+        return JSONResponse({"ok": ok, "version": __version__, "mode": runtime.config.runtime.mode,
+                             "profile": "lab" if runtime.lab_mode else runtime.config.runtime.mode},
                             status_code=200 if ok else 503)
 
     app.state.request_shutdown = None

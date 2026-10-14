@@ -249,8 +249,9 @@ class OptimizerService:
             batt = float(d.params.get("battery_kwh", _param(d.params, "battery_kwh", 60)))
             if soc is not None:
                 need = max(0.0, (float(d.params.get("target_soc_pct", 80)) - float(soc)) / 100 * batt)
-            else:
-                need = float(d.params.get("session_target_kwh", 0))
+            else:   # no vehicle SOC: plan the requested energy for this session, minus what is already charged
+                done = st.get(Metric.EV_SESSION_ENERGY_KWH) or 0.0
+                need = max(0.0, float(d.params.get("session_target_kwh", 0)) - float(done))
             depart = next_local_time(now, d.params.get("departure", "07:30"), tz)
             deadline = sum(1 for t in slots if t + timedelta(minutes=SLOT_MIN) <= depart)
             avail = [t < depart for t in slots]

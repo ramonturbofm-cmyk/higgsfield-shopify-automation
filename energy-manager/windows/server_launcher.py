@@ -6,7 +6,9 @@ Two executables are built from this file (same files, see EnergyManagerServer.sp
   EnergyManagerServer.exe    with a console window (troubleshooting)
 
 Options:
-  --demo / --production   choose the mode; remembered in %LOCALAPPDATA%\\EnergyManager\\mode.txt
+  --demo / --lab / --production
+                          choose the mode (--lab = Testomgeving: virtual devices over real protocols);
+                          remembered in %LOCALAPPDATA%\\EnergyManager\\mode.txt
   --background            no browser, output to %LOCALAPPDATA%\\EnergyManager\\logs\\server.log
   --stop                  stop a running server gracefully (devices are released first)
   --lan                   also reachable from phones/tablets on the network (default: this PC only)
@@ -44,9 +46,13 @@ def mode_file() -> Path:
     return root() / "mode.txt"
 
 
+MODES = ("demo", "lab", "production")
+
+
 def choose_mode(args: list[str]) -> str:
-    if "--demo" in args or "--production" in args:
-        mode = "demo" if "--demo" in args else "production"
+    chosen = [m for m in MODES if f"--{m}" in args]
+    if chosen:
+        mode = chosen[0]
         root().mkdir(parents=True, exist_ok=True)
         mode_file().write_text(mode, encoding="utf-8")
         return mode
@@ -54,7 +60,7 @@ def choose_mode(args: list[str]) -> str:
         saved = mode_file().read_text(encoding="utf-8").strip()
     except OSError:
         saved = ""
-    return saved if saved in ("demo", "production") else "production"
+    return saved if saved in MODES else "production"
 
 
 def port_open(port: int = PORT) -> bool:
@@ -111,9 +117,10 @@ def run(args: list[str]) -> int:
     if background:
         redirect_output()
     mode = choose_mode(args)
-    data_dir = root() / ("demo" if mode == "demo" else "server")
+    data_dir = root() / {"demo": "demo", "lab": "lab"}.get(mode, "server")
     host = "0.0.0.0" if "--lan" in args else "127.0.0.1"
-    print(f"Energy Manager server ({'Demo Mode' if mode == 'demo' else 'eigen installatie'}) — http://127.0.0.1:{PORT}")
+    label = {"demo": "Demo Mode", "lab": "Testomgeving"}.get(mode, "eigen installatie")
+    print(f"Energy Manager server ({label}) — http://127.0.0.1:{PORT}")
     print(f"Gegevens: {data_dir}")
     if not background:
         print("Sluit dit venster om de server te stoppen. Apparaten vallen dan terug op hun eigen regeling.")
@@ -122,7 +129,7 @@ def run(args: list[str]) -> int:
     os.environ.setdefault("EMS_LOG_JSON", "0")
     cli = ["serve", "--data-dir", str(data_dir), "--host", host, "--port", str(PORT), "--log-level", "warning",
            "--local-control-file", str(control_file())]
-    return main(cli + (["--demo"] if mode == "demo" else []))
+    return main(cli + {"demo": ["--demo"], "lab": ["--lab"]}.get(mode, []))
 
 
 def _pause(message: str) -> None:

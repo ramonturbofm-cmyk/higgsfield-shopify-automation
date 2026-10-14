@@ -33,11 +33,15 @@ fn local_server_available() -> bool {
     service_exe().is_some()
 }
 
-/// Start the built-in server in the background ("demo" or "production").
+/// Start the built-in server in the background ("demo", "lab" = Testomgeving, or "production").
 /// Returns immediately; the connect screen polls until the server answers.
 #[tauri::command]
 fn start_local_server(mode: String) -> Result<(), String> {
-    let flag = if mode == "demo" { "--demo" } else { "--production" };
+    let flag = match mode.as_str() {
+        "demo" => "--demo",
+        "lab" => "--lab",
+        _ => "--production",
+    };
     service_command(&["--background", flag])?
         .spawn()
         .map(|_| ())

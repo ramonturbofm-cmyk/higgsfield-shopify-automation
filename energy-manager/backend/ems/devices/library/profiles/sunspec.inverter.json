@@ -1,0 +1,37 @@
+{
+ "profile_id": "sunspec.inverter",
+ "driver_id": "library.sunspec",
+ "manufacturer": "SunSpec-compatibel",
+ "model": "Omvormer (SunSpec-modellen 101–103 / 111–113)",
+ "device_category": "pv_inverter",
+ "supported_roles": [],
+ "protocol": "sunspec",
+ "connection_parameters": {
+  "port": 502,
+  "unit_id": 1
+ },
+ "discovery_signatures": [
+  {
+   "kind": "sunspec"
+  }
+ ],
+ "capabilities": [
+  "read_pv_power"
+ ],
+ "documentation_sources": [
+  {
+   "title": "SunSpec Information Model Specification; officiële modeldefinities",
+   "url": "https://github.com/sunspec/models",
+   "license": "Apache-2.0"
+  }
+ ],
+ "test_status": "UNVERIFIED",
+ "requirements": [
+  "Modbus TCP met SunSpec aanzetten in de omvormer of datamanager (zie handleiding van de fabrikant)."
+ ],
+ "known_limitations": [
+  "Vermogensbegrenzing alleen als het apparaat SunSpec-model 123 aanbiedt én de fabrikant die via SunSpec toestaat; niet getest op echte hardware.",
+  "Unit-ID verschilt per merk (bijv. 1 of 126); controleer de handleiding."
+ ],
+ "description": "Algemene SunSpec-omvormer: herkent zelf welke modellen er zijn."
+}

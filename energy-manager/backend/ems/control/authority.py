@@ -20,6 +20,7 @@ from typing import Any
 
 from ems.core.models import ACTION_CAPABILITY, Command, CommandAction, Metric
 from ems.devices.capabilities import ACTION_LABELS, check_value, type_capabilities, value_spec
+from ems.devices.manager import is_virtual
 
 
 class ControlState(StrEnum):
@@ -121,7 +122,7 @@ def can_execute(md, command: Command, user, state: ControlState, *, config=None,
                        "niet uitgevoerd")
     elif gate_mode == "dry_run":
         reasons.append("EMS staat in DRY RUN: niets wordt uitgevoerd")
-    elif gate_mode == "simulation" and not getattr(md.driver.manifest, "simulated", False):
+    elif gate_mode == "simulation" and not is_virtual(md.driver):
         reasons.append("simulatiemodus: echte apparatuur wordt niet aangestuurd")
     else:
         out.executes = True

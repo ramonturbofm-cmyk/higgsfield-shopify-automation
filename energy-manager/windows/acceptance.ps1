@@ -2,7 +2,7 @@
 # Checks: install, app start, all-in-one background EMS in Demo Mode, backend + database, live data,
 # optimizer, WebSocket, settings save, app close (EMS keeps running), restart via the Windows
 # sign-in autostart entry (simulated reboot), history kept, upgrade over the existing install,
-# uninstall (user data kept).
+# Testomgeving (virtual devices over Modbus TCP / SunSpec / HTTP), uninstall (user data kept).
 # Usage: .\windows\acceptance.ps1 -Installer dist\EnergyManagerSetup-<versie>.exe
 param([Parameter(Mandatory = $true)][string]$Installer)
 $ErrorActionPreference = "Stop"
@@ -148,6 +148,34 @@ if ($p.ExitCode -eq 0) { Fail "installing an older version over a newer one was 
 if (-not (Select-String -Path "$env:TEMP\em-downgrade.log" -Pattern "Downgrade blocked" -Quiet)) { Fail "downgrade block not logged" }
 if (-not (Healthy 10)) { Fail "EMS affected by the refused downgrade" }
 Pass "version $installed everywhere; downgrade over a newer version refused (exit code $($p.ExitCode)), EMS untouched"
+
+# 9c. Testomgeving: virtual devices over real protocols, bundled Modbus/SunSpec stack ------------
+& (Join-Path $App "server\EnergyManagerServer.exe") --stop
+if (-not (PortClosed)) { Fail "EMS did not stop before switching to the Testomgeving" }
+Start-Process (Join-Path $App "server\EnergyManagerService.exe") -ArgumentList "--background", "--lab" | Out-Null
+$h = Healthy
+if (-not $h -or $h.profile -ne "lab") { Fail "Testomgeving did not start (profile $($h.profile))" }
+Login
+$lab = Api "/lab"
+if (-not $lab.active -or $lab.devices.Count -lt 8) { Fail "virtual devices not running ($($lab.devices.Count))" }
+$scan = Api "/discovery/scan" "POST" @{ mdns = $false; serial = $false }
+$hp = $scan.results | Where-Object { $_.profile_id -eq "energymanager.lab.heat_pump" }
+if (-not $hp -or $hp.confidence -ne "EXACT_MODEL") { Fail "automatic search did not recognise the virtual heat pump" }
+$body = @{ name = "Warmtepomp"; category = "heat_pump"; driver = "library.modbus"; connection = $hp.connection }
+$probe = Api "/devices/probe" "POST" $body
+if (-not $probe.reachable -or $probe.identity.serial_number -ne "EMLAB-HP-0001") { Fail "Modbus TCP probe failed" }
+$dev = Api "/devices" "POST" $body
+if ((Api "/devices/$($dev.id)/test" "POST").reachable -ne $true) { Fail "connection test failed" }
+Api "/devices/$($dev.id)/commissioning" "PUT" @{ level = "shadow" } | Out-Null
+$wt = Api "/devices/$($dev.id)/commissioning/write-test" "POST"
+if (-not $wt.ok) { Fail "write test on the virtual heat pump failed: $($wt.detail)" }
+$pv = $scan.results | Where-Object { $_.driver_id -eq "library.sunspec" }
+if (-not $pv) { Fail "SunSpec inverter not found" }
+Pass "Testomgeving: 8 virtual devices; search recognises exact model; Modbus TCP probe, identity, add, test, shadow and write test OK; SunSpec found"
+& (Join-Path $App "server\EnergyManagerServer.exe") --stop
+if (-not (PortClosed)) { Fail "EMS did not stop after the Testomgeving" }
+Start-Process (Join-Path $App "server\EnergyManagerService.exe") -ArgumentList "--background", "--demo" | Out-Null
+if (-not (Healthy)) { Fail "Demo did not start again after the Testomgeving" }
 
 # 10. Uninstall ------------------------------------------------------------------------------
 Start-Process (Join-Path $App "unins000.exe") -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
