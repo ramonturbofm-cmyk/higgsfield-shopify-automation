@@ -427,3 +427,34 @@ installatie zelf op.
 
 **Deployment**: `cloud/Dockerfile`, `cloud/docker-compose.yml` (Caddy TLS → API → PostgreSQL),
 `cloud/DEPLOYMENT.md`; privacy: `PRIVACY_COMPLIANCE.md`.
+
+## 22. Apparatenbibliotheek, protocollen en Testomgeving (0.6.0)
+
+**Drie lagen.** Transport (`integrations/modbus/transport.py`: pymodbus TCP/RTU met lock, rate-limit,
+time-out, lees-retries en géén herhaling van schrijfopdrachten; HTTP via httpx) → driver (`library.modbus`,
+`library.sunspec`, `homewizard.p1`, `shelly.switch`, `sgready.relay`, `homeassistant.entities`, …) →
+modelprofiel (`devices/library/profiles/*.json`, schema in `devices/library/schema.py`, zie
+`DEVICE_PROFILE_SCHEMA.md`). De catalogus (`devices/library/catalog.py`) laadt ingebouwde en eigen profielen
+plus de merk/model-lijst (`manufacturers.json`) en weigert ongeldige bestanden.
+
+**Capabilities per apparaat.** Drivers kunnen `capabilities()` per apparaat leveren (na SunSpec-scan of uit
+het profiel); de kern neemt de doorsnede met het type-schema. `write_documented()`, `hardware_verified()` en
+`simulated_target()` bepalen per apparaat wat de inbedrijfstelling toestaat (`server/commissioning.py`).
+`devices/capreport.py` maakt het rapport dat de gebruiker ziet.
+
+**Discovery** (`devices/discovery.py`): mDNS-browse (`_hwenergy._tcp`, `_shelly._tcp`,
+`_home-assistant._tcp`), identiteitsvragen op opgegeven adressen (HTTP `/api`, `/shelly`, HA `/api/`;
+Modbus/SunSpec op 502), signaturen uit de profielen. Resultaten krijgen EXACT_MODEL / MANUFACTURER /
+PROTOCOL / UNVERIFIED, worden ontdubbeld op serienummer en vergeleken met geconfigureerde apparaten
+(`params.identity`) om adreswijzigingen te melden.
+
+**Testomgeving** (`simulator/lab.py`, `labmodbus.py`, `httpd.py`): startmodus `--lab` = Demo-runtime met
+`runtime.demo_profile: lab`, zonder vooraf ingestelde apparaten. Het simulatiehuis krijgt extra componenten
+(`lab_*`); `LabDevices` start pymodbus-servers en een kleine HTTP-server op 127.0.0.1 die hun waarden live
+uit het huis berekenen en schrijfopdrachten in het huis uitvoeren (met apparaatwatchdog en
+storingsinjectie). De gewone, productie-drivers praten ermee. De poort (`control/gate.py`) behandelt deze
+apparaten als virtueel (`devices/manager.is_virtual`); echte hardware blijft in Demo/Testomgeving geblokkeerd.
+
+**Wizard** (`web/js/views/addwizard.js`, `deviceform.js`): `/library/categories`, `/library/brands`,
+`/discovery/scan`, `/devices/probe` (test + identiteit + rapport), `POST /devices` (vult
+profiel-`default_params` aan), `PUT /devices/{id}/address`.

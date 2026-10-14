@@ -1,15 +1,24 @@
-# Bekende beperkingen — Energy Manager 0.5.0
+# Bekende beperkingen — Energy Manager 0.6.0
 
 Eerlijk overzicht van wat (nog) niet kan of niet bewezen is. Zie ook [AUDIT_REMEDIATION.md](AUDIT_REMEDIATION.md).
 
 ## Hardware
 
-* **Niets is met echte hardware getest.** HomeWizard P1, DSMR P1 en de generieke Modbus/HTTP/MQTT-drivers
-  zijn gebouwd volgens officiële documentatie en getest tegen nep-apparaten en een echte MQTT-broker; niet
-  tegen een fysiek apparaat.
-* **Er zijn geen schrijvende drivers voor echte apparaten.** Zonder zo'n driver blijft een echt apparaat op
-  Alleen lezen of Schaduwmodus. Volledige regeling vereist bovendien een driver die op echte hardware is
-  bewezen (`verified`); dat geldt voor geen enkele driver.
+* **Niets is met echte hardware getest.** HomeWizard P1, DSMR P1, SunSpec, Shelly Gen2+, SG Ready-relais,
+  de Modbus-profieldriver en de Home Assistant-brug zijn gebouwd volgens officiële documentatie/standaarden en
+  getest tegen de virtuele apparaten van de Testomgeving (echte protocollen op 127.0.0.1) en nagebootste
+  API's — niet tegen een fysiek apparaat.
+* **Volledige regeling van echte apparaten is geblokkeerd**: daarvoor moet een profiel/driver op hardware
+  bewezen zijn (`HARDWARE_TESTED`); dat geldt voor geen enkele. Beperkte regeling kan wél waar schrijven
+  officieel gedocumenteerd is (SunSpec model 123, Shelly, SG Ready).
+* **Merken zonder lokale koppeling** in deze versie: Solis, GoodWe, Sungrow, SolaX, Huawei, NIBE S-serie,
+  Daikin Altherma, Weheat (alleen cloud), OCPP-laadpalen, Shelly Gen1. Alternatief: SG Ready of Home Assistant.
+* **Niet geïmplementeerd**: OCPP 1.6J, generieke WebSocket-driver, zoeken op andere nodes (alleen lokaal),
+  Modbus RTU niet getest met echte seriële hardware.
+* **Victron GX**: registers uit een community-bron (evcc, MIT); alleen uitlezen, niet geverifieerd.
+* **Home Assistant-brug**: alleen getest met een nagebootste API, niet met een echte Home Assistant.
+* **Testomgeving**: gebruikt vaste poorten 15502–15599 op 127.0.0.1 (verschuifbaar met
+  `EMS_LAB_PORT_OFFSET`); bezette poorten = dat virtuele apparaat ontbreekt (staat in het logboek).
 * Raspberry Pi: getest als Docker-image voor arm64 **onder QEMU-emulatie** in CI, niet op een fysieke Pi.
 
 ## Regeling en optimizer
@@ -18,8 +27,9 @@ Eerlijk overzicht van wat (nog) niet kan of niet bewezen is. Zie ook [AUDIT_REME
   aan het eind van de planningshorizon in de batterij zit niet hetzelfde als de optimizer (die een
   eindwaarde gebruikt). Het getal komt wel uit de optimizer, maar is een indicatie, geen garantie.
 * Geen automatische controller-failover (bewust: veiligheid boven snelle overname).
-* Warmtepomp: geen ontdooi-, tapwater- of legionellamodel; de modus wordt afgeleid uit het geplande
-  vermogen t.o.v. de eigen regeling (één regel, gedeeld door planning en controller).
+* Warmtepomp: geen ontdooi-, tapwater- of legionellamodel. De gevraagde modus volgt uit de planning (gepland
+  t.o.v. eigen regeling) en is een **verzoek**; de uitleg toont planning en meting apart. SG Ready regelt geen
+  vermogen.
 * V2H/V2G niet geïmplementeerd.
 * Uitvoeringsbevestiging ("bevestigd door apparaat") werkt alleen als het apparaat de relevante waarde
   terugmeldt; anders "verzonden (geen terugmelding)".

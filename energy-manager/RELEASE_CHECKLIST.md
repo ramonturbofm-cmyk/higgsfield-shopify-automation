@@ -13,13 +13,20 @@ Werk deze lijst af vóór elke release. Vink alleen af wat echt is gecontroleerd
 - [ ] Databasemigraties: nieuwe migratie toegevoegd én getest op een database van de vorige versie
 - [ ] CI-job *Linux acceptance* groen (Docker amd64, Docker arm64/QEMU, systemd)
 - [ ] Browser-acceptatie `tests/ui/ui_acceptance.py` groen (resoluties, touch, toetsenbord, offline/trage API)
+- [ ] Wizard-acceptatie `tests/ui/wizard_acceptance.py` groen tegen `ems serve --lab`
+- [ ] `tests/test_device_library.py` groen (virtuele apparaten via echte protocollen)
+- [ ] Alle ingebouwde profielen valideren (`Catalog(None).load().problems` leeg); geen profiel claimt
+      `HARDWARE_TESTED` zonder vastgelegde hardwaretest (model + firmware)
 - [ ] AUDIT_REMEDIATION.md, TEST_RESULTS.md, KNOWN_LIMITATIONS.md bijgewerkt — alleen FIXED wat getest is
 
 ## 2. Veiligheid
 
 - [ ] Geen geheimen in de repository (`git grep -i -E "password|token|secret"` nagelopen; `.env` niet gecommit)
 - [ ] Opgeslagen YAML bevat alleen `${VAR}`- of `secret:`-verwijzingen (test `test_config` / `test_generic_device_password_goes_to_secret_store`)
-- [ ] Geen nieuwe schrijvende driver zonder officiële documentatie; `verified=True` alleen na hardwaretest
+- [ ] Geen nieuwe schrijvende driver of profiel-control zonder officiële documentatie (`documentation_sources`);
+      `verified=True` / `test_status: HARDWARE_TESTED` alleen na hardwaretest
+- [ ] Testomgeving stuurt alleen virtuele apparaten (127.0.0.1 + actieve Testomgeving); echte apparaten blijven
+      in Demo/Testomgeving geblokkeerd
 - [ ] CommandGate: SIMULATION_MODE / DRY_RUN / inbedrijfstellingsniveaus ongewijzigd of getest
       (`test_safety_matrix.py`); volledige regeling alleen voor `verified` drivers
 - [ ] Geen tokens in localStorage of URL's (`test_p0_06_*`); back-up standaard zonder sleutels

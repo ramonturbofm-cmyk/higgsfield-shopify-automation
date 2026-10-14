@@ -455,3 +455,51 @@ async def test_heat_pump_controller_never_requests_a_refused_mode():
     cfg = config_from_dict({"devices": []}, {})
     ctx = ControlContext(cfg, T0, {"sg": frozenset({Capability.CONTROL_HP_MODE})}, "r", {"sg": ["normal", "boost"]})
     assert "eco" not in ctx.modes["sg"]
+
+
+# ========================================== Home Assistant bridge (mock API)
+async def test_home_assistant_bridge_reads_and_controls_only_when_confirmed(monkeypatch):
+    """Against a stand-in for the documented Home Assistant REST API (not a real Home Assistant)."""
+    from ems.integrations.homeassistant.bridge import HomeAssistantDriver, suggest
+
+    calls = []
+    states = {"sensor.grid": {"entity_id": "sensor.grid", "state": "1.5", "attributes": {"unit_of_measurement": "kW"}},
+              "switch.boiler": {"entity_id": "switch.boiler", "state": "off", "attributes": {}}}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.headers.get("authorization") != "Bearer tok":
+            return httpx.Response(401)
+        path = request.url.path
+        if path == "/api/":
+            return httpx.Response(200, json={"message": "API running."})
+        if path == "/api/states":
+            return httpx.Response(200, json=list(states.values()))
+        if path.startswith("/api/states/"):
+            return httpx.Response(200, json=states[path.rsplit("/", 1)[1]])
+        if path.startswith("/api/services/"):
+            calls.append((path, json.loads(request.content)))
+            return httpx.Response(200, json=[])
+        return httpx.Response(404)
+
+    monkeypatch.setattr(HomeAssistantDriver, "transport", httpx.MockTransport(handler))
+    conn = {"url": "http://ha.local:8123", "token": "tok",
+            "values": [{"metric": "load_power_w", "entity_id": "sensor.grid"}],
+            "controls": [{"action": "switch", "entity_id": "switch.boiler"}]}
+    cfg = DeviceConfig(id="b", name="b", category="boiler", driver="homeassistant.entities", connection=conn)
+    drv = HomeAssistantDriver(cfg, DriverContext(SimulatedClock(T0)))
+    await drv.connect()
+    assert (await drv.read())["load_power_w"] == pytest.approx(1500)              # kW -> W
+    assert Capability.CONTROL_SWITCH not in drv.capabilities()                   # not confirmed: no control
+    with pytest.raises(DriverError):
+        await drv.apply(Command("b", CommandAction.SWITCH, True))
+    cfg2 = DeviceConfig(id="b", name="b", category="boiler", driver="homeassistant.entities",
+                        connection={**conn, "exclusive_control_confirmed": True})
+    drv2 = HomeAssistantDriver(cfg2, DriverContext(SimulatedClock(T0)))
+    assert Capability.CONTROL_SWITCH in drv2.capabilities()
+    await drv2.apply(Command("b", CommandAction.SWITCH, True))
+    assert calls == [("/api/services/switch/turn_on", {"entity_id": "switch.boiler"})]
+    assert {e["kind"] for e in suggest(list(states.values()))} == {"power", "switch"}
+    bad = HomeAssistantDriver(DeviceConfig(id="b", name="b", category="boiler", driver="homeassistant.entities",
+                                           connection={**conn, "token": "wrong"}), DriverContext(SimulatedClock(T0)))
+    with pytest.raises(DriverError, match="token"):
+        await bad.connect()

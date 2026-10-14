@@ -144,20 +144,21 @@ class ExampleBatteryDriver(DeviceDriver):
 De bestaande `tests/test_drivers.py` controleert voor alle geregistreerde drivers o.a. dat een
 `verified` driver een documentatiebron heeft.
 
-## 6. Apparaatwizard
+## 6. Apparaatwizard (0.6.0)
 
-`DeviceDriver.self_test()` levert een `TestReport`:
+De gebruiker kiest zijn **apparaat**, niet een protocol: soort (15) → automatisch zoeken / merk en model /
+gateway / handmatig (Expert) → gegevens → test → opslaan. Zie `web/js/views/addwizard.js`.
 
-```
-✓ apparaat bereikbaar
-✓ batterijvermogen uitleesbaar
-✓ batterij-SOC uitleesbaar
-✓ batterijbesturing beschikbaar — ondersteund door driver
-✗ vermogensbegrenzing beschikbaar — niet ondersteund door deze driver
-```
-
-Leescapabilities worden echt uitgelezen; stuurcapabilities worden in de test **niet** uitgevoerd
-(geen hardware bewegen zonder toestemming van de gebruiker).
+* `POST /api/v1/devices/probe` doet de verbindingstest (`DeviceDriver.self_test()`), leest de identiteit
+  (`identify()`: manufacturer/model/serial_number/firmware_version) en geeft het **capabilityrapport**
+  (`devices/capreport.py`) met per functie SUPPORTED_READ, SUPPORTED_WRITE, REQUIRES_CONFIGURATION,
+  REQUIRES_COMMISSIONING, NOT_SUPPORTED of UNVERIFIED.
+* Leescapabilities worden echt uitgelezen; stuurcapabilities worden in de test **niet** uitgevoerd (geen
+  hardware bewegen zonder toestemming). Schrijven gebeurt pas in de inbedrijfstelling (schrijftest).
+* Formulierveld-metadata komt uit `connection_schema` (`level`, `show_if`, `secret`, `readonly`, `required`);
+  zie `DRIVER_SDK.md`.
+* Profiel-`default_params` vullen datablad-waarden vooraf in; de identiteit wordt bewaard in
+  `params.identity`, zodat hetzelfde apparaat op een nieuw IP-adres wordt herkend ("Adres bijwerken").
 
 ## 6b. Documentatie per driver (verplicht)
 
@@ -178,28 +179,21 @@ node worden automatisch via `node.remote` beschikbaar.
 
 ## 7. Status van integraties
 
-Legenda teststatus: UNIT = geautomatiseerde tests met nagebootst apparaat; SIMULATOR = in de woningsimulator;
-HARDWARE = getest met een echt apparaat.
-
-| Integratie | Driver-id | Lezen | Sturen | Teststatus |
-|---|---|---|---|---|
-| Mockapparaten (meter, PV, batterij, warmtepomp, laadpaal) | `mock.*` | ✓ | ✓ (simulatie) | UNIT, SIMULATOR — alleen in Demo Mode |
-| HomeWizard P1-meter (API v1 en v2) | `homewizard.p1` | ✓ net, fasen, meterstanden | n.v.t. | UNIT (TLS-fake volgens de officiële API-docs) — **niet HARDWARE** |
-| Slimme meter via P1-poort (DSMR 2.2–5) | `dsmr.p1` | ✓ net, fasen, meterstanden | n.v.t. | UNIT (telegrammen uit de standaard) — **niet HARDWARE** |
-| Generiek Modbus TCP | `generic.modbus_tcp` | ✓ volgens mapping | ✗ (bewust) | UNIT (fake server volgens de Modbus-spec) — **niet HARDWARE** |
-| Generiek HTTP/JSON | `generic.http_json` | ✓ volgens mapping | ✗ (bewust) | UNIT — **niet HARDWARE** |
-| Generiek MQTT | `generic.mqtt` | ✓ volgens mapping | ✗ (bewust) | UNIT + echte Mosquitto-broker — **niet HARDWARE** |
-| Omvormers/batterijen (bijv. Solis, Growatt, Deye, Sungrow, Victron, SMA, Fronius, GoodWe, Enphase) | — | via generieke driver | ✗ | niet geïmplementeerd: model, firmware, interface en officiële documentatie nodig |
-| Warmtepompen (SG Ready, Modbus, fabrikant-API) | — | via generieke driver | ✗ | idem; SG Ready vereist geschikte schakelhardware (relais) |
-| Laadpalen (OCPP, Modbus, lokale API) | — | via generieke driver | ✗ | idem |
+De actuele status per integratie staat in **[DEVICE_INTEGRATION_AUDIT.md](DEVICE_INTEGRATION_AUDIT.md)** (§2)
+en voor gebruikers in **[SUPPORTED_DEVICES.md](SUPPORTED_DEVICES.md)**; profielen en bronnen in
+**[DEVICE_CATALOG.md](DEVICE_CATALOG.md)**. Kort: HomeWizard P1, DSMR P1, SunSpec (inclusief begrenzing via
+model 123), Shelly Gen2+, SG Ready-relais, Modbus-profieldriver en Home Assistant-brug zijn gebouwd en getest
+tegen virtuele apparaten / nagebootste API's; **niets is HARDWARE TESTED**.
 
 Bronnen: HomeWizard — officiële API-documentatie (api-documentation.homewizard.com, API v1 en v2;
-geraadpleegde versie in `integrations/homewizard/__init__.py`). Licentie: de HomeWizard-API is bedoeld
-voor persoonlijk, niet-commercieel gebruik. DSMR — Netbeheer Nederland, P1 Companion Standard 5.0.2.
-Modbus — Modbus Organization, Application Protocol V1.1b3 en Messaging on TCP/IP V1.0b.
+geraadpleegde versie in `integrations/homewizard/__init__.py`). DSMR — Netbeheer Nederland, P1 Companion
+Standard 5.0.2. Modbus — Modbus Organization, Application Protocol V1.1b3 en Messaging on TCP/IP V1.0b.
+SunSpec — SunSpec Alliance Information Model (JSON-modellen, Apache-2.0). Shelly — Shelly Gen2+ API
+documentation (RPC, Switch). SG Ready — label van de Bundesverband Wärmepumpe (BWP), toestanden 1–4.
+Home Assistant — REST API (developers.home-assistant.io/docs/api/rest).
 
-Zodra we een echte (schrijvende) driver gaan bouwen, is per apparaat nodig: merk, exact model,
-firmwareversie, beschikbare lokale interface(s) en de officiële documentatie.
+Voor een nieuwe schrijvende koppeling is per apparaat nodig: merk, exact model, firmwareversie, beschikbare
+lokale interface(s) en de officiële documentatie.
 
 ## 8. Generieke drivers (zonder eigen code)
 

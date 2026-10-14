@@ -1,6 +1,6 @@
 # DEVELOPMENT — voortgang, teststatus en besluiten
 
-Laatst bijgewerkt: versie **0.5.0** — prijzen/prognoses en Energy Manager Cloud (0.4.0: audit-remediatie, zie [AUDIT_REMEDIATION.md](AUDIT_REMEDIATION.md)).
+Laatst bijgewerkt: versie **0.6.0** — apparatenbibliotheek, echte protocollen en Testomgeving (0.5.0: prijzen/cloud; 0.4.0: audit-remediatie, zie [AUDIT_REMEDIATION.md](AUDIT_REMEDIATION.md)).
 Dit bestand is de waarheid over wat werkt.
 
 ## Legenda
@@ -13,14 +13,33 @@ Test: **TESTED** (geautomatiseerd: unit/API/simulator/browser/CI) of **NOT TESTE
 schone Windows-runner (`windows/acceptance.ps1`), Linux op een schone Ubuntu-runner
 (`deploy/acceptance-linux.sh`: Docker amd64, Docker arm64 onder QEMU, systemd).
 
-Tests: 340 pytest-tests EMS (Linux en Windows), 26 cloudtests (SQLite en PostgreSQL 16), 5
-browser-acceptatiechecks (`tests/ui/ui_acceptance.py`), Windows- en Linux-acceptatiescripts in CI.
+Tests: 363 pytest-tests EMS (Linux en Windows), 26 cloudtests (SQLite en PostgreSQL 16), 5
+browser-acceptatiechecks (`tests/ui/ui_acceptance.py`), 9 wizardchecks tegen de Testomgeving
+(`tests/ui/wizard_acceptance.py`), Windows- en Linux-acceptatiescripts in CI.
+
+## Apparaatintegratie (0.6.0)
+
+| Onderdeel | Implementatie | Test |
+|---|---|---|
+| Wizard merk/model, automatisch zoeken, gateway, handmatig | COMPLETE | TESTED — browsertest tegen de Testomgeving |
+| Apparatenbibliotheek (schema, validatie, import, versies, rollback) | COMPLETE | TESTED |
+| Modbus TCP-transport + codec (pymodbus) | COMPLETE | TESTED — virtuele apparaten (echte Modbus TCP) |
+| Modbus RTU | COMPLETE (zelfde transport) | NOT TESTED (geen seriële hardware) |
+| SunSpec (modelketen, uitlezen, begrenzing model 123) | COMPLETE | TESTED — virtuele SunSpec-omvormer |
+| Shelly Gen2+ / SG Ready-relais | COMPLETE | TESTED — virtuele Shelly-RPC |
+| Home Assistant-brug | PARTIALLY IMPLEMENTED (geen automatische entiteitkoppeling) | TESTED — nagebootste API |
+| Discovery (mDNS, identiteit, dedupe, adreswijziging) | COMPLETE (alleen lokaal, niet via nodes) | TESTED (mDNS niet in CI) |
+| Capabilityrapport | COMPLETE | TESTED |
+| Testomgeving (virtuele woning, storingen) | COMPLETE | TESTED |
+| OCPP 1.6J, generieke WebSocket | NOT IMPLEMENTED | — |
+| Echte merken (Fronius, SMA, …) | via SunSpec, alleen lezen/beperkt | BLOCKED BY HARDWARE |
 
 ## Platformen en nodes
 
 | Onderdeel | Implementatie | Test |
 |---|---|---|
 | Windows alles-in-één (app + EMS op de achtergrond, autostart bij aanmelden) | COMPLETE | TESTED — Windows-acceptatie in CI |
+| Windows: startmodus Testomgeving | COMPLETE | TESTED — acceptatiestap 9c |
 | Windows: downgradebescherming installer | COMPLETE | TESTED — acceptatiestap 9b |
 | Windows-service vóór aanmelden | NOT IMPLEMENTED | — (autostart bij aanmelden) |
 | Code signing | BLOCKED (geen certificaat) | — UNSIGNED TEST BUILD |

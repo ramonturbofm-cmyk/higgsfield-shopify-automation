@@ -21,8 +21,9 @@ De installer is een **UNSIGNED TEST BUILD** (geen code-signing-certificaat). Win
    `%LOCALAPPDATA%\Programs\Energy Manager`.
 2. Kies *Alles op deze computer* (aanbevolen) en laat "EMS automatisch starten bij aanmelden" aangevinkt.
 3. Open de app en kies:
-   * **Alles op deze computer** → *Demo* (gesimuleerde woning, login `demo`/`demo`) of *Mijn eigen installatie*
-     (eerste keer: beheerdersaccount aanmaken) → **Starten**;
+   * **Alles op deze computer** → *Demo* (gesimuleerde woning, login `demo`/`demo`), *Testomgeving* (virtuele
+     apparaten via echte protocollen, login `demo`/`demo`, zie [TEST_MORGEN_WINDOWS.md](TEST_MORGEN_WINDOWS.md))
+     of *Mijn eigen installatie* (eerste keer: beheerdersaccount aanmaken) → **Starten**;
    * **Verbinden met een bestaand systeem** (Raspberry Pi/Linux op het netwerk);
    * **Raspberry Pi / Linux-node toevoegen**.
 4. Zet de slaapstand van de pc uit; de app waarschuwt als de pc in slaap kan vallen.

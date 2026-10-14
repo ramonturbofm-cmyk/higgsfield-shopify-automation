@@ -5,13 +5,14 @@ De EMS-server draait 24/7 zelfstandig op een **Raspberry Pi 4/5** (of andere Lin
 plant en logt. De **Windows-app** en de **webinterface** (telefoon/tablet) zijn alleen bediening:
 het EMS blijft werken als de app dicht is.
 
-> **Versie 0.5.0 — UNSIGNED TEST BUILD.** Nieuw: marktgegevens gescheiden van het energiecontract, officiële
-> EnergyZero-API zonder token, prijsstatussen en -prognoses, en het optionele **Energy Manager Cloud**-platform
-> (accounts, organisaties, koppelen, portalen, licenties) — zie [CHANGELOG.md](CHANGELOG.md). Uitlezen van
-> echte apparaten: HomeWizard P1, DSMR P1 en generieke Modbus TCP/HTTP/MQTT (alleen-lezen). Er is nog
-> **niets met echte hardware getest** en er zijn bewust **geen schrijvende drivers** voor echte apparaten.
-> De cloud is **niet productierijp verklaard** (hosting, e-mail, betalingen en juridische documenten
-> ontbreken nog: [cloud/DEPLOYMENT.md](cloud/DEPLOYMENT.md)). Beperkingen: [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).
+> **Versie 0.6.0 — UNSIGNED TEST BUILD.** Nieuw: apparaat toevoegen op **merk en model** (of automatisch
+> zoeken), een lokale **apparatenbibliotheek** met gevalideerde profielen, echte protocollen (Modbus TCP/RTU
+> via pymodbus, **SunSpec**, Shelly Gen2+, **SG Ready**-relais, optionele **Home Assistant**-brug), een eerlijk
+> functierapport per apparaat, en de startmodus **Testomgeving**: een virtuele woning waarvan de apparaten
+> echte protocollen spreken — zie [CHANGELOG.md](CHANGELOG.md) en [TEST_MORGEN_WINDOWS.md](TEST_MORGEN_WINDOWS.md).
+> Er is nog **niets met echte hardware getest**; volledige regeling van echte apparaten blijft daarom
+> geblokkeerd. Ondersteunde apparaten: [SUPPORTED_DEVICES.md](SUPPORTED_DEVICES.md). Beperkingen:
+> [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md). De cloud (`cloud/`) is ongewijzigd en niet productierijp verklaard.
 
 ## Wat het doet
 
@@ -27,6 +28,8 @@ het EMS blijft werken als de app dicht is.
 * Automatiseringen, handmatige overrides met verlooptijd, uitlegbare beslissingen, historie en export,
   financieel overzicht, backtesting en Auto-Tune (nooit automatisch toegepast), meldingen,
   back-up/restore, gebruikers met rollen.
+* **Testomgeving**: een lege installatie met een virtuele woning; u voegt de virtuele apparaten zelf toe via de
+  wizard en doorloopt de hele keten (zoeken, testen, inbedrijfstelling, sturen, terugmelden, storingen).
 * **Demo Mode**: een complete gesimuleerde "Demo Home" (PV 8 kWp, batterij 15 kWh, warmtepomp, EV,
   3×25 A, dynamische prijs) om alles zonder hardware te proberen. In productie worden nooit nepwaarden
   getoond.
@@ -85,8 +88,9 @@ bij succes wordt hij gepubliceerd, met `SHA256SUMS.txt` en de testuitslag (`acce
 
 Bij het openen kiest u **hoe u Energy Manager wilt gebruiken**:
 
-* **Alles op deze computer** — geen Raspberry Pi nodig. Kies *Mijn eigen installatie* (echte apparaten) of
-  *Demo* (gesimuleerd huis, inloggen demo/demo) en klik **Starten**. Het EMS draait op de achtergrond
+* **Alles op deze computer** — geen Raspberry Pi nodig. Kies *Mijn eigen installatie* (echte apparaten),
+  *Demo* (gesimuleerd huis, inloggen demo/demo) of *Testomgeving* (virtuele apparaten via echte protocollen,
+  inloggen demo/demo) en klik **Starten**. Het EMS draait op de achtergrond
   (zonder venster), blijft werken als u de app sluit en start automatisch na aanmelden in Windows. Zet de
   slaapstand van de pc uit; de app waarschuwt als de pc in slaap kan vallen.
 * **Verbinden met bestaand Energy Manager-systeem** — de app zoekt het EMS op het netwerk
@@ -127,23 +131,24 @@ privacy: [PRIVACY_COMPLIANCE.md](PRIVACY_COMPLIANCE.md).
 
 ## Apparaten koppelen
 
-In de webinterface: **Apparaten → Apparaat toevoegen**: soort → merk en model (of "Mijn apparaat staat er niet
-tussen") → gegevens (met toegestane bereiken) → test. Nieuwe apparaten starten **alleen-lezen**; via
-*Inbedrijfstelling* volgt u per apparaat een procedure (verbindingstest, veiligheidsinstellingen,
-schaduwmodus, schrijftest, getypte bevestiging). Het apparaat toont alleen de bedieningen die het echt heeft.
+In de webinterface: **Apparaten → Apparaat toevoegen**: kies de **soort** (15 tegels) en daarna **hoe**:
 
-| Apparaat | Hoe |
-|---|---|
-| **HomeWizard P1-meter** | automatisch gevonden (mDNS); bij API v2 drukt u op de knop van de meter om te koppelen. Wordt automatisch de primaire netmeter. |
-| **Slimme meter via P1-kabel** | driver *DSMR P1*: USB-kabel (`/dev/ttyUSB0`) of een netwerk-P1-bridge (TCP). In Docker: `devices:` in `docker-compose.yml` aanzetten. |
-| **Modbus TCP-apparaat** | *Generiek Modbus TCP*: IP, unit-ID en een waardetoewijzing (adres, type, schaal) **uit de handleiding van het apparaat**. |
-| **Apparaat met JSON-API** | *Generiek HTTP/JSON*: URL en JSON-paden. |
-| **Via MQTT** (bijv. bestaande gateway) | *Generiek MQTT*: broker, topics en (optioneel) JSON-pad. |
+1. **Automatisch zoeken** — mDNS (HomeWizard, Shelly, Home Assistant) en een identiteitsvraag op een IP-adres
+   dat u opgeeft (HTTP en Modbus/SunSpec op poort 502). Geen poortscan. Herkenning: *exact model*,
+   *fabrikant* of *alleen protocol* — een onzeker apparaat wordt nooit als een bepaald merk behandeld.
+2. **Merk en model** — de lijst toont per model eerlijk wat kan (ondersteund, alleen uitlezen, via SG Ready,
+   via Home Assistant, nog niet ondersteund + alternatief).
+3. **Via een gateway** — SG Ready-relais (warmtepomp), Shelly-relais, Home Assistant, Modbus-gateway.
+4. **Handmatig (Expert)** — generiek Modbus/HTTP/MQTT, alleen uitlezen.
 
-Voor het **aansturen** van een specifieke omvormer, batterij, warmtepomp of laadpaal is een driver
-nodig op basis van de officiële documentatie. Lever daarvoor aan: merk, exact model, firmwareversie,
-aansluiting (LAN/RS485/USB) en de protocoldocumentatie — zie
-[DEVICE_INTEGRATION_GUIDE.md](DEVICE_INTEGRATION_GUIDE.md).
+Daarna: gegevens (alleen de velden die bij uw niveau horen) → **Verbinding testen** → identiteit en
+**functierapport** → opslaan. Nieuwe apparaten starten **alleen-lezen**; via *Inbedrijfstelling* volgt u per
+apparaat de procedure ([COMMISSIONING_GUIDE.md](COMMISSIONING_GUIDE.md)). Overzicht:
+[SUPPORTED_DEVICES.md](SUPPORTED_DEVICES.md); technisch: [DEVICE_CATALOG.md](DEVICE_CATALOG.md).
+
+Een nieuw merk toevoegen kan vaak met alleen een JSON-profiel ([DEVICE_PROFILE_SCHEMA.md](DEVICE_PROFILE_SCHEMA.md),
+[DRIVER_SDK.md](DRIVER_SDK.md)), maar nooit zonder officiële documentatie. Lever daarvoor aan: merk, exact model,
+firmwareversie, aansluiting (LAN/RS485/USB) en de protocoldocumentatie.
 
 Zonder primaire netmeter toont het EMS: *"Geen primaire netmeter ingesteld. Sommige EMS-functies zijn
 beperkt."* (geen zero-export, piekbegrenzing of fasebewaking).
@@ -157,7 +162,8 @@ cd energy-manager
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 ems serve --demo --data-dir ./data-demo     # http://127.0.0.1:8080 (login demo/demo)
-pytest -q                                   # 306 tests
+ems serve --lab --data-dir ./data-lab       # Testomgeving: virtuele apparaten op 127.0.0.1:15502-15599
+pytest -q                                   # 363 tests
 ruff check backend tests
 ems-sim --start 2026-06-15 --days 2 --compare-native   # simulator-CLI
 ```
@@ -171,9 +177,11 @@ Andere opdrachten: `ems create-user <naam> --role admin`, `ems backup <bestand.z
 energy-manager/
 ├── backend/ems/
 │   ├── core/          modellen, config, engine, validatie, journaal, watchdog, events, klok
-│   ├── devices/       driver-interface, plugin-registry, DeviceManager
+│   ├── devices/       driver-interface, plugin-registry, DeviceManager, discovery, capabilityrapport,
+│   │                  library/ (profielschema, catalogus, profielen, merk/model-lijst)
 │   ├── gridmeter/     GridMeter-abstractie en selectie van de primaire netmeter
-│   ├── integrations/  homewizard/, dsmr/, generic/ (Modbus TCP, HTTP/JSON, MQTT), mock/ (Demo Mode)
+│   ├── integrations/  homewizard/, dsmr/, modbus/ (pymodbus-transport, codec, profieldriver), sunspec/,
+│   │                  shelly/ (schakelaar, SG Ready), homeassistant/, generic/, mock/ (Demo Mode)
 │   ├── nodes/         node-identiteit, koppelen, regelrecht (lease), gateway, node.remote-driver
 │   ├── control/       controllers, zero-export, overrides, CommandGate (inbedrijfstelling)
 │   ├── tariffs/ prices/ forecasting/ optimizer/ automations/
@@ -182,7 +190,7 @@ energy-manager/
 │   ├── api/           FastAPI REST + WebSocket
 │   ├── database/ security/
 │   ├── web/           webinterface (ook gebruikt door de Windows-app)
-│   └── simulator/     fysiek woningmodel
+│   └── simulator/     fysiek woningmodel; lab.py = virtuele apparaten van de Testomgeving
 ├── windows-app/       Tauri 2-app (verbindingsscherm)
 ├── windows/           PyInstaller-server + Inno Setup-installer
 ├── deploy/            systemd-unit
@@ -194,6 +202,11 @@ energy-manager/
 
 * [ARCHITECTURE.md](ARCHITECTURE.md) — technisch ontwerp en keuzes
 * [DEVELOPMENT.md](DEVELOPMENT.md) — status per onderdeel, teststatus, besluiten, beperkingen
+* [TEST_MORGEN_WINDOWS.md](TEST_MORGEN_WINDOWS.md) — stappenplan om 0.6.0 op Windows te testen
+* [SUPPORTED_DEVICES.md](SUPPORTED_DEVICES.md) — wat werkt met welk apparaat
+* [DEVICE_INTEGRATION_AUDIT.md](DEVICE_INTEGRATION_AUDIT.md) — audit van de apparaatintegratie (status per bevinding/integratie)
+* [DEVICE_CATALOG.md](DEVICE_CATALOG.md), [DEVICE_PROFILE_SCHEMA.md](DEVICE_PROFILE_SCHEMA.md), [DRIVER_SDK.md](DRIVER_SDK.md)
+* [COMMISSIONING_GUIDE.md](COMMISSIONING_GUIDE.md), [SAFETY_RULES.md](SAFETY_RULES.md)
 * [DEVICE_INTEGRATION_GUIDE.md](DEVICE_INTEGRATION_GUIDE.md) — apparaten en drivers
 * [AUDIT_REMEDIATION.md](AUDIT_REMEDIATION.md) — status per auditbevinding
 * [TEST_RESULTS.md](TEST_RESULTS.md) — testuitslagen van deze release
