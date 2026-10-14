@@ -119,6 +119,9 @@ $status = Api "/system/status"
 if (-not $status.database.ok) { Fail "database not ok" }
 if (-not (Test-Path (Join-Path $Data "demo\ems.db"))) { Fail "database file not created" }
 Pass "background EMS (no window) runs; database created ($($status.database.backend), schema v$($status.database.schema_version))"
+$build = (Api "/system/info").build
+if (-not $build.commit -or $build.commit -eq "dev" -or -not $build.consistent) { Fail "installed server has no release build id ($($build.build))" }
+Pass "build identity: server $($build.build), built $($build.built_at), web assets $($build.asset_hash)"
 
 # 4. Live data and optimizer -----------------------------------------------------------------
 $live = Api "/energy/live"
