@@ -19,6 +19,12 @@ import sys
 
 from playwright.sync_api import sync_playwright
 
+for _stream in (sys.stdout, sys.stderr):      # Windows console code page cannot print "→"
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 BASE, OUT = sys.argv[1].rstrip("/"), sys.argv[2]
 CDP = sys.argv[sys.argv.index("--cdp") + 1] if "--cdp" in sys.argv else None
 DEMO = "--demo" in sys.argv

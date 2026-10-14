@@ -80,6 +80,7 @@ function StopApp($p) {
 }
 function AppUi([string]$name, [string[]]$extra) {
   $out = Join-Path (Get-Location) "ui-$name"
+  $env:PYTHONIOENCODING = "utf-8"
   python tests\ui\wizard_acceptance.py $Base $out --cdp "http://127.0.0.1:9222" @extra 2>&1 | Tee-Object -Variable log | Write-Host
   if ($LASTEXITCODE -ne 0) { Fail "UI in the installed app ($name) failed: $($log | Select-Object -Last 5)" }
   return ($log | Where-Object { "$_" -like "PASS *" }).Count
