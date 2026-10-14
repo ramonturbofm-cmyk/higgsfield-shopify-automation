@@ -1,4 +1,4 @@
-# Energy Manager 0.6.0 testen op Windows — stappenplan
+# Energy Manager 0.6.1 testen op Windows — stappenplan
 
 Dit is een **testversie** (UNSIGNED TEST BUILD). U hoeft niets met Python of de opdrachtprompt te doen.
 Alles wat u in de **Testomgeving** ziet is virtueel: er wordt geen echt apparaat aangestuurd.
@@ -10,10 +10,10 @@ screenshot.
 
 ## Voorbereiding
 
-1. Download `EnergyManagerSetup-0.6.0.exe` van de GitHub-release **energy-manager-windows**
+1. Download `EnergyManagerSetup-0.6.1.exe` van de GitHub-release **energy-manager-windows**
    (Releases → "Energy Manager (Windows)").
 2. Controleer eventueel de controlesom: rechtsklik in de map → *Terminal openen* →
-   `Get-FileHash .\EnergyManagerSetup-0.6.0.exe` — de uitkomst moet gelijk zijn aan de SHA-256 in
+   `Get-FileHash .\EnergyManagerSetup-0.6.1.exe` — de uitkomst moet gelijk zijn aan de SHA-256 in
    `SHA256SUMS.txt` bij de release.
 
 ---
@@ -22,19 +22,21 @@ screenshot.
 
 | # | Wat u doet | Wat u moet zien |
 |---|---|---|
-| 1 | Dubbelklik op `EnergyManagerSetup-0.6.0.exe`. Windows SmartScreen meldt "Onbekende uitgever": kies **Meer informatie → Toch uitvoeren**. Volg de installatie. | De installatie eindigt zonder foutmelding. In het Startmenu staat "Energy Manager". Een eerdere versie wordt bijgewerkt; uw gegevens blijven. |
+| 1 | Dubbelklik op `EnergyManagerSetup-0.6.1.exe`. Windows SmartScreen meldt "Onbekende uitgever": kies **Meer informatie → Toch uitvoeren**. Volg de installatie. | De installatie eindigt zonder foutmelding. In het Startmenu staat "Energy Manager". Een eerdere versie wordt bijgewerkt; uw gegevens blijven. |
 | 2 | Open **Energy Manager** uit het Startmenu. | Het startscherm met "Alles op deze computer" en drie keuzes: *Mijn eigen installatie*, *Demo*, *Testomgeving*. |
 | 3 | Kies **Testomgeving** en klik **Starten**. | Binnen ongeveer een minuut opent het EMS. Inloggen: **demo / demo** (al ingevuld). |
-| 4 | Kijk bovenaan. | Een oranje label **TESTOMGEVING**. Links in het menu een pagina **Testomgeving**. |
+| 4 | Kijk bovenaan, en onderin het menu links. | Een oranje label **TESTOMGEVING**. Links in het menu een pagina **Testomgeving**. Onderin het menu: **Versie 0.6.1 · build …** (staat er "App … ≠ server …" of een rode melding "Versieverschil", sluit de app dan helemaal en open hem opnieuw). |
 | 5 | Open **Testomgeving** in het menu. | "Virtuele woning" met netmeting en een lijst van 8 virtuele apparaten met hun adres (127.0.0.1:…). |
-| 6 | Ga naar **Apparaten → + Apparaat toevoegen**. | 15 tegels: Slimme meter, Energiemeter, Zonnepanelen, Hybride omvormer, Thuisbatterij, Warmtepomp, … |
+| 6 | Ga naar **Apparaten → + Apparaat toevoegen**. | Bovenaan de stappen **Soort → Methode → Gegevens → Testen** en 15 tegels: Slimme meter, Energiemeter, Zonnepanelen, Hybride omvormer, Thuisbatterij, Warmtepomp, … Klik **Zonnepanelen / omvormer**: u ziet vier keuzes: *Automatisch zoeken*, *Kies merk en model*, *Via een gateway*, *Handmatig (Expert)*. (Ziet u "Merk en model" als tweede stap, dan draait er een oude versie: meld dit.) |
 | 7 | **Automatisch zoeken**: kies *Thuisbatterij* → *Automatisch zoeken*. | Na enkele seconden: "Virtuele thuisbatterij 10 kWh" met **Exact model herkend** en het label *virtueel*. |
 | 8 | Klik **Kiezen** → **Verbinding testen**. | "✓ Verbonden", "Apparaat meldt: EM Testomgeving EM-VBAT-10 · serienummer EMLAB-BAT-0001", en een tabel *Wat kan het EMS met dit apparaat?* (uitlezen: groen; bedienen: *Na inbedrijfstelling*). Klik **Opslaan**. |
 | 9 | **Merk en model**: *+ Apparaat toevoegen* → *Slimme meter / P1* → *Kies merk en model* → onder "Energy Manager Testomgeving" **Virtuele P1-meter** → *Kiezen*. Laat "Gebruiken als primaire netmeter" aangevinkt → **Verbinding testen** → **Opslaan**. | De meter is toegevoegd. Bovenaan staat nu "Netmeter online". |
 | 10 | Bekijk de pagina van de P1-meter. | Netvermogen, per fase vermogen/stroom/spanning, meterstanden. |
+| 10b | **Merk en model bekijken**: *+ Apparaat toevoegen* → *Zonnepanelen / omvormer* → *Kies merk en model*. | Echte merken (Fronius, SMA, SolarEdge, Kostal, …) met per model de functies (bijv. "PV-vermogen en opbrengst", "Vermogensbegrenzing — alleen als …"). Merken zonder koppeling (Growatt, Enphase, …) staan er eerlijk als "Nog niet ondersteund", met knoppen "Koppelen via …". Home Assistant en SunSpec staan niet als merk, maar onderaan bij "Staat uw merk of model er niet bij?". |
 | 11 | **Warmtepomp**: *+ Apparaat toevoegen* → *Warmtepomp* → *Kies merk en model*. | U ziet ook echte merken met een eerlijke status, bijv. Daikin/NIBE/Weheat "Nog niet ondersteund" (zonder knop) en "SG Ready" als alternatief. Kies **Virtuele warmtepomp (Modbus TCP)** → testen → opslaan. |
 | 12 | **Omvormer**: voeg *Zonnepanelen / omvormer* → **Virtuele SunSpec-omvormer 5 kW** toe (testen, opslaan). | Rapport: PV-vermogen uitleesbaar; vermogensbegrenzing *Na inbedrijfstelling*. |
 | 13 | (Optioneel) voeg ook de **Virtuele laadpaal** en **Virtuele boiler via slim relais** toe. | Bij de laadpaal staat géén "SOC van de auto": die is onbekend; u stelt een doel in kWh in. |
+| 13b | **Home Assistant (virtueel)**: *+ Apparaat toevoegen* → *Elektrische boiler* → *Via een gateway* → **Via Home Assistant** → *Kiezen*. Adres en token (`testomgeving`) zijn al ingevuld. Klik **Verbinden en entiteiten ophalen**. Kies bij *Vermogen* "Testwoning boiler vermogen" en bij *aan/uit schakelen* "Testwoning boiler" → **Verbinding testen** → **Opslaan**. | U kiest alles uit lijsten; er is geen JSON nodig. |
 | 14 | **Bewerken**: open de thuisbatterij → **Bewerken**, typ een nieuwe naam en wacht 10 seconden zonder op te slaan. | Wat u typte blijft staan (wordt niet gewist door live-updates). Klik **Opslaan**: de nieuwe naam staat bovenaan. |
 | 15 | **Realtime**: ga naar het **Dashboard**. | De getallen veranderen elke paar seconden. |
 | 16 | **Optimizer**: open **Planning**. | Een planning voor de komende uren met uitleg per kwartier. |

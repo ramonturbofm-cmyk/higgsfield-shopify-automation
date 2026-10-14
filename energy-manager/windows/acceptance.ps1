@@ -256,7 +256,7 @@ if ($procs.Count -ne 1) { Fail "expected exactly one EMS server process, found $
 $appProc = StartAppDebug
 $n = AppUi "upgrade-demo" @("--demo")
 StopApp $appProc
-Pass "upgrade 0.5.0 -> $installed: one server process of version $installed, settings and history kept ($rowsOld -> $rowsNew samples); the app shows the NEW wizard (4 methods, all categories) despite the cached 0.5.0 files ($n UI checks)"
+Pass "upgrade 0.5.0 -> ${installed}: one server process of version ${installed}, settings and history kept ($rowsOld -> $rowsNew samples); the app shows the NEW wizard (4 methods, all categories) despite the cached 0.5.0 files ($n UI checks)"
 
 Write-Host ""
 Write-Host "WINDOWS ACCEPTANCE: PASS ($($results.Count) checks)" -ForegroundColor Green

@@ -458,3 +458,21 @@ apparaten als virtueel (`devices/manager.is_virtual`); echte hardware blijft in 
 **Wizard** (`web/js/views/addwizard.js`, `deviceform.js`): `/library/categories`, `/library/brands`,
 `/discovery/scan`, `/devices/probe` (test + identiteit + rapport), `POST /devices` (vult
 profiel-`default_params` aan), `PUT /devices/{id}/address`.
+
+## 23. Build-identiteit en cache (0.6.1)
+
+Aanleiding: na een upgrade toonde de Windows-app de oude wizard — WebView2 had de 0.5.0-JavaScript-modules
+heuristisch gecachet (geen `Cache-Control`), en combineerde die met de nieuwe server.
+
+* `ems/buildinfo.py`: versie, commit en bouwtijd (`BUILD_INFO.json`, geschreven door
+  `tools/write_build_info.py` tijdens de release-build) en een SHA-256 over alle bestanden in `web/`.
+* `index.html` wordt per server gerenderd met `/static/v/<hash>/…`-URL's en `<meta name="ems-build|ems-asset|
+  ems-version">`; `Cache-Control: no-store`. Versie-URL's met de huidige hash: `immutable` (1 jaar); een oude hash
+  krijgt het huidige bestand met `no-store`. Onversioneerd `/static/…`: `no-cache` (altijd revalideren).
+  Alle modules importeren relatief, dus de hash geldt voor de hele module-graaf.
+* De frontend vergelijkt zijn hash met `/healthz` (start, WebSocket-herverbinding, elke 2 minuten) en herlaadt
+  één keer bij een verschil; daarna een melding "Versieverschil". Versie van app en server onderin het menu.
+* Windows: de app (`connect.js`, `APP_VERSION` via `tools/set_version.py`) herstart een lokale server van een
+  andere versie; de installer wist de HTTP-cache van WebView2 (niet de opslag) en beëindigt achtergebleven
+  serverprocessen. `windows/acceptance.ps1` bedient de geïnstalleerde app via CDP
+  (`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port`), ook na een upgrade vanaf 0.5.0.

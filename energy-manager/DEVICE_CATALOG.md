@@ -1,4 +1,4 @@
-# Apparatencatalogus — Energy Manager 0.6.0
+# Apparatencatalogus — Energy Manager 0.6.1
 
 Technisch overzicht van de lokale apparatenbibliotheek: welke merk/model-regels er zijn, welk profiel en
 welke driver ze gebruiken, en de bron. Voor gebruikers: zie `SUPPORTED_DEVICES.md`.
@@ -24,29 +24,25 @@ Overige koppelingen zonder profiel (eigen driver): `homewizard.p1` (HomeWizard L
 
 ## Merk/model-lijst (wizard)
 
-| Merk | Model | Status in de wizard | Koppeling |
-|---|---|---|---|
-| HomeWizard | P1 Meter (HWE-P1) | Ondersteund | `homewizard.p1` |
-| Slimme meter (DSMR) | P1-kabel (USB) | Ondersteund | `dsmr.p1` |
-| Shelly | Gen2+ relais/stekker | Ondersteund | `shelly.switch` |
-| Shelly | Gen2+ met 2 relais als SG Ready-schakelaar | Via SG Ready | `sgready.relay` |
-| Shelly | Gen1 | Nog niet ondersteund | — |
-| SG Ready (alle merken) | Warmtepomp met SG Ready-ingang + netwerkrelais | Via SG Ready | `sgready.relay` |
-| Fronius | Symo / Primo / Tauro / GEN24; Smart Meter | Alleen uitlezen (SunSpec) | `sunspec.inverter` / `sunspec.meter` |
-| SMA | Sunny Boy / Tripower (SunSpec) | Alleen uitlezen | `sunspec.inverter` |
-| SolarEdge | Omvormers; meter via omvormer | Alleen uitlezen | `sunspec.inverter` / `sunspec.meter` |
-| Kostal | Plenticore / Piko IQ | Alleen uitlezen | `sunspec.inverter` |
-| SunSpec-compatibel | Omvormer / meter | Alleen uitlezen | `sunspec.*` |
-| Victron Energy | GX (Cerbo, Venus, Ekrano) | Alleen uitlezen (community) | `victron.gx` |
-| Home Assistant | Entiteiten uit uw eigen HA | Via Home Assistant | `homeassistant.entities` |
-| Solis, GoodWe, Sungrow, SolaX, Huawei | alle | Nog niet ondersteund | alternatief: Home Assistant |
-| NIBE | S-serie | Nog niet ondersteund | alternatief: SG Ready / HA |
-| Daikin | Altherma | Nog niet ondersteund | alternatief: SG Ready / HA |
-| Weheat | Blackbird / Sparrow / Flint | Nog niet ondersteund (alleen cloud) | — |
-| Laadpalen (OCPP) | OCPP 1.6J | Nog niet ondersteund | alternatief: HA |
+`manufacturers.json` (schema 2) bevat **merken met modellen**, per model: status, functies, opmerking en — als het
+model niet (volledig) ondersteund is — **alternatieve routes**. Verbindingsmethoden zijn géén merk:
 
-"Alleen uitlezen" voor SunSpec-omvormers: als het apparaat model 123 aanbiedt kan vermogensbegrenzing na
-inbedrijfstelling tot **beperkte regeling**; volledige regeling blijft geblokkeerd tot een hardwaretest.
+| Route | Driver | Soorten |
+|---|---|---|
+| `sunspec` — Apparaat met SunSpec (Modbus) | `library.sunspec` | omvormer, hybride, slimme meter, energiemeter |
+| `sgready` — SG Ready via netwerkrelais | `sgready.relay` | warmtepomp, warmtepompboiler |
+| `shelly` — Netwerkrelais / slimme stekker | `shelly.switch` | boiler, stekker, relais, flexibele verbruiker |
+| `homeassistant` — Via Home Assistant | `homeassistant.entities` | alle |
+
+| Status | Merken/modellen (voorbeelden) |
+|---|---|
+| Ondersteund | HomeWizard P1 Meter, P1-kabel (DSMR), Shelly Gen2+ |
+| Alleen uitlezen (SunSpec; begrenzing alleen met model 123) | Fronius Symo/Primo/Tauro/GEN24 + Smart Meter, SMA Sunny Boy/Tripower, SolarEdge-omvormers + meter, Kostal Plenticore/Piko IQ |
+| Alleen uitlezen, community | Victron GX |
+| Nog niet ondersteund + alternatief | omvormers/batterijen: Solis, GoodWe, Sungrow, SolaX, Huawei, Growatt, Deye, Enphase, APsystems, Hoymiles, Tesla Powerwall, BYD (via omvormer), Sessy, Zendure, SolarEdge Home Battery; warmtepompen: NIBE, Daikin, Vaillant, Viessmann, Panasonic, Mitsubishi Electric, Bosch/Nefit, Remeha, Itho Daalderop, Alpha Innotec, Atlantic, Intergas, Quatt, Weheat (alleen HA); warmtepompboilers en boilers: Itho Daalderop, Atlantic, Ariston, Inventum; laadpalen: Alfen, Easee, Zaptec, Wallbox, Tesla, Peblar, ABB, Smappee, Etrel, overige OCPP; auto's, airco's, ventilatie, Eastron, HomeWizard kWh-meter/Energy Socket, TP-Link, Tasmota |
+
+De catalogus wordt bij het laden gecontroleerd: elke verwijzing naar een profiel of route moet bestaan
+(`tests/test_device_library.py::test_catalog_lists_real_brands_not_protocols`).
 
 ## Licenties
 
@@ -70,6 +66,7 @@ fabrikant, 8–15 model, 16–23 serienummer, 24–27 firmware (ASCII, 2 tekens 
 | 15580 | P1-meter | HomeWizard API v1 (`/api`, `/api/v1/data`) |
 | 15581 | 2-relaismodule voor SG Ready | Shelly Gen2 RPC |
 | 15582 | 1-relaismodule boiler 2 kW | Shelly Gen2 RPC |
+| 15583 | Home Assistant (virtueel; token `testomgeving`) | Home Assistant REST API |
 
 **Warmtepomp (15503)** — input: 0 elektrisch vermogen W · 1 thermisch W · 2 binnen ×0,1 °C (int16) · 3 buiten
 ×0,1 · 4 aanvoer ×0,1 · 5 retour ×0,1 · 6 tapwater ×0,1 · 7 COP ×0,01 · 8 compressor aan · 9 frequentie Hz ·

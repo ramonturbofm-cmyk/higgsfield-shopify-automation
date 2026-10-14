@@ -14,6 +14,9 @@ Werk deze lijst af vóór elke release. Vink alleen af wat echt is gecontroleerd
 - [ ] CI-job *Linux acceptance* groen (Docker amd64, Docker arm64/QEMU, systemd)
 - [ ] Browser-acceptatie `tests/ui/ui_acceptance.py` groen (resoluties, touch, toetsenbord, offline/trage API)
 - [ ] Wizard-acceptatie `tests/ui/wizard_acceptance.py` groen tegen `ems serve --lab`
+- [ ] Windows-acceptatie bevat de UI-controle **in de geïnstalleerde app** (WebView2 via CDP) na schone installatie
+      én na een upgrade vanaf de vorige gepubliceerde versie (oude interface in de cache): nieuwe wizard zichtbaar
+- [ ] `/healthz` toont het build-ID van deze build (commit), menu toont dezelfde versie voor app en server
 - [ ] `tests/test_device_library.py` groen (virtuele apparaten via echte protocollen)
 - [ ] Alle ingebouwde profielen valideren (`Catalog(None).load().problems` leeg); geen profiel claimt
       `HARDWARE_TESTED` zonder vastgelegde hardwaretest (model + firmware)

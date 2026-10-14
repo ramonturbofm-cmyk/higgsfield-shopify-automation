@@ -1,4 +1,4 @@
-# Bekende beperkingen — Energy Manager 0.6.0
+# Bekende beperkingen — Energy Manager 0.6.1
 
 Eerlijk overzicht van wat (nog) niet kan of niet bewezen is. Zie ook [AUDIT_REMEDIATION.md](AUDIT_REMEDIATION.md).
 
@@ -16,7 +16,11 @@ Eerlijk overzicht van wat (nog) niet kan of niet bewezen is. Zie ook [AUDIT_REME
 * **Niet geïmplementeerd**: OCPP 1.6J, generieke WebSocket-driver, zoeken op andere nodes (alleen lokaal),
   Modbus RTU niet getest met echte seriële hardware.
 * **Victron GX**: registers uit een community-bron (evcc, MIT); alleen uitlezen, niet geverifieerd.
-* **Home Assistant-brug**: alleen getest met een nagebootste API, niet met een echte Home Assistant.
+* **Home Assistant-brug**: getest met een nagebootste API en de virtuele Home Assistant van de Testomgeving,
+  niet met een echte Home Assistant. Een warmtepompmodus via Home Assistant (keuzelijst-opties) is alleen in
+  Expert in te stellen.
+* **Schakelbare apparaten** (boiler, relais, stekker) hebben geen automatische regelaar; inbedrijfstelling
+  voorbij de schaduwmodus vraagt eerst een handmatige opdracht of een automatisering.
 * **Testomgeving**: gebruikt vaste poorten 15502–15599 op 127.0.0.1 (verschuifbaar met
   `EMS_LAB_PORT_OFFSET`); bezette poorten = dat virtuele apparaat ontbreekt (staat in het logboek).
 * Raspberry Pi: getest als Docker-image voor arm64 **onder QEMU-emulatie** in CI, niet op een fysieke Pi.
