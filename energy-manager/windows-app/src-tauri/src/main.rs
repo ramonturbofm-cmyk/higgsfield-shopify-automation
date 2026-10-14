@@ -57,9 +57,27 @@ async fn stop_local_server() -> Result<(), String> {
     if status.success() { Ok(()) } else { Err("de server reageerde niet op stoppen".into()) }
 }
 
+/// WebView2 browser arguments of the main window. wry's defaults (no mini menu, no SmartScreen) plus — only for the
+/// automated acceptance test — a DevTools port on 127.0.0.1 when ENERGY_MANAGER_WEBVIEW_DEBUG_PORT is set, so the
+/// test can drive the installed app itself. (WebView2's own WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS variable is
+/// ignored because the app always passes its own arguments.)
+fn browser_args() -> String {
+    let mut args = String::from("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection");
+    if let Some(port) = std::env::var("ENERGY_MANAGER_WEBVIEW_DEBUG_PORT").ok().and_then(|p| p.parse::<u16>().ok()) {
+        args.push_str(&format!(" --remote-debugging-port={port} --remote-debugging-address=127.0.0.1"));
+    }
+    args
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![local_server_available, start_local_server, stop_local_server])
+        .setup(|app| {
+            let mut config = app.config().app.windows[0].clone();
+            config.additional_browser_args = Some(browser_args());
+            tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?.build()?;
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("Energy Manager kon niet starten");
 }

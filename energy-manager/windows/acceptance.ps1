@@ -47,18 +47,33 @@ function Login() {
 # The installed app, with its WebView2 reachable over the Chrome DevTools Protocol, so the UI test drives the
 # real app window (its own WebView2 profile and cache) — not a separate browser.
 function StartAppDebug([string]$exe = (Join-Path $App "Energy Manager.exe")) {
-  $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222"
+  $env:ENERGY_MANAGER_WEBVIEW_DEBUG_PORT = "9222"      # test hook of the app (src-tauri/src/main.rs)
   $p = Start-Process $exe -PassThru
-  Remove-Item Env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
+  Remove-Item Env:ENERGY_MANAGER_WEBVIEW_DEBUG_PORT
+  for ($i = 0; $i -lt 90; $i++) {
+    try { Invoke-RestMethod "http://127.0.0.1:9222/json/version" -TimeoutSec 2 | Out-Null; return $p } catch { Start-Sleep 1 }
+  }
+  Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" | Select-Object -First 3 -ExpandProperty CommandLine | Write-Host
+  Fail "app WebView2 debug port did not open (app running: $(-not $p.HasExited))"
+}
+# The 0.5.0 app has no test hook: open the old interface with Edge on the app's own WebView2 profile, so the old
+# files end up in exactly the cache the app uses.
+function StartEdgeOnAppProfile() {
+  $edge = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") |
+    Where-Object { Test-Path $_ } | Select-Object -First 1
+  if (-not $edge) { Fail "Microsoft Edge not found on the runner" }
+  $profileDir = Join-Path $env:LOCALAPPDATA "nl.energymanager.desktop\EBWebView"
+  New-Item -ItemType Directory -Force $profileDir | Out-Null
+  $p = Start-Process $edge -ArgumentList "--headless=new", "--remote-debugging-port=9222", "--user-data-dir=`"$profileDir`"", "about:blank" -PassThru
   for ($i = 0; $i -lt 60; $i++) {
     try { Invoke-RestMethod "http://127.0.0.1:9222/json/version" -TimeoutSec 2 | Out-Null; return $p } catch { Start-Sleep 1 }
   }
-  Fail "app WebView2 debug port did not open"
+  Fail "Edge debug port did not open"
 }
 function StopApp($p) {
   Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
   Start-Sleep 2
-  Get-Process msedgewebview2 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  Get-Process msedgewebview2, msedge -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
   for ($i = 0; $i -lt 20; $i++) {
     try { Invoke-RestMethod "http://127.0.0.1:9222/json/version" -TimeoutSec 1 | Out-Null; Start-Sleep 1 } catch { return }
   }
@@ -235,10 +250,13 @@ Login
 Api "/settings" "PUT" @{ site = @{ name = "Upgradetest 0.5.0" } } | Out-Null
 Start-Sleep -Seconds 25
 $rowsOld = (Api "/history?hours=1&resolution=raw").rows.Count
-$appProc = StartAppDebug
-$n = AppUi "old-0.5.0" @("--prime-old")
+$appProc = Start-Process (Join-Path $App "Energy Manager.exe") -PassThru      # the 0.5.0 app creates its profile
+Start-Sleep -Seconds 8
 StopApp $appProc
-Pass "0.5.0 installed and used: old wizard opened in the app (its files cached), settings changed, $rowsOld history samples"
+$edgeProc = StartEdgeOnAppProfile
+$n = AppUi "old-0.5.0" @("--prime-old")
+StopApp $edgeProc
+Pass "0.5.0 installed and used: old wizard opened on the app's WebView2 profile (its files cached), settings changed, $rowsOld history samples"
 Install
 if (-not (PortClosed 30)) { Fail "installer did not stop the running 0.5.0 EMS" }
 StartFromRunKey
