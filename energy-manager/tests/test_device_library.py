@@ -50,7 +50,7 @@ async def lab(monkeypatch):
     site.lab = devices
     site.advance(1)
     await devices.start()
-    assert len(devices.ports) == 8, devices.ports
+    assert len(devices.ports) == 9, devices.ports
     yield site, devices
     await devices.stop()
 
@@ -345,7 +345,7 @@ async def test_c_lab_starts_empty_and_marked(lab_api):
     assert info["profile"] == "lab"
     assert (await c.get("/api/v1/devices")).json() == []                    # the user adds the devices
     lab = (await c.get("/api/v1/lab")).json()
-    assert lab["active"] and len(lab["devices"]) == 8
+    assert lab["active"] and len(lab["devices"]) == 9
 
 
 async def test_c_full_chain_read_only_shadow_limited_full(lab_api):
@@ -503,3 +503,81 @@ async def test_home_assistant_bridge_reads_and_controls_only_when_confirmed(monk
                                            connection={**conn, "token": "wrong"}), DriverContext(SimulatedClock(T0)))
     with pytest.raises(DriverError, match="token"):
         await bad.connect()
+
+
+# ================================================== catalog content (0.6.1)
+WIZARD = ["smart_meter", "energy_meter", "pv_inverter", "hybrid_inverter", "battery", "heat_pump", "heat_pump_boiler",
+          "boiler", "ev_charger", "ev", "airco", "ventilation", "smart_plug", "smart_relay", "flexible_load"]
+
+
+def test_catalog_lists_real_brands_not_protocols():
+    cat = Catalog(None).load()
+    assert not cat.problems, cat.problems
+    for c in WIZARD:
+        names = {b["manufacturer"] for b in cat.brands(c)}
+        assert not names & {"Home Assistant", "SunSpec-compatibel (overige merken)", "SG Ready (alle merken)"}, (c, names)
+        assert cat.routes(c), c                                     # always at least one alternative route
+        assert names or c in ("hvac",), c
+        for b in cat.brands(c):
+            for m in b["models"]:
+                if m["support"] in ("supported", "read_only", "community_read_only"):
+                    assert m["functions"], (b["manufacturer"], m["model"])
+                if m["support"] == "not_supported":
+                    assert m["note"], (b["manufacturer"], m["model"])
+    pv = {b["manufacturer"]: b for b in cat.brands("pv_inverter")}
+    assert {"Fronius", "SMA", "SolarEdge", "Kostal", "Growatt", "Enphase"} <= set(pv)
+    assert any("model 123" in f for f in pv["Fronius"]["models"][0]["functions"])
+    assert [r["id"] for r in pv["Growatt"]["models"][0]["alternatives"]] == ["sunspec", "homeassistant"]
+    hp = {b["manufacturer"]: b for b in cat.brands("heat_pump")}
+    assert {r["id"] for r in hp["Vaillant"]["models"][0]["alternatives"]} == {"sgready", "homeassistant"}
+    assert {"Alfen", "Easee", "Zaptec"} <= {b["manufacturer"] for b in cat.brands("ev_charger")}
+    assert {r["id"] for r in cat.routes("pv_inverter")} == {"sunspec", "homeassistant"}
+
+
+async def test_home_assistant_flow_against_virtual_home_assistant(lab_api):
+    """Wizard flow without JSON: list entities with slots for the category, map, add, read, control after commissioning."""
+    rt, c = lab_api
+    url = f"http://127.0.0.1:{rt.lab.ports['homeassistant']}"
+    bad = await c.post("/api/v1/integrations/homeassistant/entities", json={"url": url, "token": "fout"})
+    assert bad.status_code == 422 and "token" in bad.json()["detail"]
+    r = (await c.post("/api/v1/integrations/homeassistant/entities",
+                      json={"url": url, "token": "testomgeving", "category": "boiler"})).json()
+    assert any(e["entity_id"] == "switch.testwoning_boiler" for e in r["all"])
+    assert {s["metric"] for s in r["slots"]["values"]} >= {"load_power_w"}
+    assert any(s["action"] == "switch" and "switch" in s["domains"] for s in r["slots"]["controls"])
+    routes = (await c.get("/api/v1/library/routes", params={"category": "boiler"})).json()
+    ha = next(x for x in routes if x["id"] == "homeassistant")
+    assert ha["lab_connection"] == {"url": url, "token": "testomgeving"}
+    body = {"name": "Boiler via HA", "category": "boiler", "driver": "homeassistant.entities",
+            "connection": {"url": url, "token": "testomgeving", "exclusive_control_confirmed": True,
+                           "values": [{"metric": "load_power_w", "entity_id": "sensor.testwoning_boiler_vermogen"}],
+                           "controls": [{"action": "switch", "entity_id": "switch.testwoning_boiler"}]}}
+    probe = (await c.post("/api/v1/devices/probe", json=body)).json()
+    assert probe["reachable"]
+    assert {r["capability"]: r["status"] for r in probe["capability_report"]}["control_switch"] == "REQUIRES_COMMISSIONING"
+    dev = (await c.post("/api/v1/devices", json=body)).json()
+    assert dev["connection"]["token"] == "********"
+    did = dev["id"]
+    assert (await c.post(f"/api/v1/devices/{did}/test")).json()["reachable"]
+    await rt.tick_once()
+    assert "load_power_w" in (await c.get(f"/api/v1/devices/{did}")).json()["values"]
+    # Virtual Home Assistant: commissioning up to full control, then a manual command really switches the boiler.
+    assert (await c.put(f"/api/v1/devices/{did}/commissioning", json={"level": "shadow"})).status_code == 200
+    assert (await c.post(f"/api/v1/devices/{did}/commissioning/write-test")).json()["ok"]
+    com = (await c.get(f"/api/v1/devices/{did}/commissioning")).json()
+    assert com["levels"]["full"]["allowed"] or "schaduwmodus" in com["levels"]["full"]["reason"], com["levels"]["full"]
+    # A switchable load has no automatic regulator: in shadow mode a manual command shows "EMS zou …".
+    r = await c.post("/api/v1/overrides", json={"device": did, "action": "switch", "value": "off"})
+    assert r.status_code == 200 and not r.json()["executes"]
+    for _ in range(2):
+        await rt.tick_once()
+    await c.delete(f"/api/v1/overrides/{did}")
+    r = await c.put(f"/api/v1/devices/{did}/commissioning", json={"level": "full", "confirm_text": "Boiler via HA"})
+    assert r.status_code == 200, r.text
+    rt.site.components["lab_boiler"].relay_on = True
+    r = await c.post("/api/v1/overrides", json={"device": did, "action": "switch", "value": "off"})
+    assert r.status_code == 200 and r.json()["executes"], r.text
+    for _ in range(2):
+        await rt.tick_once()
+    assert rt.site.components["lab_boiler"].relay_on is False
+    assert ("homeassistant", "switch.turn_off", ["switch.testwoning_boiler"]) in rt.lab.write_log

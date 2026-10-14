@@ -3,6 +3,7 @@
 // the network (Raspberry Pi). Servers are probed via GET /api/v1/system/info (public;
 // the server allows the app's origin via CORS); then the server's own web interface
 // is loaded in this window.
+const APP_VERSION = "0.6.1";   // set by tools/set_version.py — must equal the bundled server's version
 const LOCAL = "http://127.0.0.1:8080";
 const DEFAULTS = ["http://energy-manager.local:8080", "http://raspberrypi.local:8080", LOCAL];
 const tauri = window.__TAURI__?.core;
@@ -100,7 +101,11 @@ async function startLocal(mode, hash) {
   $("startLocal").disabled = true;
   try {
     let info = await probe(LOCAL, 1500);
-    if (info && modeOf(info) !== mode) {        // running in another mode: restart
+    if (info && info.version !== APP_VERSION) {  // an older/other server is still running: replace it
+      localMsg(`Er draait nog Energy Manager-server ${info.version}; deze wordt vervangen door ${APP_VERSION}…`);
+      await tauri.invoke("stop_local_server");
+      info = null;
+    } else if (info && modeOf(info) !== mode) { // running in another mode: restart
       localMsg("EMS wordt herstart in de gekozen modus…");
       await tauri.invoke("stop_local_server");
       info = null;
@@ -109,6 +114,11 @@ async function startLocal(mode, hash) {
       localMsg("EMS wordt gestart… (de eerste keer kan dit tot een minuut duren)");
       await tauri.invoke("start_local_server", { mode });
       for (let i = 0; i < 120 && !info; i++) { await sleep(1000); info = await probe(LOCAL, 1500); }
+    }
+    if (info && info.version !== APP_VERSION) {
+      localMsg(`Op poort 8080 draait een andere Energy Manager-server (versie ${info.version}) die niet gestopt kan worden. `
+        + "Stop die via Startmenu → Energy Manager → Hulpmiddelen → EMS stoppen, of herstart de pc.", true);
+      return;
     }
     if (!info) {
       localMsg("Het EMS start niet. Kijk in %LOCALAPPDATA%\\EnergyManager\\logs\\server.log of start "
@@ -150,6 +160,7 @@ async function initLocal() {
 }
 
 (async () => {
+  if ($("appver")) $("appver").textContent = `Energy Manager-app ${APP_VERSION}`;
   const choose = new URLSearchParams(location.search).has("choose");
   const last = load("last", null);
   const local = await initLocal();

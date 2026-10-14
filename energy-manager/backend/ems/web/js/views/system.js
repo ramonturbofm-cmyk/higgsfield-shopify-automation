@@ -1,4 +1,5 @@
-import { api, can, dateTime, download, guard, h, num, statusPill } from "../lib.js";
+import { FRONTEND } from "../app.js";
+import { api, can, dateTime, download, guard, h, num, state, statusPill } from "../lib.js";
 import { decisionList, kpi } from "./common.js";
 
 export async function render(root) {
@@ -6,7 +7,7 @@ export async function render(root) {
   const upd = await api("/system/update");
   const up = s.uptime_s;
   root.append(h("h1", {}, "Systeem"),
-    h("div", { class: "grid cols-4" }, kpi("Versie", s.version, `modus: ${s.mode}`), kpi("Uptime", up > 86400 ? `${num(up / 86400, 1)} dagen` : `${num(up / 3600, 1)} uur`, `regelmodus: ${s.gate_mode}`),
+    h("div", { class: "grid cols-4" }, kpi("Versie", s.version, `modus: ${s.mode} · server ${state.info?.build?.build || "?"} · app ${FRONTEND.build || "?"}`), kpi("Uptime", up > 86400 ? `${num(up / 86400, 1)} dagen` : `${num(up / 3600, 1)} uur`, `regelmodus: ${s.gate_mode}`),
       kpi("Database", s.database.ok ? "OK" : "FOUT", `${s.database.backend}, schema v${s.database.schema_version}`),
       kpi("Fallback", s.failsafe.active ? "ACTIEF" : "uit", s.failsafe.active ? s.failsafe.reason : `${s.failsafe.events} keer sinds start`)),
     h("div", { class: "grid cols-2", style: { marginTop: "14px" } },

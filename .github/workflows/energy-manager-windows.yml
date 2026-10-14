@@ -44,7 +44,9 @@ jobs:
         run: python -m pytest -q --timeout 300 -p no:warnings
 
       - name: Build EMS server (PyInstaller)
-        run: pyinstaller --noconfirm --clean --distpath dist --workpath build windows/EnergyManagerServer.spec
+        run: |
+          python tools/write_build_info.py
+          pyinstaller --noconfirm --clean --distpath dist --workpath build windows/EnergyManagerServer.spec
 
       - name: Server selftest
         run: |
@@ -108,9 +110,10 @@ jobs:
           "signed" | Set-Content dist\signing.txt
           Remove-Item $pfx
 
-      - name: Windows acceptance test (install, run, restart, upgrade, uninstall)
+      - name: Windows acceptance test (install, app UI, run, restart, upgrade, uninstall, upgrade from 0.5.0)
         run: |
           Remove-Item -Recurse -Force "$env:LOCALAPPDATA\EnergyManager" -ErrorAction SilentlyContinue
+          python -m pip install "playwright>=1.49"   # drives the installed app's WebView2 over CDP (no browser download)
           $exe = (Get-ChildItem dist\EnergyManagerSetup-*.exe | Select-Object -First 1).FullName
           .\windows\acceptance.ps1 -Installer $exe
           Copy-Item acceptance-results.txt dist\acceptance-results.txt
@@ -122,6 +125,13 @@ jobs:
             energy-manager/dist/EnergyManagerSetup-*.exe
             energy-manager/dist/acceptance-results.txt
           if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: EnergyManager-Windows-UI-screenshots
+          path: energy-manager/ui-*/
+          if-no-files-found: ignore
 
       # Direct download link that always points to the newest build:
       # https://github.com/<owner>/<repo>/releases/download/energy-manager-windows/EnergyManagerSetup.exe

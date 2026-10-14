@@ -35,6 +35,7 @@ export function capabilityTable(rows) {
  *    datasheet defaults of the chosen profile — the user can change both.
  *  * Parameters: the type's own ranges and help; phase only where electrically relevant. */
 export function deviceForm({ schema, driver, caps, existing = null, preset = {}, paramPreset = {}, defaultName = null }) {
+  const category = schema.category;
   const name = h("input", { value: existing?.name ?? defaultName ?? driver.name, required: true, maxlength: 80, "aria-label": "naam" });
   const phase = schema.phase_relevant ? h("select", { "aria-label": "fase" }, PHASES.map(([v, l]) => h("option", { value: v }, l))) : null;
   if (phase) phase.value = existing?.phase && existing.phase !== "NA" ? existing.phase : "3P";
@@ -45,8 +46,9 @@ export function deviceForm({ schema, driver, caps, existing = null, preset = {},
   for (const [k, s] of Object.entries(cschema)) {
     const cur = existing?.connection?.[k] ?? preset[k];
     if (s.readonly) { if (cur !== undefined && cur !== null) fixed[k] = cur; continue; }
+    if (s.categories && category && !s.categories.includes(category)) continue;   // not relevant for this kind of device
     let input;
-    if (s.enum) input = h("select", { "aria-label": s.label_nl || k }, s.enum.map((v) => h("option", { value: v }, v)));
+    if (s.enum) input = h("select", { "aria-label": s.label_nl || k, name: k }, s.enum.map((v) => h("option", { value: v }, s.enum_labels?.[v] || v)));
     else if (s.type === "boolean") input = h("input", { type: "checkbox", checked: (cur ?? s.default) ? true : null });
     else if (s.type === "array") input = h("textarea", { rows: 6, class: "mono", spellcheck: "false", placeholder: s.example ? JSON.stringify(s.example, null, 1) : "[]" });
     else input = h("input", { type: s.secret ? "password" : s.type === "integer" || s.type === "number" ? "number" : "text",
@@ -115,5 +117,15 @@ export function deviceForm({ schema, driver, caps, existing = null, preset = {},
     }
     return { name: name.value.trim(), phase: phase ? phase.value : "NA", connection: c, params: pr };
   };
-  return { el, collect };
+  /** Set a connection field from code (e.g. the Home Assistant entity picker fills the mapping). */
+  const set = (k, v) => {
+    const f = conn[k];
+    if (!f) return;
+    const [input, sch] = f;
+    if (sch.type === "boolean") input.checked = Boolean(v);
+    else if (sch.type === "array") input.value = v && v.length ? JSON.stringify(v, null, 1) : "";
+    else input.value = v ?? "";
+    input.dispatchEvent(new Event("change"));
+  };
+  return { el, collect, set };
 }

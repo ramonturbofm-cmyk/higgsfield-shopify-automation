@@ -169,3 +169,9 @@ tr.now td { background: var(--warn-bg); }
 .wizard input[type=search]{width:100%;max-width:420px;margin-bottom:8px}
 .capreport td{vertical-align:top}
 .pill.st{background:var(--panel2)}
+.version-line{padding:10px 14px;margin-top:auto;font-size:11px;opacity:.75}
+.wizard dl.picked{display:grid;grid-template-columns:max-content 1fr;gap:4px 12px;margin:0 0 12px;padding:10px 12px;border-radius:10px;background:var(--panel2)}
+.wizard dl.picked dt{color:var(--muted);font-size:13px}.wizard dl.picked dd{margin:0;font-weight:600}
+.wizard ul.functions{margin:6px 0 4px;padding-left:18px}.wizard ul.functions li{margin:1px 0}
+.wizard .model .alternatives{flex-wrap:wrap;gap:6px;align-items:center}
+.wizard .not-listed{margin-top:14px}

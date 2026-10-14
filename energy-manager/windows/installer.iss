@@ -7,7 +7,7 @@
 ; Expects: dist\app\Energy Manager.exe  and  dist\EnergyManagerServer\ (PyInstaller one-folder)
 
 #ifndef AppVersion
-  #define AppVersion "0.6.0"
+  #define AppVersion "0.6.1"
 #endif
 
 [Setup]
@@ -53,6 +53,13 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 [Files]
 Source: "..\dist\app\Energy Manager.exe"; DestDir: "{app}"; Components: app; Flags: ignoreversion
 Source: "..\dist\EnergyManagerServer\*"; DestDir: "{app}\server"; Components: server; Flags: ignoreversion recursesubdirs createallsubdirs
+
+; The app's WebView2 HTTP cache (not its storage/cookies) is cleared on every install/update, so no web file
+; from a previous version can be reused. (The server also uses versioned asset URLs; this is a second guard.)
+[InstallDelete]
+Type: filesandordirs; Name: "{localappdata}\nl.energymanager.desktop\EBWebView\Default\Cache"
+Type: filesandordirs; Name: "{localappdata}\nl.energymanager.desktop\EBWebView\Default\Code Cache"
+Type: filesandordirs; Name: "{localappdata}\nl.energymanager.desktop\EBWebView\Default\Service Worker"
 
 [Icons]
 Name: "{group}\Energy Manager"; Filename: "{app}\Energy Manager.exe"
@@ -139,6 +146,15 @@ begin
       Log('EMS still running after graceful stop; Restart Manager will close it')
     else
       Log('EMS stopped before replacing files');
+  end;
+  // Any server process left (another install folder, a hung process): end it, so the new version is the
+  // only one serving port 8080. Devices fall back to their own control when the EMS stops.
+  if ServerRunning() then
+  begin
+    Exec(ExpandConstant('{cmd}'), '/C taskkill /F /T /IM EnergyManagerService.exe & taskkill /F /T /IM EnergyManagerServer.exe',
+      '', SW_HIDE, ewWaitUntilTerminated, Code);
+    Sleep(1000);
+    if ServerRunning() then Log('EMS process could not be ended') else Log('remaining EMS process ended');
   end;
   Result := '';
 end;

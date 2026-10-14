@@ -289,7 +289,7 @@ async def scan(*, lab=None, hosts: list[str] | None = None, use_mdns: bool = Tru
     if lab is not None:
         sources.append("testomgeving")
         for key, port in lab.ports.items():
-            if key in ("p1", "sgready", "boiler"):
+            if key in ("p1", "sgready", "boiler", "homeassistant"):
                 tasks.append(probe_http("127.0.0.1", port))
             else:
                 tasks.append(probe_modbus("127.0.0.1", port))

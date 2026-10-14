@@ -17,6 +17,7 @@ class MiniHTTPServer:
     def __init__(self, handler: Handler, host: str = "127.0.0.1", port: int = 0) -> None:
         self.handler, self.host, self.port = handler, host, port
         self.server: asyncio.base_events.Server | None = None
+        self.last_headers: dict[str, str] = {}
 
     async def start(self) -> None:
         self.server = await asyncio.start_server(self._conn, self.host, self.port)
@@ -40,6 +41,7 @@ class MiniHTTPServer:
                 raw = await asyncio.wait_for(reader.readexactly(min(n, 1_000_000)), 10)
                 body = json.loads(raw or b"null")
             url = urlsplit(target)
+            self.last_headers = headers          # read synchronously by handlers that need them (auth)
             status, payload = await self.handler(method.upper(), url.path, dict(parse_qsl(url.query)), body)
         except (asyncio.IncompleteReadError, TimeoutError, ValueError, json.JSONDecodeError):
             status, payload = 400, {"error": "bad request"}
@@ -47,7 +49,8 @@ class MiniHTTPServer:
             log.exception("lab http handler failed")
             status, payload = 500, {"error": "internal"}
         data = b"" if payload is None else json.dumps(payload).encode()
-        reason = {200: "OK", 400: "Bad Request", 404: "Not Found", 500: "Internal Server Error"}.get(status, "OK")
+        reason = {200: "OK", 400: "Bad Request", 401: "Unauthorized", 404: "Not Found",
+                  500: "Internal Server Error"}.get(status, "OK")
         writer.write(f"HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {len(data)}\r\n"
                      f"Connection: close\r\n\r\n".encode() + data)
         try:

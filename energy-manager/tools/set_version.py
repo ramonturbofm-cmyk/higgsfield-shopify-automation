@@ -42,6 +42,7 @@ def found_versions() -> dict[str, str]:
     lockfile = app / "src-tauri" / "Cargo.lock"
     if lockfile.exists():
         out["src-tauri/Cargo.lock"] = re.search(r'name = "energy-manager"\nversion = "([^"]+)"', _read(lockfile)).group(1)
+    out["windows-app/src/connect.js"] = re.search(r'const APP_VERSION = "([^"]+)"', _read(app / "src" / "connect.js")).group(1)
     out["windows/installer.iss"] = re.search(r'#define AppVersion "([^"]+)"', _read(ROOT / "windows" / "installer.iss")).group(1)
     out["cloud/pyproject.toml"] = re.search(r'(?m)^version = "([^"]+)"', _read(ROOT / "cloud" / "pyproject.toml")).group(1)
     cloud_init = _read(ROOT / "cloud" / "emcloud" / "__init__.py")
@@ -72,6 +73,7 @@ def set_version(v: str) -> None:
     if lockfile.exists():
         sub(lockfile, r'(name = "energy-manager"\nversion = )"[^"]+"', rf'\g<1>"{v}"')
     sub(ROOT / "windows" / "installer.iss", r'#define AppVersion "[^"]+"', f'#define AppVersion "{v}"')
+    sub(app / "src" / "connect.js", r'const APP_VERSION = "[^"]+"', f'const APP_VERSION = "{v}"')
     sub(ROOT / "cloud" / "pyproject.toml", r'(?m)^version = "[^"]+"', f'version = "{v}"')
     sub(ROOT / "cloud" / "emcloud" / "__init__.py", r'__version__ = "[^"]+"', f'__version__ = "{v}"')
 

@@ -2,6 +2,37 @@
 
 (Zelfde inhoud als `backend/ems/CHANGELOG.md`, dat met het pakket wordt meegeleverd.)
 
+## 0.6.1 — na een update altijd de nieuwe interface; merk/model-catalogus en Home Assistant zonder JSON (UNSIGNED TEST BUILD)
+
+**Reparatie: na een upgrade werd de oude apparatenwizard getoond**
+- Oorzaak (nagebootst): de webbestanden werden zonder cache-instructies geserveerd; de Windows-app (WebView2) en
+  browsers bewaarden de oude JavaScript-modules urenlang en vroegen de server niet om de nieuwe. Zo draaide de
+  0.5.0-wizard tegen een 0.6.0-server.
+- Centraal build-ID (versie + commit + bouwtijd) en een hash over alle webbestanden; alle scripts en stijlen worden
+  geladen via `/static/v/<hash>/…` (onveranderlijk), `index.html` wordt nooit gecachet, API-antwoorden ook niet
+- De pagina vergelijkt haar eigen build met die van de server (bij start, bij herverbinden en elke 2 minuten);
+  bij een verschil laadt hij zichzelf één keer opnieuw, anders volgt een duidelijke melding
+- Versie van app en server zichtbaar onderin het menu en op de pagina Systeem; `/healthz` en `/system/info` geven
+  het build-ID; elke respons heeft `X-EMS-Version` / `X-EMS-Build`
+- Windows-app: start de EMS-server opnieuw als er nog een andere versie draait; toont de app-versie
+- Installer: wist bij installeren/bijwerken de HTTP-cache van de app (niet de instellingen) en beëindigt
+  achtergebleven serverprocessen; het build-ID wordt bij het bouwen vastgelegd
+- Acceptatietest in CI bedient nu de **geïnstalleerde app zelf** (WebView2) en test ook een upgrade vanaf de
+  gepubliceerde 0.5.0-installer met de oude interface in de cache
+
+**Apparaatcatalogus**
+- Merk/model-lijsten tonen echte merken met hun modellen en de functies per model; Home Assistant, SunSpec en
+  SG Ready zijn geen "merk" meer maar verbindingsmethoden (via een gateway / "Staat uw merk er niet bij?")
+- Veel meer merken per categorie (o.a. Growatt, Enphase, Deye, Vaillant, Viessmann, Panasonic, Alfen, Easee,
+  Zaptec, Tesla, Sessy …): eerlijk "nog niet ondersteund", met een knop naar een geschikte alternatieve koppeling
+- Bij "Gegevens" staan apparaat en verbinding apart; Modbus TCP toont geen RS485-velden; SunSpec-instellingen
+  alleen waar ze bij het soort apparaat horen
+- Alle vier de methoden zijn altijd zichtbaar, bij elke categorie
+
+**Home Assistant zonder JSON**
+- Verbinden, daarna per meetwaarde en per bediening een entiteit kiezen uit een lijst
+- De Testomgeving heeft een virtuele Home Assistant (token `testomgeving`) om dit te proberen
+
 ## 0.6.0 — apparatenbibliotheek, echte protocollen en Testomgeving (UNSIGNED TEST BUILD)
 
 **Apparaat toevoegen: kies uw apparaat, niet een protocol**

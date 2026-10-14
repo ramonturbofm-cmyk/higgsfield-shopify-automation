@@ -39,7 +39,8 @@ from ems.simulator.httpd import MiniHTTPServer
 log = logging.getLogger(__name__)
 
 PORTS = {"pv": 15502, "heat_pump": 15503, "battery": 15504, "ev": 15505, "unknown": 15599,
-         "p1": 15580, "sgready": 15581, "boiler": 15582}
+         "p1": 15580, "sgready": 15581, "boiler": 15582, "homeassistant": 15583}
+HA_TOKEN = "testomgeving"   # access token of the virtual Home Assistant (shown on the Testomgeving page)
 # Library profile of each virtual Modbus device (the wizard fills in the port the lab really listens on).
 PROFILE_KEY = {"energymanager.lab.sunspec_inverter": "pv", "energymanager.lab.heat_pump": "heat_pump",
                "energymanager.lab.battery": "battery", "energymanager.lab.ev_charger": "ev"}
@@ -367,6 +368,64 @@ class LabDevices:
             return 200, d
         return 404, {"error": "not found"}
 
+    def _ha_states(self) -> list[dict]:
+        """The virtual Home Assistant: a few entities of the test house (Home Assistant REST API format)."""
+        site, out = self.site, []
+        pv, bat, hp, bo, ev = (self.comp(c) for c in ("lab_pv", "lab_battery", "lab_hp", "lab_boiler", "lab_ev"))
+
+        def sensor(eid, name, state, unit=None, dc=None):
+            attrs = {"friendly_name": name, **({"unit_of_measurement": unit} if unit else {}),
+                     **({"device_class": dc} if dc else {})}
+            out.append({"entity_id": eid, "state": str(state), "attributes": attrs})
+        sensor("sensor.testwoning_netvermogen", "Testwoning netvermogen", round(site.meter.power_w / 1000, 3), "kW", "power")
+        if pv:
+            sensor("sensor.testwoning_pv_vermogen", "Testwoning zonnepanelen vermogen", round(pv.output_w, 1), "W", "power")
+        if bat:
+            sensor("sensor.testwoning_batterij_vermogen", "Testwoning batterij vermogen", int(bat.output_w), "W", "power")
+            sensor("sensor.testwoning_batterij_laadtoestand", "Testwoning batterij laadtoestand", round(bat.soc_pct, 1),
+                   "%", "battery")
+        if hp:
+            sensor("sensor.testwoning_binnentemperatuur", "Testwoning binnentemperatuur", round(hp.indoor_temp_c, 1), "°C",
+                   "temperature")
+            sensor("sensor.testwoning_warmtepomp_vermogen", "Testwoning warmtepomp vermogen", round(hp.output_w, 1), "W", "power")
+        if bo:
+            sensor("sensor.testwoning_boiler_vermogen", "Testwoning boiler vermogen", round(bo.output_w, 1), "W", "power")
+            out.append({"entity_id": "switch.testwoning_boiler", "state": "on" if bo.relay_on else "off",
+                        "attributes": {"friendly_name": "Testwoning boiler"}})
+        if ev:
+            limit = ev.max_current_a if ev.current_setpoint_a is None else ev.current_setpoint_a
+            out.append({"entity_id": "number.testwoning_laadstroom", "state": str(limit),
+                        "attributes": {"friendly_name": "Testwoning laadstroom", "unit_of_measurement": "A",
+                                       "min": 0, "max": 16}})
+            sensor("sensor.testwoning_laadpaal_vermogen", "Testwoning laadpaal vermogen", round(ev.output_w, 1), "W", "power")
+        return out
+
+    async def http_homeassistant(self, method: str, path: str, query: dict, body) -> tuple[int, Any]:
+        srv = next((s for s in self.servers if getattr(s, "port", None) == self.ports.get("homeassistant")), None)
+        auth = (srv.last_headers if srv else {}).get("authorization", "")
+        if auth != f"Bearer {HA_TOKEN}":
+            return 401, {"message": "401: Unauthorized"}
+        if path == "/api/":
+            return 200, {"message": "API running."}
+        states = {s["entity_id"]: s for s in self._ha_states()}
+        if path == "/api/states":
+            return 200, list(states.values())
+        if path.startswith("/api/states/"):
+            eid = path.rsplit("/", 1)[1]
+            return (200, states[eid]) if eid in states else (404, {"message": "Entity not found."})
+        if method == "POST" and path.startswith("/api/services/"):
+            domain, service = path.split("/")[3:5]
+            eid = (body or {}).get("entity_id")
+            self.write_log.append(("homeassistant", f"{domain}.{service}", [eid]))
+            if eid == "switch.testwoning_boiler" and domain == "switch" and (bo := self.comp("lab_boiler")):
+                bo.relay_on = service == "turn_on"
+                return 200, [states[eid]]
+            if eid == "number.testwoning_laadstroom" and service == "set_value" and (ev := self.comp("lab_ev")):
+                ev.current_setpoint_a = float(body.get("value"))
+                return 200, [states[eid]]
+            return 400, {"message": "service not supported by the virtual Home Assistant"}
+        return 404, {"message": "not found"}
+
     def _apply_sg(self) -> None:
         hp: SimHeatPump = self.comp("lab_hp")
         if hp is None:
@@ -437,7 +496,8 @@ class LabDevices:
             self.ports[name] = port_of(name)
         for name, handler in (("p1", self.http_p1),
                               ("sgready", lambda *a: self.http_shelly("sgready", *a)),
-                              ("boiler", lambda *a: self.http_shelly("boiler", *a))):
+                              ("boiler", lambda *a: self.http_shelly("boiler", *a)),
+                              ("homeassistant", self.http_homeassistant)):
             srv = MiniHTTPServer(self._faulty_http(name, handler), port=port_of(name))
             try:
                 await srv.start()
@@ -474,7 +534,9 @@ class LabDevices:
                   "battery": "Virtuele thuisbatterij 10 kWh (Modbus TCP)", "ev": "Virtuele laadpaal 11 kW (Modbus TCP)",
                   "unknown": "Onbekend Modbus-apparaat (geen identiteit)", "p1": "Virtuele P1-meter (HomeWizard API v1)",
                   "sgready": "Virtuele relaismodule voor SG Ready (Shelly Gen2 RPC)",
-                  "boiler": "Virtuele boiler via slim relais (Shelly Gen2 RPC)"}
+                  "boiler": "Virtuele boiler via slim relais (Shelly Gen2 RPC)",
+                  "homeassistant": f"Virtuele Home Assistant (REST API, token: {HA_TOKEN})"}
         return [{"key": k, "label": labels[k], "host": "127.0.0.1", "port": p,
                  "protocol": "modbus_tcp" if k in ("pv", "heat_pump", "battery", "ev", "unknown") else "http",
+                 "url": f"http://127.0.0.1:{p}" if k == "homeassistant" else None,
                  "fault": vars(self.fault(k))} for k, p in self.ports.items()]

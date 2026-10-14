@@ -22,6 +22,36 @@ const VIEWS = {
 const TITLES = Object.fromEntries(NAV.filter((n) => n !== "-").map(([k, t]) => [k, t]));
 let cleanup = null;
 
+// ------------------------------------------------------------------ build identity
+// index.html (never cached) names the frontend build; the server reports its own. They must match:
+// otherwise this page runs old JavaScript against a newer server (or the other way round).
+const meta = (n) => document.querySelector(`meta[name="${n}"]`)?.content || null;
+export const FRONTEND = { version: meta("ems-version"), build: meta("ems-build"), asset: meta("ems-asset") };
+let versionWarning = null;
+
+function checkBuild(server) {
+  const b = server?.build;
+  if (!b?.asset_hash || !FRONTEND.asset || b.asset_hash === FRONTEND.asset) { versionWarning = null; return true; }
+  let reloaded = null;
+  try { reloaded = sessionStorage.getItem("ems.reloadedFor"); } catch { /* ignore */ }
+  if (reloaded !== b.asset_hash) {          // first time: load the new version
+    try { sessionStorage.setItem("ems.reloadedFor", b.asset_hash); } catch { /* ignore */ }
+    location.reload();
+    return false;
+  }
+  versionWarning = `Versieverschil: deze pagina is versie ${FRONTEND.version} (${FRONTEND.asset}), de server ${b.version} (${b.asset_hash}). Sluit de app helemaal en open hem opnieuw.`;
+  renderBanner();
+  return true;
+}
+
+async function pollBuild() {
+  try {
+    const r = await fetch("/healthz", { cache: "no-store" });
+    const hz = await r.json();
+    checkBuild({ build: { asset_hash: hz.asset_hash, version: hz.version } });
+  } catch { /* offline: the normal offline banner handles it */ }
+}
+
 // ------------------------------------------------------------------ theme
 function applyTheme() {
   let t = "auto";
@@ -62,6 +92,15 @@ export function setLevel(level) {
   route();
 }
 
+/** Frontend and server version, always visible (bottom of the menu). */
+function versionLine() {
+  const srv = state.info?.build;
+  const same = !srv || srv.asset_hash === FRONTEND.asset;
+  return h("div", { class: "version-line small muted", id: "version-line", title: `app ${FRONTEND.build} · server ${srv?.build || "?"}` },
+    same ? `Versie ${FRONTEND.version} · build ${(FRONTEND.asset || "").slice(0, 7)}`
+      : `App ${FRONTEND.version} (${(FRONTEND.asset || "").slice(0, 7)}) ≠ server ${srv.version} (${srv.asset_hash.slice(0, 7)})`);
+}
+
 function renderSidebar(active) {
   const side = document.getElementById("sidebar");
   document.body.dataset.level = state.level;
@@ -70,7 +109,8 @@ function renderSidebar(active) {
     h("div", { class: "brand" }, h("img", { src: "/static/icon.svg", alt: "" }), "Energy Manager"),
     h("nav", { class: "nav", "aria-label": "Hoofdmenu" }, items.map((n) => n === "-" ? h("div", { class: "sep" }) :
       h("a", { href: `#/${n[0]}`, class: n[0] === active ? "active" : "", "aria-current": n[0] === active ? "page" : null, onclick: () => side.classList.remove("open") },
-        h("span", { "aria-hidden": "true" }, n[2]), n[1]))));
+        h("span", { "aria-hidden": "true" }, n[2]), n[1]))),
+    versionLine());
 }
 
 // Inside the Windows app the connect screen passes its own URL so we can link back.
@@ -123,6 +163,7 @@ function renderBanner() {
   const el = document.getElementById("banner");
   const live = state.live;
   const items = [];
+  if (versionWarning) items.push(h("div", { class: "notice bad", "data-version-mismatch": "1" }, "⚠", h("div", {}, versionWarning)));
   if (live?.failsafe?.active) items.push(h("div", { class: "notice bad" }, "⚠",
     h("div", {}, h("b", {}, "EMS-fallback actief. "), "Alle apparaten draaien op hun eigen regeling. Oorzaak: ", live.failsafe.reason)));
   if (live?.grid_meter?.status === "no_primary_grid_meter") items.push(h("div", { class: "notice warn" }, "ⓘ",
@@ -188,6 +229,8 @@ async function boot() {
     document.getElementById("view").replaceChildren(h("div", { class: "notice bad inline" }, `Server niet bereikbaar: ${e.message}`));
     return;
   }
+  if (!checkBuild(state.info)) return;
+  setInterval(pollBuild, 120000);
   try {
     const sess = await api("/auth/session");   // valid session cookie? (never 401)
     if (!sess.authenticated) throw new Error("niet ingelogd");
@@ -202,6 +245,7 @@ async function boot() {
 
 on((msg) => {
   if (msg.type === "live" || msg.type === "ws" || msg.type === "online") { renderTopbar(); renderBanner(); }
+  if (msg.type === "ws" && msg.data === true) pollBuild();      // server may have been updated meanwhile
   if (msg.type === "notification" && ["warning", "critical"].includes(msg.data.level)) {
     import("./lib.js").then(({ toast }) => toast(msg.data.message, msg.data.level === "critical"));
   }

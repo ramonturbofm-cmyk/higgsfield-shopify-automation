@@ -9,6 +9,7 @@ python -m venv .venv-build
 .\.venv-build\Scripts\python -m pip install --upgrade pip
 .\.venv-build\Scripts\python -m pip install ".[dev]" pyinstaller
 .\.venv-build\Scripts\python -m pytest -q --timeout 300
+.\.venv-build\Scripts\python tools\write_build_info.py
 .\.venv-build\Scripts\pyinstaller --noconfirm --clean --distpath dist --workpath build windows\EnergyManagerServer.spec
 .\dist\EnergyManagerServer\EnergyManagerServer.exe --selftest
 if ($LASTEXITCODE -ne 0) { throw "selftest van de server mislukt" }

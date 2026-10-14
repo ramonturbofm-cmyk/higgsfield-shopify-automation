@@ -88,8 +88,9 @@ class SunSpecDriver(LibraryDriverMixin, DeviceDriver):
         notes="Herkent zelf welke SunSpec-modellen het apparaat aanbiedt.",
         connection_schema={
             "profile_id": {"type": "string", "label_nl": "Apparaatprofiel", "readonly": True},
-            "transport": {"type": "string", "enum": ["tcp", "rtu"], "default": "tcp", "label_nl": "Verbinding",
-                          "level": "advanced"},
+            "transport": {"type": "string", "enum": ["tcp", "rtu"], "default": "tcp",
+                          "label_nl": "Hoe is het apparaat aangesloten?",
+                          "enum_labels": {"tcp": "Netwerk (LAN/wifi, Modbus TCP)", "rtu": "RS485-kabel (Modbus RTU)"}},
             "host": {"type": "string", "label_nl": "IP-adres / hostnaam", "show_if": ["transport", "tcp"]},
             "port": {"type": "integer", "default": 502, "label_nl": "Poort", "level": "advanced",
                      "show_if": ["transport", "tcp"]},
@@ -98,9 +99,9 @@ class SunSpecDriver(LibraryDriverMixin, DeviceDriver):
                          "show_if": ["transport", "rtu"]},
             "unit_id": {"type": "integer", "default": 1, "label_nl": "Unit-ID", "level": "advanced"},
             "meter_invert": {"type": "boolean", "default": False, "label_nl": "Teken netvermogen omdraaien",
-                             "level": "expert"},
+                             "level": "expert", "categories": ["smart_meter", "energy_meter"]},
             "revert_s": {"type": "integer", "default": 900, "label_nl": "Begrenzing vervalt in het apparaat na (s)",
-                         "level": "expert"},
+                         "level": "expert", "categories": ["pv_inverter", "hybrid_inverter"]},
         },
     )
 

@@ -135,7 +135,8 @@ def build_view(rt, device_id: str) -> dict:
         elif lvl in ("limited", "full") and not done["safety_params"]:
             why = "vul eerst de veiligheidsinstellingen in: " + ", ".join(missing)
         elif lvl in ("limited", "full") and not done["shadow"] and cfg.control_level not in ("limited", "full"):
-            why = "eerst schaduwmodus doorlopen tot het EMS een beslissing voor dit apparaat heeft getoond"
+            why = ("eerst schaduwmodus doorlopen tot het EMS een beslissing voor dit apparaat heeft getoond "
+                   "(schakelbare apparaten: geef in schaduwmodus een handmatige opdracht of laat een automatisering lopen)")
         elif lvl == "full" and not done["write_test"]:
             why = "eerst een geslaagde schrijftest"
         elif lvl == "full" and not done["hardware_verified"]:

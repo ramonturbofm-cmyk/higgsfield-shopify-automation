@@ -1,5 +1,5 @@
 {
- "schema_version": 1,
+ "schema_version": 2,
  "entries": [
   {
    "manufacturer": "Energy Manager Testomgeving",
@@ -13,7 +13,6 @@
     "boiler",
     "energy_meter"
    ],
-   "note": "Virtuele apparaten op deze computer — alleen in de Testomgeving.",
    "models": [
     {
      "model": "Virtuele P1-meter (HomeWizard API v1)",
@@ -75,19 +74,52 @@
      "support": "simulator",
      "lab": "boiler"
     }
-   ]
+   ],
+   "note": "Virtuele apparaten op deze computer — alleen in de Testomgeving."
   },
   {
    "manufacturer": "HomeWizard",
    "categories": [
-    "smart_meter"
+    "smart_meter",
+    "energy_meter",
+    "smart_plug"
    ],
    "models": [
     {
      "model": "P1 Meter (HWE-P1)",
+     "categories": [
+      "smart_meter"
+     ],
      "driver_id": "homewizard.p1",
      "support": "supported",
-     "note": "Officiële lokale API v1/v2; niet op echte hardware getest door ons."
+     "functions": [
+      "Netvermogen (afname/teruglevering)",
+      "Vermogen, stroom en spanning per fase",
+      "Meterstanden"
+     ],
+     "note": "Officiële lokale API v1/v2. Niet door ons op echte hardware getest."
+    },
+    {
+     "model": "kWh-meter (HWE-KWH1 / HWE-KWH3)",
+     "categories": [
+      "energy_meter"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    },
+    {
+     "model": "Energy Socket (HWE-SKT)",
+     "categories": [
+      "smart_plug"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "homeassistant"
+     ]
     }
    ]
   },
@@ -98,10 +130,21 @@
    ],
    "models": [
     {
-     "model": "P1-kabel (USB) op de slimme meter",
+     "model": "Rechtstreeks via P1-kabel (USB)",
      "driver_id": "dsmr.p1",
      "support": "supported",
-     "note": "DSMR 4/5 via seriële P1-kabel."
+     "functions": [
+      "Netvermogen (afname/teruglevering)",
+      "Vermogen, stroom en spanning per fase",
+      "Meterstanden"
+     ],
+     "note": "DSMR 4/5 via een P1-kabel.",
+     "requirements": [
+      "P1-kabel (USB)"
+     ],
+     "categories": [
+      "smart_meter"
+     ]
     }
    ]
   },
@@ -111,38 +154,35 @@
     "smart_plug",
     "smart_relay",
     "boiler",
-    "flexible_load",
-    "heat_pump"
+    "flexible_load"
    ],
    "models": [
     {
-     "model": "Gen2+ relais/stekker (Plus 1PM, Plus 2PM, Pro 1PM/2PM/4PM, Plus Plug S)",
+     "model": "Gen2+ relais / stekker (Plus 1PM, Plus 2PM, Pro 1PM/2PM/4PM, Plus Plug S)",
+     "driver_id": "shelly.switch",
+     "support": "supported",
+     "functions": [
+      "Aan/uit schakelen met minimale aan-/uittijd",
+      "Vermogen meten (PM-modellen)"
+     ],
+     "note": "Lokale Gen2-API. Let op de belastbaarheid van het relais.",
      "categories": [
       "smart_plug",
       "smart_relay",
       "boiler",
       "flexible_load"
-     ],
-     "driver_id": "shelly.switch",
-     "support": "supported",
-     "note": "Lokale Gen2-API: aan/uit + vermogen. Let op de belastbaarheid van het relais."
-    },
-    {
-     "model": "Gen2+ met 2 relais als SG Ready-schakelaar (bijv. Plus 2PM, Pro 2)",
-     "categories": [
-      "heat_pump"
-     ],
-     "driver_id": "sgready.relay",
-     "support": "via_sg_ready",
-     "note": "Twee potentiaalvrije contacten op de SG Ready-ingangen; bedrading volgens de handleiding van de warmtepomp."
+     ]
     },
     {
      "model": "Gen1-apparaten",
-     "support": "not_supported",
-     "note": "Gen1-API wordt niet ondersteund.",
      "categories": [
       "smart_plug",
       "smart_relay"
+     ],
+     "support": "not_supported",
+     "note": "De Gen1-API wordt niet ondersteund.",
+     "alternatives": [
+      "homeassistant"
      ]
     }
    ]
@@ -152,44 +192,64 @@
    "categories": [
     "pv_inverter",
     "hybrid_inverter",
-    "smart_meter"
+    "smart_meter",
+    "energy_meter"
    ],
    "models": [
     {
-     "model": "Symo / Primo / Tauro / GEN24 (SunSpec Modbus TCP)",
+     "model": "Symo / Primo / Tauro / GEN24",
      "categories": [
       "pv_inverter",
       "hybrid_inverter"
      ],
      "profile_id": "sunspec.inverter",
      "support": "read_only",
-     "note": "Via de SunSpec-standaard. Begrenzing alleen als model 123 beschikbaar is; niet op hardware getest."
+     "functions": [
+      "PV-vermogen en opbrengst",
+      "Vermogensbegrenzing — alleen als het apparaat SunSpec-model 123 aanbiedt"
+     ],
+     "note": "Via SunSpec Modbus TCP (in de omvormer inschakelen). Niet op hardware getest.",
+     "requirements": [
+      "Modbus TCP (SunSpec) aan in de omvormer"
+     ]
     },
     {
-     "model": "Fronius Smart Meter (via datamanager, SunSpec)",
+     "model": "Smart Meter (via datamanager)",
      "categories": [
-      "smart_meter"
+      "smart_meter",
+      "energy_meter"
      ],
      "profile_id": "sunspec.meter",
-     "support": "read_only"
+     "support": "read_only",
+     "functions": [
+      "Netvermogen",
+      "Fasewaarden (als de meter ze levert)",
+      "Meterstanden"
+     ]
     }
    ]
   },
   {
    "manufacturer": "SMA",
    "categories": [
-    "pv_inverter",
-    "smart_meter"
+    "pv_inverter"
    ],
    "models": [
     {
-     "model": "Sunny Boy / Tripower met SunSpec Modbus",
-     "categories": [
-      "pv_inverter"
-     ],
+     "model": "Sunny Boy / Sunny Tripower (met SunSpec Modbus)",
      "profile_id": "sunspec.inverter",
      "support": "read_only",
-     "note": "SunSpec moet in het apparaat zijn ingeschakeld; unit-ID vaak 126 (zie handleiding)."
+     "functions": [
+      "PV-vermogen en opbrengst",
+      "Vermogensbegrenzing — alleen als het apparaat SunSpec-model 123 aanbiedt"
+     ],
+     "note": "SunSpec moet in het apparaat zijn ingeschakeld; unit-ID vaak 126 (zie handleiding).",
+     "requirements": [
+      "SunSpec Modbus aan in de omvormer"
+     ],
+     "categories": [
+      "pv_inverter"
+     ]
     }
    ]
   },
@@ -197,38 +257,69 @@
    "manufacturer": "SolarEdge",
    "categories": [
     "pv_inverter",
-    "smart_meter"
+    "smart_meter",
+    "energy_meter",
+    "battery"
    ],
    "models": [
     {
-     "model": "Omvormers met SunSpec Modbus TCP",
+     "model": "Omvormers (SunSpec Modbus TCP)",
      "categories": [
       "pv_inverter"
      ],
      "profile_id": "sunspec.inverter",
      "support": "read_only",
-     "note": "Uitlezen via SunSpec. Vermogensregeling van SolarEdge loopt niet altijd via model 123: niet geïmplementeerd."
+     "functions": [
+      "PV-vermogen en opbrengst"
+     ],
+     "note": "Uitlezen via SunSpec. Vermogensbegrenzing van SolarEdge loopt niet altijd via model 123: niet geclaimd."
     },
     {
-     "model": "SolarEdge-meter via omvormer (SunSpec)",
+     "model": "SolarEdge-meter via de omvormer (SunSpec)",
      "categories": [
-      "smart_meter"
+      "smart_meter",
+      "energy_meter"
      ],
      "profile_id": "sunspec.meter",
-     "support": "read_only"
+     "support": "read_only",
+     "functions": [
+      "Netvermogen",
+      "Fasewaarden (als de meter ze levert)",
+      "Meterstanden"
+     ]
+    },
+    {
+     "model": "Home Battery",
+     "categories": [
+      "battery"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "homeassistant"
+     ]
     }
    ]
   },
   {
    "manufacturer": "Kostal",
    "categories": [
-    "pv_inverter"
+    "pv_inverter",
+    "hybrid_inverter"
    ],
    "models": [
     {
      "model": "Plenticore / Piko IQ (SunSpec)",
      "profile_id": "sunspec.inverter",
-     "support": "read_only"
+     "support": "read_only",
+     "functions": [
+      "PV-vermogen en opbrengst",
+      "Vermogensbegrenzing — alleen als het apparaat SunSpec-model 123 aanbiedt"
+     ],
+     "categories": [
+      "pv_inverter",
+      "hybrid_inverter"
+     ]
     }
    ]
   },
@@ -245,7 +336,21 @@
      "model": "GX-apparaat (Cerbo GX, Venus GX, Ekrano) — systeemwaarden",
      "profile_id": "victron.gx",
      "support": "community_read_only",
-     "note": "Registers uit een community-bron (evcc, MIT); alleen lezen, niet op hardware getest."
+     "functions": [
+      "Netvermogen per fase",
+      "PV-vermogen",
+      "Batterijvermogen en SOC"
+     ],
+     "note": "Registers uit een community-bron (evcc, MIT); alleen lezen, niet geverifieerd. ESS-regeling niet geïmplementeerd.",
+     "alternatives": [
+      "homeassistant"
+     ],
+     "categories": [
+      "hybrid_inverter",
+      "battery",
+      "pv_inverter",
+      "smart_meter"
+     ]
     }
    ]
   },
@@ -257,9 +362,17 @@
    ],
    "models": [
     {
-     "model": "Alle modellen",
+     "model": "Omvormers en hybride omvormers",
+     "categories": [
+      "pv_inverter",
+      "hybrid_inverter"
+     ],
      "support": "not_supported",
-     "note": "Geen directe lokale koppeling in deze versie; wel via Home Assistant als uw Home Assistant dit apparaat al kent."
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "sunspec",
+      "homeassistant"
+     ]
     }
    ]
   },
@@ -271,9 +384,17 @@
    ],
    "models": [
     {
-     "model": "Alle modellen",
+     "model": "Omvormers en hybride omvormers",
+     "categories": [
+      "pv_inverter",
+      "hybrid_inverter"
+     ],
      "support": "not_supported",
-     "note": "Geen directe lokale koppeling in deze versie; wel via Home Assistant als uw Home Assistant dit apparaat al kent."
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "sunspec",
+      "homeassistant"
+     ]
     }
    ]
   },
@@ -286,9 +407,18 @@
    ],
    "models": [
     {
-     "model": "Alle modellen",
+     "model": "Omvormers, hybride omvormers en batterijen",
+     "categories": [
+      "pv_inverter",
+      "hybrid_inverter",
+      "battery"
+     ],
      "support": "not_supported",
-     "note": "Geen directe lokale koppeling in deze versie; wel via Home Assistant als uw Home Assistant dit apparaat al kent."
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "sunspec",
+      "homeassistant"
+     ]
     }
    ]
   },
@@ -301,9 +431,18 @@
    ],
    "models": [
     {
-     "model": "Alle modellen",
+     "model": "Omvormers, hybride omvormers en batterijen",
+     "categories": [
+      "pv_inverter",
+      "hybrid_inverter",
+      "battery"
+     ],
      "support": "not_supported",
-     "note": "Geen directe lokale koppeling in deze versie; wel via Home Assistant als uw Home Assistant dit apparaat al kent."
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "sunspec",
+      "homeassistant"
+     ]
     }
    ]
   },
@@ -317,8 +456,123 @@
    "models": [
     {
      "model": "SUN2000 / LUNA2000",
+     "categories": [
+      "pv_inverter",
+      "hybrid_inverter",
+      "battery"
+     ],
      "support": "not_supported",
-     "note": "Geen directe lokale koppeling in deze versie; wel via Home Assistant als uw Home Assistant dit apparaat al kent. Geen SunSpec."
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "sunspec",
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Growatt",
+   "categories": [
+    "pv_inverter",
+    "hybrid_inverter",
+    "battery"
+   ],
+   "models": [
+    {
+     "model": "Omvormers en batterijen",
+     "categories": [
+      "pv_inverter",
+      "hybrid_inverter",
+      "battery"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "sunspec",
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Deye",
+   "categories": [
+    "pv_inverter",
+    "hybrid_inverter"
+   ],
+   "models": [
+    {
+     "model": "Omvormers en hybride omvormers",
+     "categories": [
+      "pv_inverter",
+      "hybrid_inverter"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "sunspec",
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Enphase",
+   "categories": [
+    "pv_inverter"
+   ],
+   "models": [
+    {
+     "model": "IQ micro-omvormers (IQ Gateway)",
+     "categories": [
+      "pv_inverter"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "sunspec",
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "APsystems",
+   "categories": [
+    "pv_inverter"
+   ],
+   "models": [
+    {
+     "model": "Micro-omvormers",
+     "categories": [
+      "pv_inverter"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "sunspec",
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Hoymiles",
+   "categories": [
+    "pv_inverter"
+   ],
+   "models": [
+    {
+     "model": "Micro-omvormers",
+     "categories": [
+      "pv_inverter"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "sunspec",
+      "homeassistant"
+     ]
     }
    ]
   },
@@ -330,21 +584,342 @@
    "models": [
     {
      "model": "S-serie (S1155, S1255, S2125, …)",
+     "categories": [
+      "heat_pump"
+     ],
      "support": "not_supported",
-     "note": "Modbus TCP-registers van de S-serie zijn nog niet geïmplementeerd. Wel mogelijk: SG Ready via relais (als uw model het ondersteunt) of Home Assistant."
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen. Heeft uw model een SG Ready-ingang, dan kan het EMS via een relais bedrijfsverzoeken geven.",
+     "alternatives": [
+      "sgready",
+      "homeassistant"
+     ]
     }
    ]
   },
   {
    "manufacturer": "Daikin",
    "categories": [
-    "heat_pump"
+    "heat_pump",
+    "airco"
    ],
    "models": [
     {
      "model": "Altherma (alle varianten)",
+     "categories": [
+      "heat_pump"
+     ],
      "support": "not_supported",
-     "note": "Geen gedocumenteerde lokale schrijf-API beschikbaar. Mogelijk: SG Ready (als uw model het ondersteunt) of Home Assistant."
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen. Heeft uw model een SG Ready-ingang, dan kan het EMS via een relais bedrijfsverzoeken geven.",
+     "alternatives": [
+      "sgready",
+      "homeassistant"
+     ]
+    },
+    {
+     "model": "Airco's",
+     "categories": [
+      "airco"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Vaillant",
+   "categories": [
+    "heat_pump"
+   ],
+   "models": [
+    {
+     "model": "aroTHERM",
+     "categories": [
+      "heat_pump"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen. Heeft uw model een SG Ready-ingang, dan kan het EMS via een relais bedrijfsverzoeken geven.",
+     "alternatives": [
+      "sgready",
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Viessmann",
+   "categories": [
+    "heat_pump"
+   ],
+   "models": [
+    {
+     "model": "Vitocal",
+     "categories": [
+      "heat_pump"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen. Heeft uw model een SG Ready-ingang, dan kan het EMS via een relais bedrijfsverzoeken geven.",
+     "alternatives": [
+      "sgready",
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Panasonic",
+   "categories": [
+    "heat_pump",
+    "airco"
+   ],
+   "models": [
+    {
+     "model": "Aquarea",
+     "categories": [
+      "heat_pump"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen. Heeft uw model een SG Ready-ingang, dan kan het EMS via een relais bedrijfsverzoeken geven.",
+     "alternatives": [
+      "sgready",
+      "homeassistant"
+     ]
+    },
+    {
+     "model": "Airco's",
+     "categories": [
+      "airco"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Mitsubishi Electric",
+   "categories": [
+    "heat_pump",
+    "airco"
+   ],
+   "models": [
+    {
+     "model": "Ecodan",
+     "categories": [
+      "heat_pump"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen. Heeft uw model een SG Ready-ingang, dan kan het EMS via een relais bedrijfsverzoeken geven.",
+     "alternatives": [
+      "sgready",
+      "homeassistant"
+     ]
+    },
+    {
+     "model": "Airco's",
+     "categories": [
+      "airco"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Bosch / Nefit",
+   "categories": [
+    "heat_pump"
+   ],
+   "models": [
+    {
+     "model": "Compress",
+     "categories": [
+      "heat_pump"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen. Heeft uw model een SG Ready-ingang, dan kan het EMS via een relais bedrijfsverzoeken geven.",
+     "alternatives": [
+      "sgready",
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Remeha",
+   "categories": [
+    "heat_pump"
+   ],
+   "models": [
+    {
+     "model": "Elga / Eria",
+     "categories": [
+      "heat_pump"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen. Heeft uw model een SG Ready-ingang, dan kan het EMS via een relais bedrijfsverzoeken geven.",
+     "alternatives": [
+      "sgready",
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Itho Daalderop",
+   "categories": [
+    "heat_pump",
+    "heat_pump_boiler",
+    "boiler",
+    "ventilation"
+   ],
+   "models": [
+    {
+     "model": "Amber",
+     "categories": [
+      "heat_pump"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen. Heeft uw model een SG Ready-ingang, dan kan het EMS via een relais bedrijfsverzoeken geven.",
+     "alternatives": [
+      "sgready",
+      "homeassistant"
+     ]
+    },
+    {
+     "model": "Warmtepompboiler",
+     "categories": [
+      "heat_pump_boiler"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "sgready",
+      "homeassistant"
+     ]
+    },
+    {
+     "model": "Elektrische boiler",
+     "categories": [
+      "boiler"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen. Aan/uit schakelen kan met een geschikt relais (installateur).",
+     "alternatives": [
+      "shelly",
+      "homeassistant"
+     ]
+    },
+    {
+     "model": "Ventilatie-units",
+     "categories": [
+      "ventilation"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Alpha Innotec",
+   "categories": [
+    "heat_pump"
+   ],
+   "models": [
+    {
+     "model": "alle modellen",
+     "categories": [
+      "heat_pump"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen. Heeft uw model een SG Ready-ingang, dan kan het EMS via een relais bedrijfsverzoeken geven.",
+     "alternatives": [
+      "sgready",
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Atlantic",
+   "categories": [
+    "heat_pump",
+    "heat_pump_boiler"
+   ],
+   "models": [
+    {
+     "model": "Alfea / Loria",
+     "categories": [
+      "heat_pump"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen. Heeft uw model een SG Ready-ingang, dan kan het EMS via een relais bedrijfsverzoeken geven.",
+     "alternatives": [
+      "sgready",
+      "homeassistant"
+     ]
+    },
+    {
+     "model": "Explorer",
+     "categories": [
+      "heat_pump_boiler"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "sgready",
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Intergas",
+   "categories": [
+    "heat_pump"
+   ],
+   "models": [
+    {
+     "model": "Xtend",
+     "categories": [
+      "heat_pump"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen. Heeft uw model een SG Ready-ingang, dan kan het EMS via een relais bedrijfsverzoeken geven.",
+     "alternatives": [
+      "sgready",
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Quatt",
+   "categories": [
+    "heat_pump"
+   ],
+   "models": [
+    {
+     "model": "Hybrid / Duo",
+     "categories": [
+      "heat_pump"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen. Heeft uw model een SG Ready-ingang, dan kan het EMS via een relais bedrijfsverzoeken geven.",
+     "alternatives": [
+      "sgready",
+      "homeassistant"
+     ]
     }
    ]
   },
@@ -356,68 +931,578 @@
    "models": [
     {
      "model": "Blackbird / Sparrow / Flint",
-     "support": "not_supported",
-     "note": "Geen lokale interface bekend; de Weheat-API is cloudgebaseerd. Geen besturing geclaimd."
-    }
-   ]
-  },
-  {
-   "manufacturer": "SG Ready (alle merken)",
-   "categories": [
-    "heat_pump",
-    "heat_pump_boiler"
-   ],
-   "models": [
-    {
-     "model": "Warmtepomp met SG Ready-ingang + netwerkrelais (Shelly Gen2+)",
-     "driver_id": "sgready.relay",
-     "support": "via_sg_ready",
-     "note": "Bedrijfsverzoeken (normaal / aanbevolen aan / optioneel blokkeren of geforceerd). Geen vermogensregeling."
-    }
-   ]
-  },
-  {
-   "manufacturer": "SunSpec-compatibel (overige merken)",
-   "categories": [
-    "pv_inverter",
-    "smart_meter",
-    "energy_meter"
-   ],
-   "models": [
-    {
-     "model": "Omvormer met SunSpec Modbus",
      "categories": [
-      "pv_inverter"
+      "heat_pump"
      ],
-     "profile_id": "sunspec.inverter",
-     "support": "read_only"
+     "support": "not_supported",
+     "note": "Geen lokale interface bekend; de Weheat-API is cloudgebaseerd. Niets lokaal geclaimd.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Ariston",
+   "categories": [
+    "heat_pump_boiler",
+    "boiler"
+   ],
+   "models": [
+    {
+     "model": "Nuos",
+     "categories": [
+      "heat_pump_boiler"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "sgready",
+      "homeassistant"
+     ]
     },
     {
-     "model": "Meter met SunSpec Modbus",
+     "model": "Elektrische boiler",
      "categories": [
-      "smart_meter",
-      "energy_meter"
+      "boiler"
      ],
-     "profile_id": "sunspec.meter",
-     "support": "read_only"
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen. Aan/uit schakelen kan met een geschikt relais (installateur).",
+     "alternatives": [
+      "shelly",
+      "homeassistant"
+     ]
     }
    ]
   },
   {
-   "manufacturer": "Laadpalen (OCPP)",
+   "manufacturer": "Inventum",
+   "categories": [
+    "heat_pump_boiler",
+    "boiler"
+   ],
+   "models": [
+    {
+     "model": "Modulo",
+     "categories": [
+      "heat_pump_boiler"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "sgready",
+      "homeassistant"
+     ]
+    },
+    {
+     "model": "Elektrische boiler",
+     "categories": [
+      "boiler"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen. Aan/uit schakelen kan met een geschikt relais (installateur).",
+     "alternatives": [
+      "shelly",
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Alfen",
    "categories": [
     "ev_charger"
    ],
    "models": [
     {
-     "model": "OCPP 1.6J-laadpaal",
+     "model": "Eve Single / Double",
+     "categories": [
+      "ev_charger"
+     ],
      "support": "not_supported",
-     "note": "OCPP is in deze versie nog niet geïmplementeerd. Via Home Assistant mogelijk als die de laadpaal kent."
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "homeassistant"
+     ]
     }
    ]
   },
   {
-   "manufacturer": "Home Assistant",
+   "manufacturer": "Easee",
+   "categories": [
+    "ev_charger"
+   ],
+   "models": [
+    {
+     "model": "Home / Charge",
+     "categories": [
+      "ev_charger"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Zaptec",
+   "categories": [
+    "ev_charger"
+   ],
+   "models": [
+    {
+     "model": "Go / Pro",
+     "categories": [
+      "ev_charger"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Wallbox",
+   "categories": [
+    "ev_charger"
+   ],
+   "models": [
+    {
+     "model": "Pulsar",
+     "categories": [
+      "ev_charger"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Tesla",
+   "categories": [
+    "ev_charger",
+    "battery",
+    "ev"
+   ],
+   "models": [
+    {
+     "model": "Wall Connector",
+     "categories": [
+      "ev_charger"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    },
+    {
+     "model": "Powerwall",
+     "categories": [
+      "battery"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    },
+    {
+     "model": "Laadtoestand (SOC) van de auto",
+     "categories": [
+      "ev"
+     ],
+     "support": "not_supported",
+     "note": "Auto's hebben geen lokale interface; de SOC kan via Home Assistant als die de auto kent.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Peblar",
+   "categories": [
+    "ev_charger"
+   ],
+   "models": [
+    {
+     "model": "Home / Business",
+     "categories": [
+      "ev_charger"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "ABB",
+   "categories": [
+    "ev_charger"
+   ],
+   "models": [
+    {
+     "model": "Terra AC",
+     "categories": [
+      "ev_charger"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Smappee",
+   "categories": [
+    "ev_charger"
+   ],
+   "models": [
+    {
+     "model": "EV Wall",
+     "categories": [
+      "ev_charger"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Etrel",
+   "categories": [
+    "ev_charger"
+   ],
+   "models": [
+    {
+     "model": "INCH",
+     "categories": [
+      "ev_charger"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "OCPP-laadpalen (overige merken)",
+   "categories": [
+    "ev_charger"
+   ],
+   "models": [
+    {
+     "model": "OCPP 1.6J",
+     "categories": [
+      "ev_charger"
+     ],
+     "support": "not_supported",
+     "note": "OCPP is in deze versie nog niet geïmplementeerd.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "BYD",
+   "categories": [
+    "battery"
+   ],
+   "models": [
+    {
+     "model": "Battery-Box",
+     "categories": [
+      "battery"
+     ],
+     "support": "not_supported",
+     "note": "Wordt via de (hybride) omvormer geregeld; kies de omvormer.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Sessy",
+   "categories": [
+    "battery"
+   ],
+   "models": [
+    {
+     "model": "Thuisbatterij",
+     "categories": [
+      "battery"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Zendure",
+   "categories": [
+    "battery"
+   ],
+   "models": [
+    {
+     "model": "SolarFlow / Hyper",
+     "categories": [
+      "battery"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Volkswagen (ID.)",
+   "categories": [
+    "ev"
+   ],
+   "models": [
+    {
+     "model": "Laadtoestand (SOC) van de auto",
+     "categories": [
+      "ev"
+     ],
+     "support": "not_supported",
+     "note": "Auto's hebben geen lokale interface; de SOC kan via Home Assistant als die de auto kent.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Kia / Hyundai",
+   "categories": [
+    "ev"
+   ],
+   "models": [
+    {
+     "model": "Laadtoestand (SOC) van de auto",
+     "categories": [
+      "ev"
+     ],
+     "support": "not_supported",
+     "note": "Auto's hebben geen lokale interface; de SOC kan via Home Assistant als die de auto kent.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Overige merken",
+   "categories": [
+    "ev"
+   ],
+   "models": [
+    {
+     "model": "Laadtoestand (SOC) van de auto",
+     "categories": [
+      "ev"
+     ],
+     "support": "not_supported",
+     "note": "Auto's hebben geen lokale interface; de SOC kan via Home Assistant als die de auto kent.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "LG",
+   "categories": [
+    "airco"
+   ],
+   "models": [
+    {
+     "model": "Airco's",
+     "categories": [
+      "airco"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Zehnder",
+   "categories": [
+    "ventilation"
+   ],
+   "models": [
+    {
+     "model": "Ventilatie-units",
+     "categories": [
+      "ventilation"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Brink",
+   "categories": [
+    "ventilation"
+   ],
+   "models": [
+    {
+     "model": "Ventilatie-units",
+     "categories": [
+      "ventilation"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Eastron",
+   "categories": [
+    "energy_meter"
+   ],
+   "models": [
+    {
+     "model": "SDM630 / SDM120 (Modbus)",
+     "categories": [
+      "energy_meter"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen. Uitlezen kan (Expert) met een eigen Modbus-registertoewijzing uit de handleiding.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "TP-Link (Tapo / Kasa)",
+   "categories": [
+    "smart_plug",
+    "smart_relay"
+   ],
+   "models": [
+    {
+     "model": "Slimme stekkers / relais",
+     "categories": [
+      "smart_plug",
+      "smart_relay"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    }
+   ]
+  },
+  {
+   "manufacturer": "Tasmota-apparaten",
+   "categories": [
+    "smart_plug",
+    "smart_relay"
+   ],
+   "models": [
+    {
+     "model": "Slimme stekkers / relais",
+     "categories": [
+      "smart_plug",
+      "smart_relay"
+     ],
+     "support": "not_supported",
+     "note": "Geen geverifieerde lokale koppeling in deze versie; er worden geen registers of commando's verzonnen.",
+     "alternatives": [
+      "homeassistant"
+     ]
+    }
+   ]
+  }
+ ],
+ "routes": [
+  {
+   "id": "sunspec",
+   "kind": "standard",
+   "label": "Apparaat met SunSpec (Modbus)",
+   "categories": [
+    "pv_inverter",
+    "hybrid_inverter",
+    "smart_meter",
+    "energy_meter"
+   ],
+   "profile_by_category": {
+    "pv_inverter": "sunspec.inverter",
+    "hybrid_inverter": "sunspec.inverter",
+    "smart_meter": "sunspec.meter",
+    "energy_meter": "sunspec.meter"
+   },
+   "driver_id": "library.sunspec",
+   "note": "Open standaard voor omvormers en meters. Werkt alleen als uw apparaat SunSpec Modbus aanbiedt (zie handleiding); het EMS herkent zelf welke functies er zijn."
+  },
+  {
+   "id": "sgready",
+   "kind": "gateway",
+   "label": "SG Ready via netwerkrelais (Shelly Gen2+)",
+   "categories": [
+    "heat_pump",
+    "heat_pump_boiler"
+   ],
+   "driver_id": "sgready.relay",
+   "note": "Voor warmtepompen met een SG Ready-ingang. Het EMS geeft bedrijfsverzoeken (normaal, aanbevolen aan, …); de warmtepomp regelt zelf zijn compressor. Geen vermogensregeling. Bedrading door een installateur volgens de handleiding van de warmtepomp."
+  },
+  {
+   "id": "shelly",
+   "kind": "gateway",
+   "label": "Netwerkrelais / slimme stekker (Shelly Gen2+)",
+   "categories": [
+    "boiler",
+    "smart_plug",
+    "smart_relay",
+    "flexible_load"
+   ],
+   "driver_id": "shelly.switch",
+   "note": "Aan/uit-schakelen met minimale aan- en uittijden. Controleer of het relais de belasting aankan."
+  },
+  {
+   "id": "homeassistant",
+   "kind": "gateway",
+   "label": "Via Home Assistant",
    "categories": [
     "smart_meter",
     "energy_meter",
@@ -433,16 +1518,12 @@
     "ventilation",
     "smart_plug",
     "smart_relay",
-    "flexible_load"
+    "flexible_load",
+    "hvac",
+    "battery_system"
    ],
-   "models": [
-    {
-     "model": "Entiteiten uit uw eigen Home Assistant",
-     "driver_id": "homeassistant.entities",
-     "support": "via_home_assistant",
-     "note": "Optioneel. Meetwaarden en (na bevestiging) bediening via de officiële Home Assistant-API."
-    }
-   ]
+   "driver_id": "homeassistant.entities",
+   "note": "Gebruik meetwaarden (en na bevestiging bediening) van een apparaat dat uw eigen Home Assistant al kent. U kiest de entiteiten uit een lijst."
   }
  ]
 }

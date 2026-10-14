@@ -108,8 +108,9 @@ class ProfileModbusDriver(LibraryDriverMixin, DeviceDriver):
         notes="Registers, typen en schrijfbare functies komen uit een gevalideerd modelprofiel.",
         connection_schema={
             "profile_id": {"type": "string", "label_nl": "Apparaatprofiel", "readonly": True},
-            "transport": {"type": "string", "enum": ["tcp", "rtu"], "default": "tcp", "label_nl": "Verbinding",
-                          "level": "advanced"},
+            "transport": {"type": "string", "enum": ["tcp", "rtu"], "default": "tcp",
+                          "label_nl": "Hoe is het apparaat aangesloten?",
+                          "enum_labels": {"tcp": "Netwerk (LAN/wifi, Modbus TCP)", "rtu": "RS485-kabel (Modbus RTU)"}},
             "host": {"type": "string", "label_nl": "IP-adres / hostnaam", "show_if": ["transport", "tcp"]},
             "port": {"type": "integer", "default": 502, "label_nl": "Poort", "level": "advanced",
                      "show_if": ["transport", "tcp"]},

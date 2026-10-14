@@ -9,3 +9,4 @@ out/
 dist/
 build/
 .venv-build/
+backend/ems/BUILD_INFO.json

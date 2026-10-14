@@ -68,6 +68,19 @@ async def library_brands(category: DeviceCategory, _: Principal = Depends(viewer
     return brands
 
 
+@router.get("/library/routes", tags=["library"])
+async def library_routes(category: DeviceCategory, _: Principal = Depends(viewer),
+                         rt: EMSRuntime = Depends(get_runtime)) -> list[dict]:
+    """Connection routes that are not a brand: SunSpec standard, SG Ready relay, Shelly, Home Assistant."""
+    routes = _cat(rt).routes(category.value)
+    if rt.lab_mode and rt.lab is not None and "homeassistant" in rt.lab.ports:
+        from ems.simulator.lab import HA_TOKEN
+        for r in routes:   # the Testomgeving has a virtual Home Assistant: prefill it
+            if r["id"] == "homeassistant":
+                r["lab_connection"] = {"url": f"http://127.0.0.1:{rt.lab.ports['homeassistant']}", "token": HA_TOKEN}
+    return routes
+
+
 @router.get("/library/profiles", tags=["library"])
 async def library_profiles(_: Principal = Depends(viewer), rt: EMSRuntime = Depends(get_runtime)) -> dict:
     cat = _cat(rt)
@@ -235,6 +248,33 @@ async def serial_ports(_: Principal = Depends(installer)) -> list[dict]:
 class HAIn(BaseModel):
     url: str = Field(max_length=300)
     token: str = Field(max_length=2000)
+    category: DeviceCategory | None = None
+
+
+def ha_slots(category: DeviceCategory) -> dict:
+    """What the user can map for this kind of device: one entity per EMS value, one per control.
+    Mode selection (hp_mode) needs an option mapping and stays an Expert setting."""
+    from ems.core.models import ACTION_CAPABILITY, CAPABILITY_METRICS, METRIC_LABELS_NL, CommandAction
+    from ems.devices.capabilities import CAPABILITY_LABELS_NL
+    from ems.integrations.homeassistant.bridge import SERVICES
+    caps = TYPE_SCHEMAS[category].capabilities
+    values, seen = [], set()
+    for cap in sorted(caps, key=lambda c: c.value):
+        for metric in CAPABILITY_METRICS.get(cap, ()):
+            if metric in seen:
+                continue
+            seen.add(metric)
+            label, unit = METRIC_LABELS_NL.get(metric.value, (metric.value, ""))
+            m = metric.value
+            kind = ("power" if m.endswith("_w") else "energy" if m.endswith("_kwh") else
+                    "soc" if m.endswith("_pct") else "temperature" if m.endswith("_c") else "other")
+            values.append({"metric": m, "label": label, "unit": unit, "kind": kind})
+    controls = []
+    for action, cap in ACTION_CAPABILITY.items():
+        if cap in caps and action in SERVICES and action != CommandAction.HP_MODE:
+            controls.append({"action": action.value, "label": CAPABILITY_LABELS_NL.get(cap, cap.value),
+                             "domains": sorted(SERVICES[action])})
+    return {"values": values, "controls": controls}
 
 
 @router.post("/integrations/homeassistant/entities", tags=["library"])
@@ -246,7 +286,14 @@ async def ha_entities(body: HAIn, _: Principal = Depends(installer)) -> dict:
     try:
         c = HAClient(body.url, body.token)
         await c.ping()
-        return {"entities": suggest(await c.states())}
+        states = await c.states()
+        out = {"entities": suggest(states),
+               "all": [{"entity_id": x.get("entity_id"), "name": (x.get("attributes") or {}).get("friendly_name"),
+                        "unit": (x.get("attributes") or {}).get("unit_of_measurement"), "state": x.get("state")}
+                       for x in states if x.get("entity_id")]}
+        if body.category is not None:
+            out["slots"] = ha_slots(body.category)
+        return out
     except DriverError as exc:
         raise HTTPException(422, str(exc)) from exc
 

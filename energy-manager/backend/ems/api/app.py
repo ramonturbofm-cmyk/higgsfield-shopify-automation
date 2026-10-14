@@ -4,16 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from ems import __version__
+from ems import __version__, buildinfo
 from ems.api import routes_core, routes_devices, routes_library, routes_more, routes_nodes
 from ems.api.deps import CSRF_COOKIE, resolve_token, set_session_cookies
 from ems.core.config import ConfigError
@@ -24,6 +25,52 @@ WEB_DIR = Path(__file__).resolve().parents[1] / "web"
 
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
        "connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+
+IMMUTABLE = "public, max-age=31536000, immutable"
+
+
+class VersionedStatic(StaticFiles):
+    """``/static/v/<asset-hash>/<file>``: the hash is part of the URL, so these files can be cached forever.
+    A request with an old hash (a page from before an update) still gets the *current* file, but uncached;
+    the page then notices the version change and reloads."""
+
+    def __init__(self, *, directory: Path, current: str) -> None:
+        super().__init__(directory=directory)
+        self.current = current
+
+    def get_path(self, scope) -> str:
+        path = super().get_path(scope)
+        head, sep, rest = path.partition(os.sep)
+        scope["ems_current_asset"] = head == self.current
+        return rest if sep else path
+
+    def file_response(self, full_path, stat_result, scope, status_code: int = 200):
+        resp = super().file_response(full_path, stat_result, scope, status_code)
+        resp.headers["Cache-Control"] = IMMUTABLE if scope.get("ems_current_asset") else "no-store"
+        return resp
+
+
+class RevalidatedStatic(StaticFiles):
+    """Unversioned ``/static/<file>`` (icon, manifest, links from older pages): always revalidated (ETag),
+    never used from cache without asking the server."""
+
+    def file_response(self, full_path, stat_result, scope, status_code: int = 200):
+        resp = super().file_response(full_path, stat_result, scope, status_code)
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+
+def render_index(build: dict) -> str:
+    """index.html with versioned asset URLs and the build identity the frontend checks against the server."""
+    html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
+    base = f"/static/v/{build['asset_hash']}/"
+    for asset in ("css/app.css", "js/app.js"):
+        html = html.replace(f"/static/{asset}", base + asset)
+    meta = (f'<meta name="ems-version" content="{build["version"]}">\n'
+            f'<meta name="ems-build" content="{build["build"]}">\n'
+            f'<meta name="ems-asset" content="{build["asset_hash"]}">\n')
+    return html.replace("</head>", meta + "</head>", 1)
+
 
 # Origins of the Windows app (Tauri) connect screen; the dashboard itself is same-origin.
 TAURI_ORIGINS = ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"]
@@ -49,6 +96,8 @@ def create_app(runtime: EMSRuntime, *, start_runtime: bool = True, loops: bool =
                               "(HttpOnly-cookie + X-CSRF-Token), of Authorization: Bearer met het token uit "
                               "POST /api/v1/auth/login of een API-token (ems_...).")
     app.state.runtime = runtime
+    build = buildinfo.info()
+    app.state.build = build
     app.state.login_limiter = LoginRateLimiter()
     app.add_middleware(CORSMiddleware, allow_origins=TAURI_ORIGINS, allow_methods=["GET", "POST", "PUT", "DELETE"],
                        allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
@@ -62,6 +111,10 @@ def create_app(runtime: EMSRuntime, *, start_runtime: bool = True, loops: bool =
         if rotated:   # sliding browser session: replace the cookie, keep the CSRF token
             set_session_cookies(request, resp, rotated, request.cookies.get(CSRF_COOKIE))
         resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+        resp.headers["X-EMS-Version"] = build["version"]
+        resp.headers["X-EMS-Build"] = build["build"]
+        if request.url.path.startswith("/api/") or request.url.path == "/healthz":
+            resp.headers.setdefault("Cache-Control", "no-store")
         resp.headers.setdefault("Referrer-Policy", "no-referrer")
         if not request.url.path.startswith("/api/docs"):
             resp.headers.setdefault("Content-Security-Policy", CSP)
@@ -81,7 +134,8 @@ def create_app(runtime: EMSRuntime, *, start_runtime: bool = True, loops: bool =
     async def healthz():
         ok = runtime.running and not runtime.watchdog_tripped and runtime.db.ping()
         return JSONResponse({"ok": ok, "version": __version__, "mode": runtime.config.runtime.mode,
-                             "profile": "lab" if runtime.lab_mode else runtime.config.runtime.mode},
+                             "profile": "lab" if runtime.lab_mode else runtime.config.runtime.mode,
+                             "build": build["build"], "asset_hash": build["asset_hash"]},
                             status_code=200 if ok else 503)
 
     app.state.request_shutdown = None
@@ -143,10 +197,13 @@ def create_app(runtime: EMSRuntime, *, start_runtime: bool = True, loops: bool =
             runtime.unsubscribe(q)
 
     if (WEB_DIR / "index.html").exists():
-        app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+        index_html = render_index(build)
+        app.mount("/static/v", VersionedStatic(directory=WEB_DIR, current=build["asset_hash"]), name="static-v")
+        app.mount("/static", RevalidatedStatic(directory=WEB_DIR), name="static")
 
         @app.get("/", include_in_schema=False)
         async def index():
-            return FileResponse(WEB_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+            # Never cached: it names the asset version, so it must always come from the running server.
+            return HTMLResponse(index_html, headers={"Cache-Control": "no-store"})
 
     return app

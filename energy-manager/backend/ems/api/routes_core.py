@@ -17,7 +17,7 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
-from ems import __version__
+from ems import __version__, buildinfo
 from ems.api.deps import admin, clear_session_cookies, current_principal, get_runtime, operator, set_session_cookies, viewer
 from ems.core.config import ConfigError, StrategyProfile, dump_config, settings_schema
 from ems.core.models import Command, CommandAction
@@ -76,7 +76,8 @@ async def system_info(rt: EMSRuntime = Depends(get_runtime)) -> dict:
     return {"product": "Energy Manager", "version": __version__, "mode": rt.config.runtime.mode,
             "profile": "lab" if rt.lab_mode else ("demo" if rt.demo else "production"),
             "site": rt.config.site.name, "setup_required": users == 0,
-            "demo_login": {"username": "demo", "password": "demo"} if rt.demo else None}
+            "demo_login": {"username": "demo", "password": "demo"} if rt.demo else None,
+            "build": buildinfo.info()}
 
 
 # -------------------------------------------------------------------- auth

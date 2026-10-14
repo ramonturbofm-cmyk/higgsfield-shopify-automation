@@ -3,16 +3,14 @@ import { capabilityTable, checksList, deviceForm } from "./deviceform.js";
 
 /* Apparaat toevoegen — de gebruiker kiest zijn apparaat, niet een protocol.
  *   1. Soort (15 categorieën)
- *   2. Methode: automatisch zoeken · merk en model · via een gateway · handmatig (expert)
- *   3. Gegevens (alleen de velden die bij het niveau Eenvoudig / Geavanceerd / Expert horen)
+ *   2. Methode: automatisch zoeken · kies merk en model · via een gateway · handmatig (expert)
+ *   3. Gegevens: apparaat en verbinding apart getoond; alleen de velden die bij het niveau horen
  *   4. Testen: verbinding, identiteit en een eerlijk functierapport — daarna pas opslaan. */
 
 const SUPPORT = {
   supported: ["good", "Ondersteund"],
   read_only: ["st", "Alleen uitlezen"],
   community_read_only: ["warn", "Alleen uitlezen (community, niet geverifieerd)"],
-  via_sg_ready: ["st", "Via SG Ready"],
-  via_home_assistant: ["st", "Via Home Assistant"],
   simulator: ["warn", "Testomgeving (virtueel)"],
   not_supported: ["bad", "Nog niet ondersteund"],
 };
@@ -20,27 +18,68 @@ const TEST_STATUS = {
   HARDWARE_TESTED: "op hardware getest", SIMULATOR_TESTED: "getest in de simulator", EXPERIMENTAL: "experimenteel, niet op hardware getest",
   COMMUNITY: "community-profiel, niet geverifieerd", UNVERIFIED: "volgens documentatie, niet op hardware getest",
 };
+// How a driver talks to the device (shown separately from brand/model).
+const CONN_LABEL = {
+  "library.sunspec": "SunSpec (Modbus TCP of RS485)", "library.modbus": "Modbus volgens apparaatprofiel (TCP of RS485)",
+  "homewizard.p1": "HomeWizard lokale API (netwerk)", "dsmr.p1": "P1-kabel (DSMR)", "shelly.switch": "Shelly lokale API (netwerk)",
+  "sgready.relay": "SG Ready via netwerkrelais", "homeassistant.entities": "Home Assistant",
+  "generic.modbus_tcp": "Modbus TCP (eigen registertoewijzing)", "generic.http_json": "HTTP/JSON (eigen toewijzing)",
+  "generic.mqtt": "MQTT (eigen toewijzing)",
+};
 const STEPS = ["Soort", "Methode", "Gegevens", "Testen"];
+export const METHODS = [
+  ["search", "🔎", "Automatisch zoeken", "Zoekt op uw netwerk naar apparaten die het EMS kent (HomeWizard, Shelly, SunSpec/Modbus, Home Assistant). Geen poortscan."],
+  ["brand", "🏷", "Kies merk en model", "Kies uw apparaat uit de lijst. Per model ziet u welke functies werken — en wat niet."],
+  ["gateway", "🔌", "Via een gateway", "Home Assistant, een SG Ready-relais, een Shelly-relais, een Modbus-gateway of de SunSpec-standaard."],
+  ["manual", "🛠", "Handmatig (Expert)", "Zelf Modbus-registers, REST-velden of MQTT-topics opgeven uit de handleiding. Alleen uitlezen."],
+];
 
-/** Home Assistant: list the entities of the user's own HA (official REST API) to fill in the mapping. */
-function haHelper(form) {
+/** Home Assistant: connect, then choose the entities from lists — no JSON needed. */
+function haPicker(form, category) {
   const out = h("div", { "aria-live": "polite" });
-  const fetchList = async () => {
+  const values = {}, controls = {};
+  const apply = () => {
+    form.set("values", Object.entries(values).filter(([, e]) => e).map(([metric, entity_id]) => ({ metric, entity_id })));
+    form.set("controls", Object.entries(controls).filter(([, e]) => e).map(([action, entity_id]) => ({ action, entity_id })));
+  };
+  const pick = (list, preferred, onChange, aria) => {
+    const sel = h("select", { "aria-label": aria }, h("option", { value: "" }, "— niet gebruiken —"),
+      preferred.length ? h("optgroup", { label: "Passend" }, preferred.map((e) => h("option", { value: e.entity_id }, `${e.name || e.entity_id} (${e.entity_id})${e.unit ? ` · ${e.unit}` : ""}`))) : null,
+      h("optgroup", { label: "Alle entiteiten" }, list.map((e) => h("option", { value: e.entity_id }, `${e.name || e.entity_id} (${e.entity_id})`))));
+    sel.addEventListener("change", () => { onChange(sel.value); apply(); });
+    return sel;
+  };
+  const connect = async () => {
     let c;
     try { c = form.collect().connection; } catch (e) { out.replaceChildren(h("div", { class: "notice bad inline" }, e.message)); return; }
     if (!c.token || c.token === "********") { out.replaceChildren(h("div", { class: "notice warn inline" }, "Vul eerst het access token in.")); return; }
-    out.replaceChildren(h("div", { class: "muted" }, "Entiteiten ophalen…"));
+    out.replaceChildren(h("div", { class: "muted" }, "Verbinden met Home Assistant…"));
     try {
-      const r = await api("/integrations/homeassistant/entities", { method: "POST", body: { url: c.url, token: c.token } });
-      out.replaceChildren(h("p", { class: "small muted" }, `${r.entities.length} bruikbare entiteiten. Neem de entity_id over in ‘Meetwaarden’ (en, na bevestiging, ‘Bediening’).`),
-        h("div", { class: "tbl-wrap" }, h("table", {}, h("thead", {}, h("tr", {}, ["Naam", "entity_id", "Soort", "Waarde"].map((t) => h("th", {}, t)))),
-          h("tbody", {}, r.entities.slice(0, 300).map((e) => h("tr", {}, h("td", {}, e.name), h("td", { class: "mono small" }, e.entity_id),
-            h("td", { class: "small" }, e.kind), h("td", { class: "small" }, `${e.state ?? ""} ${e.unit || ""}`)))))));
+      const r = await api("/integrations/homeassistant/entities", { method: "POST", body: { url: c.url, token: c.token, category } });
+      const all = [...r.all].sort((a, b) => a.entity_id.localeCompare(b.entity_id));
+      const vrows = r.slots.values.map((s) => {
+        const pref = r.entities.filter((e) => e.kind === s.kind || (s.kind === "soc" && e.unit === "%"));
+        return h("label", { class: "f", "data-ha-metric": s.metric }, `${s.label}${s.unit ? ` (${s.unit})` : ""}`,
+          pick(all.filter((e) => e.entity_id.startsWith("sensor.") || e.entity_id.startsWith("binary_sensor.")), pref,
+            (v) => { values[s.metric] = v; }, s.label));
+      });
+      const crows = r.slots.controls.map((s) => {
+        const ok = all.filter((e) => s.domains.includes(e.entity_id.split(".")[0]));
+        return h("label", { class: "f", "data-ha-action": s.action }, s.label,
+          pick(ok, ok, (v) => { controls[s.action] = v; }, s.label),
+          h("span", { class: "muted small" }, `Entiteiten van het type ${s.domains.join(", ")}`));
+      });
+      out.replaceChildren(h("div", { class: "notice good inline" }, `✓ Verbonden — ${r.all.length} entiteiten gevonden`),
+        h("h4", {}, "Meetwaarden"), h("p", { class: "small muted" }, "Kies per waarde de juiste entiteit; laat leeg wat u niet heeft."),
+        h("div", { class: "form" }, ...vrows),
+        crows.length ? h("h4", {}, "Bediening (optioneel)") : null,
+        crows.length ? h("p", { class: "small muted" }, "Alleen kiezen als Home Assistant dit apparaat bedient én geen ander systeem het tegelijk regelt. Vink daarvoor ook de bevestiging hierboven aan. Het EMS bedient pas na de inbedrijfstelling.") : null,
+        crows.length ? h("div", { class: "form" }, ...crows) : null);
     } catch (e) { out.replaceChildren(h("div", { class: "notice bad inline" }, e.message)); }
   };
-  return h("div", { class: "card flat" }, h("b", {}, "Entiteiten uit Home Assistant"),
-    h("p", { class: "small muted" }, "Maak in Home Assistant een ‘long-lived access token’ (Profiel → Beveiliging). Het token wordt versleuteld opgeslagen."),
-    h("button", { class: "btn", onclick: fetchList }, "Entiteiten ophalen"), out);
+  return h("div", { class: "card flat", "data-ha-picker": "1" }, h("b", {}, "Home Assistant-entiteiten kiezen"),
+    h("p", { class: "small muted" }, "Vul het adres van uw Home Assistant en een ‘long-lived access token’ in (Home Assistant → Profiel → Beveiliging). Het token wordt versleuteld opgeslagen."),
+    h("button", { class: "btn primary", "data-action": "ha-connect", onclick: connect }, "Verbinden en entiteiten ophalen"), out);
 }
 
 export async function addWizard(root, preset, homewizardFlow) {
@@ -49,7 +88,7 @@ export async function addWizard(root, preset, homewizardFlow) {
   const schemaOf = Object.fromEntries(schemas.map((x) => [x.category, x]));
   const driverOf = Object.fromEntries(drivers.map((d) => [d.driver_id, d]));
   const lab = state.info?.profile === "lab";
-  const steps = h("div", { class: "steps", role: "list" });
+  const steps = h("div", { class: "steps", role: "list", "data-wizard": "0.6" });
   const body = h("div", { class: "card wizard" });
   root.append(h("h1", {}, "Apparaat toevoegen"),
     lab ? h("div", { class: "notice warn inline" }, h("div", {}, h("b", {}, "Testomgeving. "),
@@ -60,6 +99,7 @@ export async function addWizard(root, preset, homewizardFlow) {
     h("span", { role: "listitem", class: i === n ? "on" : i < n ? "done" : "" }, `${i < n ? "✓ " : ""}${x}`)));
   const catLabel = () => cats.find((c) => c.id === wiz.category)?.label || wiz.category;
   const back = (fn, text = "← Terug") => h("button", { class: "btn", onclick: fn }, text);
+  const routesFor = async () => api(`/library/routes?category=${wiz.category}`);
 
   // ------------------------------------------------------------ 1. soort
   const stepCategory = () => {
@@ -68,24 +108,17 @@ export async function addWizard(root, preset, homewizardFlow) {
       h("div", { class: "grid cols-4 choices" }, cats.map((c) => h("button", { class: "btn choice", "data-category": c.id,
         onclick: () => { wiz.category = c.id; stepMethod(); } },
       h("span", { class: "ico", "aria-hidden": "true" }, c.icon), h("b", {}, c.label),
-      h("span", { class: "muted small" }, c.supported_models ? `${c.supported_models} ${c.supported_models === 1 ? "koppeling" : "koppelingen"}` : "via gateway / handmatig")))));
+      h("span", { class: "muted small" }, c.supported_models ? `${c.supported_models} ${c.supported_models === 1 ? "model" : "modellen"} met koppeling` : "via gateway of handmatig")))));
   };
 
   // ----------------------------------------------------------- 2. methode
   const stepMethod = () => {
     setSteps(1);
-    const methods = [
-      ["search", "🔎", "Automatisch zoeken", "Zoekt op uw netwerk naar apparaten die het EMS kent (mDNS, HomeWizard, Shelly, SunSpec/Modbus op poort 502). Er wordt geen poortscan gedaan."],
-      ["brand", "🏷", "Kies merk en model", "Kies uw apparaat uit de lijst. U ziet meteen wat wel en niet kan."],
-      ["gateway", "🔌", "Via een gateway", "Home Assistant, een SG Ready-relais of een Modbus-gateway (RS485 → netwerk)."],
-      ["manual", "🛠", "Handmatig (expert)", "Zelf Modbus-registers, REST-velden of MQTT-topics opgeven. Alleen uitlezen."],
-    ];
     body.replaceChildren(h("h3", {}, `${catLabel()}: hoe wilt u het apparaat toevoegen?`),
-      h("div", { class: "grid cols-4 choices" }, methods.map(([k, ico, title, text]) => h("button", {
-        class: `btn choice ${k === "manual" ? "advanced-only" : ""}`, "data-method": k,
+      h("div", { class: "grid cols-4 choices methods" }, METHODS.map(([k, ico, title, text]) => h("button", {
+        class: "btn choice", "data-method": k,
         onclick: () => ({ search: stepSearch, brand: stepBrand, gateway: stepGateway, manual: stepManual })[k]() },
       h("span", { class: "ico", "aria-hidden": "true" }, ico), h("b", {}, title), h("span", { class: "muted small" }, text)))),
-      state.level === "simple" ? h("p", { class: "small muted" }, "Handmatige koppelingen zijn zichtbaar op het niveau Geavanceerd of Expert (rechtsboven).") : null,
       h("div", { class: "row" }, back(stepCategory)));
   };
 
@@ -104,7 +137,7 @@ export async function addWizard(root, preset, homewizardFlow) {
     body.replaceChildren(h("h3", {}, `${catLabel()}: automatisch zoeken`),
       h("p", { class: "small muted" }, "Het EMS zoekt alleen naar bekende aankondigingen (mDNS) en vraagt op een opgegeven adres naar de identiteit. Herkenning: ",
         h("b", {}, "exact model"), " · ", h("b", {}, "fabrikant"), " · ", h("b", {}, "alleen protocol"), ". Een apparaat dat niet zeker herkend is, wordt nooit als een bepaald merk behandeld."),
-      h("div", { class: "row" }, h("button", { class: "btn primary", onclick: () => run([]) }, "Zoeken op het netwerk")),
+      h("div", { class: "row" }, h("button", { class: "btn primary", onclick: () => run([]) }, "Opnieuw zoeken op het netwerk")),
       h("div", { class: "form", style: { marginTop: "12px" } }, h("label", { class: "f" }, "Of zoek op één IP-adres", ip)),
       h("div", { class: "row" }, h("button", { class: "btn", onclick: () => ip.value.trim() ? run([ip.value.trim()]) : toast("Vul een IP-adres in", true) }, "Zoeken op dit adres")),
       out, h("div", { class: "row", style: { marginTop: "12px" } }, back(stepMethod)));
@@ -136,38 +169,52 @@ export async function addWizard(root, preset, homewizardFlow) {
   const fromDiscovery = async (r) => {
     const paramPreset = r.profile_id ? (await api(`/library/profiles/${r.profile_id}`).catch(() => null))?.default_params || {} : {};
     stepDetails({ driver: driverOf[r.driver_id], preset: r.connection || {}, paramPreset,
+      device: [r.manufacturer, r.model].filter(Boolean).join(" ") || null,
       defaultName: r.model || driverOf[r.driver_id]?.name, origin: stepSearch, identity: r });
   };
 
   // ----------------------------------------------------------- merk/model
+  const routeButton = (route, device, origin) => h("button", { class: "btn sm", "data-route": route.id,
+    onclick: () => fromRoute(route, device, origin) }, `Koppelen ${/^via /i.test(route.label) ? route.label.replace(/^Via /, "via ") : `via ${route.label}`}`);
   const stepBrand = async () => {
     setSteps(1);
     body.replaceChildren(h("div", { class: "muted" }, "Laden…"));
-    const brands = await api(`/library/brands?category=${wiz.category}`);
+    const [brands, routes] = await Promise.all([api(`/library/brands?category=${wiz.category}`), routesFor()]);
     const search = h("input", { type: "search", placeholder: "Zoek merk of model", "aria-label": "zoek merk of model" });
     const list = h("div", {});
     const modelRow = (b, m) => {
       const [cls, text] = SUPPORT[m.support] || ["", m.support];
       const usable = m.driver_id && driverOf[m.driver_id] && m.support !== "not_supported" && (m.support !== "simulator" || m.lab_connection || lab);
-      return h("div", { class: "card flat row spread model", "data-profile": m.profile_id || "", "data-driver": m.driver_id || "" }, h("div", {},
-        h("b", {}, m.model), " ", h("span", { class: `pill ${cls}` }, text),
-        m.test_status ? h("span", { class: "muted small" }, ` · ${TEST_STATUS[m.test_status] || m.test_status}`) : null,
+      const device = `${b.manufacturer} ${m.model}`;
+      return h("div", { class: "card flat model", "data-profile": m.profile_id || "", "data-driver": m.driver_id || "", "data-support": m.support },
+        h("div", { class: "row spread" }, h("div", {},
+          h("b", {}, m.model), " ", h("span", { class: `pill ${cls}` }, text),
+          m.test_status ? h("span", { class: "muted small" }, ` · ${TEST_STATUS[m.test_status] || m.test_status}`) : null),
+        usable ? h("button", { class: "btn primary", onclick: () => fromBrand(b, m) }, "Kiezen") : null),
+        m.functions?.length ? h("ul", { class: "functions small" }, m.functions.map((f) => h("li", {}, f))) : null,
+        usable && m.driver_id ? h("div", { class: "small muted" }, "Verbinding: ", CONN_LABEL[m.driver_id] || driverOf[m.driver_id]?.name) : null,
         m.note ? h("div", { class: "small muted" }, m.note) : null,
-        m.requirements?.length ? h("div", { class: "small" }, "Nodig: ", m.requirements.join("; ")) : null),
-      usable ? h("button", { class: "btn primary", onclick: () => fromBrand(b, m) }, "Kiezen") : null);
+        m.requirements?.length ? h("div", { class: "small" }, "Nodig: ", m.requirements.join("; ")) : null,
+        m.alternatives?.length ? h("div", { class: "row alternatives", style: { marginTop: "6px" } },
+          h("span", { class: "small" }, usable ? "Ook mogelijk:" : "Wel mogelijk:"), ...m.alternatives.map((r) => routeButton(r, device, stepBrand))) : null);
     };
     const paint = () => {
       const q = search.value.trim().toLowerCase();
       const shown = brands.map((b) => ({ ...b, models: b.models.filter((m) => !q || `${b.manufacturer} ${m.model}`.toLowerCase().includes(q)) }))
         .filter((b) => b.models.length);
-      list.replaceChildren(...(shown.length ? shown.map((b) => h("div", { class: "mfr" }, h("h4", {}, b.manufacturer),
+      list.replaceChildren(...(shown.length ? shown.map((b) => h("div", { class: "mfr", "data-brand": b.manufacturer }, h("h4", {}, b.manufacturer),
         b.note ? h("p", { class: "small muted" }, b.note) : null, ...b.models.map((m) => modelRow(b, m))))
-        : [h("p", { class: "muted" }, "Geen merk of model gevonden. Probeer ‘Via een gateway’ of (Expert) ‘Handmatig’.")]));
+        : [h("p", { class: "muted" }, "Geen merk of model gevonden.")]));
     };
     search.addEventListener("input", paint);
-    body.replaceChildren(h("h3", {}, `${catLabel()}: merk en model`),
-      h("p", { class: "small muted" }, "Alleen koppelingen die op officiële documentatie of een open standaard zijn gebouwd kunnen regelen. Staat uw apparaat er niet bij of is het ‘nog niet ondersteund’, dan regelt het EMS het niet — er worden geen registers of commando's verzonnen."),
-      search, list, h("div", { class: "row", style: { marginTop: "12px" } }, back(stepMethod)));
+    body.replaceChildren(h("h3", {}, `${catLabel()}: kies merk en model`),
+      h("p", { class: "small muted" }, "Per model ziet u wat het EMS ermee kan. Alleen koppelingen die op officiële documentatie of een open standaard zijn gebouwd kunnen bedienen. ‘Nog niet ondersteund’ betekent: het EMS verzint geen registers of commando's — waar mogelijk staat een andere koppeling erbij."),
+      search, list,
+      h("div", { class: "card flat not-listed" }, h("h4", {}, "Staat uw merk of model er niet bij?"),
+        h("p", { class: "small muted" }, "Dan kan het vaak toch via een standaard of gateway:"),
+        h("div", { class: "row" }, ...routes.map((r) => routeButton(r, null, stepBrand)),
+          h("button", { class: "btn sm", onclick: stepManual }, "Handmatig (Expert)"))),
+      h("div", { class: "row", style: { marginTop: "12px" } }, back(stepMethod)));
     paint();
   };
   const fromBrand = async (b, m) => {
@@ -176,27 +223,27 @@ export async function addWizard(root, preset, homewizardFlow) {
     const prof = m.profile_id ? await api(`/library/profiles/${m.profile_id}`).catch(() => null) : null;
     const preset = { ...(prof?.connection_parameters || {}), ...(m.profile_id ? { profile_id: m.profile_id } : {}),
       ...(m.lab_connection ? (m.driver_id === "homewizard.p1" ? { host: m.lab_connection.host, port: m.lab_connection.port, api: "v1" } : m.lab_connection.host.includes(":") ? { host: m.lab_connection.host } : m.lab_connection) : {}) };
-    stepDetails({ driver: drv, preset, paramPreset: prof?.default_params || {}, defaultName: m.model, origin: stepBrand, profile: prof });
+    stepDetails({ driver: drv, preset, paramPreset: prof?.default_params || {}, defaultName: m.model,
+      device: `${b.manufacturer} ${m.model}`, origin: stepBrand, profile: prof });
+  };
+  const fromRoute = async (route, device, origin) => {
+    const prof = route.profile_id ? await api(`/library/profiles/${route.profile_id}`).catch(() => null) : null;
+    stepDetails({ driver: driverOf[route.driver_id], preset: { ...(prof?.connection_parameters || {}), ...(route.profile_id ? { profile_id: route.profile_id } : {}), ...(route.lab_connection || {}) },
+      paramPreset: prof?.default_params || {}, defaultName: device || catLabel(), device, connection: route.label,
+      routeNote: route.note, origin, profile: prof });
   };
 
   // -------------------------------------------------------------- gateway
-  const stepGateway = () => {
+  const stepGateway = async () => {
     setSteps(1);
-    const opts = [];
-    if (["heat_pump", "heat_pump_boiler"].includes(wiz.category) && driverOf["sgready.relay"]) {
-      opts.push(["SG Ready via netwerkrelais", "Voor warmtepompen met een SG Ready-ingang. Het EMS geeft bedrijfsverzoeken (normaal, aanbevolen aan, …) — de warmtepomp blijft zelf zijn compressor regelen. Laat de bedrading door een installateur aanleggen volgens de handleiding van uw warmtepomp.", "sgready.relay"]);
-    }
-    if (driverOf["homeassistant.entities"]) {
-      opts.push(["Home Assistant", "Gebruik entiteiten uit uw eigen Home Assistant. Bediening alleen na bevestiging dat geen andere automatisering hetzelfde apparaat regelt.", "homeassistant.entities"]);
-    }
-    if (["smart_relay", "smart_plug", "boiler", "flexible_load"].includes(wiz.category) && driverOf["shelly.switch"]) {
-      opts.push(["Netwerkrelais (Shelly Gen2+)", "Aan/uit-schakelen van een verbruiker via een relais of slimme stekker, met minimale aan- en uittijden.", "shelly.switch"]);
-    }
-    body.replaceChildren(h("h3", {}, `${catLabel()}: via een gateway`),
-      ...opts.map(([title, text, id]) => h("div", { class: "card flat row spread" }, h("div", {}, h("b", {}, title), h("div", { class: "small muted" }, text)),
-        h("button", { class: "btn primary", onclick: () => stepDetails({ driver: driverOf[id], preset: {}, defaultName: title, origin: stepGateway }) }, "Kiezen"))),
+    body.replaceChildren(h("div", { class: "muted" }, "Laden…"));
+    const routes = await routesFor();
+    body.replaceChildren(h("h3", {}, `${catLabel()}: via een gateway of standaard`),
+      ...routes.map((r) => h("div", { class: "card flat row spread", "data-route-card": r.id }, h("div", {}, h("b", {}, r.label),
+        h("div", { class: "small muted" }, r.note)),
+      h("button", { class: "btn primary", onclick: () => fromRoute(r, null, stepGateway) }, "Kiezen"))),
       h("div", { class: "card flat" }, h("b", {}, "Modbus-gateway (RS485 naar netwerk)"),
-        h("p", { class: "small muted" }, "Kies uw apparaat bij ‘Merk en model’ en vul bij de verbinding het IP-adres van de gateway en het Modbus-adres (unit-ID) van het apparaat in (niveau Geavanceerd). Direct via een USB-RS485-adapter kan ook: kies dan bij ‘Verbinding’ RTU.")),
+        h("p", { class: "small muted" }, "Kies uw apparaat bij ‘Kies merk en model’ en vul bij de verbinding het IP-adres van de gateway en het Modbus-adres (unit-ID) van het apparaat in. Direct via een USB-RS485-adapter kan ook: kies dan ‘RS485-kabel’.")),
       h("div", { class: "row" }, back(stepMethod)));
   };
 
@@ -204,17 +251,18 @@ export async function addWizard(root, preset, homewizardFlow) {
   const stepManual = () => {
     setSteps(1);
     const generic = drivers.filter((d) => d.driver_id.startsWith("generic.") && d.categories.includes(wiz.category) && d.available_in_mode);
-    body.replaceChildren(h("h3", {}, `${catLabel()}: handmatig`),
+    body.replaceChildren(h("h3", {}, `${catLabel()}: handmatig (Expert)`),
       h("div", { class: "notice warn inline" }, "Handmatige koppelingen lezen alleen uit. Het EMS regelt zo'n apparaat niet: daarvoor is een apparaatprofiel nodig dat op de officiële documentatie is gebouwd. Neem adressen, paden en topics uitsluitend over uit de handleiding van uw apparaat."),
       generic.length ? h("div", {}, ...generic.map((d) => h("div", { class: "card flat row spread" }, h("div", {}, h("b", {}, d.name),
         h("div", { class: "small muted" }, d.connection_types.join(", "))),
-      h("button", { class: "btn", onclick: () => stepDetails({ driver: d, preset: {}, origin: stepManual }) }, "Kiezen"))))
+      h("button", { class: "btn", onclick: () => stepDetails({ driver: d, preset: {}, origin: stepManual, connection: CONN_LABEL[d.driver_id] || d.name }) }, "Kiezen"))))
         : h("p", { class: "muted" }, "Geen handmatige koppeling voor dit soort apparaat."),
       h("div", { class: "row" }, back(stepMethod)));
   };
 
   // ------------------------------------------------------------- gegevens
-  const stepDetails = ({ driver, preset, paramPreset = {}, defaultName, origin, profile = null, identity = null }) => {
+  const stepDetails = ({ driver, preset, paramPreset = {}, defaultName, origin, profile = null, identity = null,
+    device = null, connection = null, routeNote = null }) => {
     if (!driver) { toast("Deze koppeling is niet beschikbaar", true); return; }
     setSteps(2);
     const form = deviceForm({ schema: schemaOf[wiz.category], driver, caps: driver.capabilities.map((c) => c.id), preset, paramPreset, defaultName });
@@ -233,7 +281,7 @@ export async function addWizard(root, preset, homewizardFlow) {
       await api(`/devices/${dev.id}/test`, { method: "POST", timeout: 60000 }).catch(() => null);
       location.hash = `#/devices/${dev.id}`;
     };
-    const test = h("button", { class: "btn primary", onclick: async () => {
+    const test = h("button", { class: "btn primary", "data-action": "test", onclick: async () => {
       let req;
       try { req = collect(); } catch (e) { result.replaceChildren(h("div", { class: "notice bad inline" }, e.message)); return; }
       setSteps(3); test.disabled = true; result.replaceChildren(h("div", { class: "muted" }, "Verbinding testen en functies uitlezen…"));
@@ -255,11 +303,15 @@ export async function addWizard(root, preset, homewizardFlow) {
       test.disabled = false;
     } }, "Verbinding testen");
     body.replaceChildren(h("h3", {}, `${defaultName || driver.name}: gegevens`),
+      h("dl", { class: "picked" },
+        h("dt", {}, "Apparaat"), h("dd", { "data-picked": "device" }, device || `${catLabel()} (merk/model niet gekozen)`),
+        h("dt", {}, "Verbinding"), h("dd", { "data-picked": "connection" }, connection || CONN_LABEL[driver.driver_id] || driver.name)),
+      routeNote ? h("p", { class: "small muted" }, routeNote) : null,
       profile ? h("p", { class: "small muted" }, `Profiel: ${profile.manufacturer} ${profile.model} · ${TEST_STATUS[profile.test_status] || profile.test_status}`,
         profile.known_limitations?.length ? ` · beperkingen: ${profile.known_limitations.join("; ")}` : "") : null,
       identity?.virtual ? h("p", { class: "small" }, h("span", { class: "pill warn" }, "virtueel apparaat (Testomgeving)")) : null,
       form.el,
-      driver.driver_id === "homeassistant.entities" ? haHelper(form) : null,
+      driver.driver_id === "homeassistant.entities" ? haPicker(form, wiz.category) : null,
       isMeter ? h("label", { class: "f check" }, primary, "Gebruiken als primaire netmeter (vervangt een bestaande primaire netmeter)") : null,
       h("div", { class: "row", style: { marginTop: "14px" } }, back(origin), test), result);
     if (isMeter) api("/gridmeter").then((gm) => { primary.checked = !gm.device_id || gm.needs_confirmation; }).catch(() => {});

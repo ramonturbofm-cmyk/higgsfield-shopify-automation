@@ -49,6 +49,7 @@ class Catalog:
     profiles: dict[str, DeviceProfile] = field(default_factory=dict)
     problems: list[str] = field(default_factory=list)
     manufacturers: list[dict] = field(default_factory=list)
+    route_list: list[dict] = field(default_factory=list)
 
     def load(self) -> Catalog:
         self.profiles, self.problems = {}, []
@@ -57,7 +58,16 @@ class Catalog:
         if self.user_dir is not None and self.user_dir.exists():
             for p in sorted(self.user_dir.glob("*.json")):
                 self._load_file(p, "user")
-        self.manufacturers = json.loads((HERE / "manufacturers.json").read_text(encoding="utf-8"))["entries"]
+        index = json.loads((HERE / "manufacturers.json").read_text(encoding="utf-8"))
+        self.manufacturers, self.route_list = index["entries"], index.get("routes", [])
+        for e in self.manufacturers:
+            for m in e["models"]:
+                for a in m.get("alternatives", []):
+                    if not any(r["id"] == a for r in self.route_list):
+                        self.problems.append(f"manufacturers.json: {e['manufacturer']} {m['model']}: onbekende route {a!r}")
+                pid = m.get("profile_id")
+                if pid and pid not in self.profiles:
+                    self.problems.append(f"manufacturers.json: {e['manufacturer']} {m['model']}: profiel {pid!r} ontbreekt")
         return self
 
     def _load_file(self, path: Path, source: str) -> None:
@@ -138,8 +148,32 @@ class Catalog:
                 "connection_parameters": prof.connection_parameters, "description": prof.description,
                 "integration_version": prof.integration_version}
 
+    def functions(self, m: dict) -> list[str]:
+        """What a model can do: the catalog's own description, otherwise derived from the profile."""
+        if m.get("functions"):
+            return list(m["functions"])
+        prof = self.profiles.get(m.get("profile_id") or "")
+        if prof is None:
+            return []
+        from ems.devices.capabilities import CAPABILITY_LABELS_NL
+        out = [CAPABILITY_LABELS_NL.get(c, c.value) for c in sorted(prof.read_capabilities, key=lambda c: c.value)]
+        out += [CAPABILITY_LABELS_NL.get(c.capability, c.capability.value) for c in prof.writable_controls if c.writable]
+        return out
+
+    def routes(self, category: str) -> list[dict]:
+        """Connection routes that are not a brand (SunSpec standard, SG Ready relay, Shelly, Home Assistant)."""
+        out = []
+        for r in self.route_list:
+            if category in r["categories"]:
+                pid = (r.get("profile_by_category") or {}).get(category)
+                out.append({"id": r["id"], "kind": r["kind"], "label": r["label"], "note": r.get("note", ""),
+                            "driver_id": r["driver_id"], "profile_id": pid})
+        return out
+
     def brands(self, category: str, include_simulator: bool = False) -> list[dict]:
-        """Manufacturer -> models for one category, each with its real support status."""
+        """Manufacturer -> models for one category, each with its real support status, its functions and —
+        when it is not supported directly — the connection routes that may work instead."""
+        routes = {r["id"]: r for r in self.routes(category)}
         out: dict[str, dict] = {}
         for e in self.manufacturers:
             if category not in e["categories"]:
@@ -155,9 +189,15 @@ class Catalog:
                 b["models"].append({"model": m["model"], "profile_id": m.get("profile_id"),
                                     "driver_id": m.get("driver_id") or (prof.driver_id if prof else None),
                                     "support": m["support"], "note": m.get("note", ""),
+                                    "functions": self.functions(m),
+                                    "alternatives": [routes[a] for a in m.get("alternatives", []) if a in routes],
                                     "requirements": m.get("requirements", []), "lab": m.get("lab"),
                                     "test_status": prof.test_status if prof else None})
-        return sorted(out.values(), key=lambda b: (b["manufacturer"].startswith("Energy Manager"), b["manufacturer"]))
+        order = {"supported": 0, "simulator": 0, "read_only": 1, "community_read_only": 2, "not_supported": 3}
+        for b in out.values():
+            b["best"] = min(order.get(m["support"], 9) for m in b["models"])
+        return sorted(out.values(), key=lambda b: (not b["manufacturer"].startswith("Energy Manager"), b["best"],
+                                                   b["manufacturer"].lower()))
 
 
 _catalog: Catalog | None = None

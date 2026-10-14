@@ -1,8 +1,9 @@
 # Windows acceptance test for EnergyManagerSetup.exe (runs in CI on a clean windows-latest machine).
-# Checks: install, app start, all-in-one background EMS in Demo Mode, backend + database, live data,
+# Checks: install, app start + UI in the installed app (WebView2 over CDP), all-in-one background EMS in Demo Mode, backend + database, live data,
 # optimizer, WebSocket, settings save, app close (EMS keeps running), restart via the Windows
 # sign-in autostart entry (simulated reboot), history kept, upgrade over the existing install,
-# Testomgeving (virtual devices over Modbus TCP / SunSpec / HTTP), uninstall (user data kept).
+# Testomgeving (virtual devices over Modbus TCP / SunSpec / HTTP), uninstall (user data kept), and an upgrade
+# from the previous public release 0.5.0 with its UI cached in the app.
 # Usage: .\windows\acceptance.ps1 -Installer dist\EnergyManagerSetup-<versie>.exe
 param([Parameter(Mandatory = $true)][string]$Installer)
 $ErrorActionPreference = "Stop"
@@ -43,6 +44,32 @@ function Login() {
     -Body (@{ username = "demo"; password = "demo" } | ConvertTo-Json)
   $script:Token = $r.token
 }
+# The installed app, with its WebView2 reachable over the Chrome DevTools Protocol, so the UI test drives the
+# real app window (its own WebView2 profile and cache) — not a separate browser.
+function StartAppDebug([string]$exe = (Join-Path $App "Energy Manager.exe")) {
+  $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222"
+  $p = Start-Process $exe -PassThru
+  Remove-Item Env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
+  for ($i = 0; $i -lt 60; $i++) {
+    try { Invoke-RestMethod "http://127.0.0.1:9222/json/version" -TimeoutSec 2 | Out-Null; return $p } catch { Start-Sleep 1 }
+  }
+  Fail "app WebView2 debug port did not open"
+}
+function StopApp($p) {
+  Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+  Start-Sleep 2
+  Get-Process msedgewebview2 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  for ($i = 0; $i -lt 20; $i++) {
+    try { Invoke-RestMethod "http://127.0.0.1:9222/json/version" -TimeoutSec 1 | Out-Null; Start-Sleep 1 } catch { return }
+  }
+}
+function AppUi([string]$name, [string[]]$extra) {
+  $out = Join-Path (Get-Location) "ui-$name"
+  python tests\ui\wizard_acceptance.py $Base $out --cdp "http://127.0.0.1:9222" @extra 2>&1 | Tee-Object -Variable log | Write-Host
+  if ($LASTEXITCODE -ne 0) { Fail "UI in the installed app ($name) failed: $($log | Select-Object -Last 5)" }
+  return ($log | Where-Object { "$_" -like "PASS *" }).Count
+}
+
 function StartFromRunKey() {
   $cmd = (Get-ItemProperty $RunKey -Name EnergyManagerEMS).EnergyManagerEMS
   if ($cmd -notmatch '^"([^"]+)"\s*(.*)$') { Fail "autostart entry unreadable: $cmd" }
@@ -63,8 +90,8 @@ if (-not (Get-ItemProperty $RunKey -Name EnergyManagerEMS -ErrorAction SilentlyC
 Pass "install: files, Start menu entries and autostart entry present"
 
 # 2. App starts ------------------------------------------------------------------------------
-$appProc = Start-Process (Join-Path $App "Energy Manager.exe") -PassThru
-Start-Sleep -Seconds 10
+$appProc = StartAppDebug
+Start-Sleep -Seconds 5
 if ($appProc.HasExited) { Fail "Windows app exited immediately (code $($appProc.ExitCode))" }
 Pass "Windows app launches (WebView2) and stays open"
 
@@ -85,6 +112,10 @@ $plan = $null
 for ($i = 0; $i -lt 60; $i += 3) { $plan = Api "/optimizer/plan?hours=36"; if ($plan.slots.Count -gt 0) { break }; Start-Sleep 3 }
 if ($plan.slots.Count -eq 0) { Fail "optimizer produced no plan" }
 Pass "optimizer active: $($plan.slots.Count) planned slots, status $($plan.status)"
+
+# 4b. The installed app shows the new wizard -------------------------------------------------
+$n = AppUi "clean-demo" @("--demo")
+Pass "installed app (WebView2): frontend = server build, new wizard (Soort -> Methode), 4 methods for all 15 categories, real brands with functions and alternatives ($n UI checks)"
 
 # 5. WebSocket -------------------------------------------------------------------------------
 $ws = New-Object System.Net.WebSockets.ClientWebSocket
@@ -108,7 +139,7 @@ if ((Api "/settings").site.name -ne "Acceptatietest") { Fail "setting not saved"
 Pass "settings saved"
 
 # 7. Close the app: the EMS keeps running ----------------------------------------------------
-Stop-Process -Id $appProc.Id -Force
+StopApp $appProc
 Start-Sleep -Seconds 3
 if (-not (Healthy 10)) { Fail "EMS stopped when the app was closed" }
 Pass "app closed, EMS keeps running in the background"
@@ -171,7 +202,11 @@ $wt = Api "/devices/$($dev.id)/commissioning/write-test" "POST"
 if (-not $wt.ok) { Fail "write test on the virtual heat pump failed: $($wt.detail)" }
 $pv = $scan.results | Where-Object { $_.driver_id -eq "library.sunspec" }
 if (-not $pv) { Fail "SunSpec inverter not found" }
-Pass "Testomgeving: 8 virtual devices; search recognises exact model; Modbus TCP probe, identity, add, test, shadow and write test OK; SunSpec found"
+Pass "Testomgeving: $($lab.devices.Count) virtual devices; search recognises exact model; Modbus TCP probe, identity, add, test, shadow and write test OK; SunSpec found"
+$appProc = StartAppDebug
+$n = AppUi "lab" @()
+StopApp $appProc
+Pass "installed app, Testomgeving: brand/model with Modbus profile, automatic search, SunSpec, P1, Home Assistant via entity lists, edit form, fault injection ($n UI checks)"
 & (Join-Path $App "server\EnergyManagerServer.exe") --stop
 if (-not (PortClosed)) { Fail "EMS did not stop after the Testomgeving" }
 Start-Process (Join-Path $App "server\EnergyManagerService.exe") -ArgumentList "--background", "--demo" | Out-Null
@@ -185,6 +220,43 @@ if (-not (PortClosed 30)) { Fail "EMS still running after uninstall" }
 if (Get-ItemProperty $RunKey -Name EnergyManagerEMS -ErrorAction SilentlyContinue) { Fail "autostart entry left behind" }
 if (-not (Test-Path (Join-Path $Data "demo\ems.db"))) { Fail "user data was removed by uninstall" }
 Pass "uninstall: program, autostart entry and background EMS removed; user data kept"
+
+# 11. Upgrade from the previous public release (0.5.0) with the old UI cached in the app ---------------------
+Remove-Item -Recurse -Force $Data, (Join-Path $env:LOCALAPPDATA "nl.energymanager.desktop") -ErrorAction SilentlyContinue
+$old = Join-Path $env:TEMP "EnergyManagerSetup-0.5.0.exe"
+Invoke-WebRequest "https://github.com/ramonturbofm-cmyk/higgsfield-shopify-automation/releases/download/energy-manager-windows/EnergyManagerSetup-0.5.0.exe" -OutFile $old
+if ((Get-FileHash $old -Algorithm SHA256).Hash.ToLower() -ne "97575a14129c89a62723c27d782aa9ccee1aa6ce42255327139681aa65643541") { Fail "0.5.0 installer checksum mismatch" }
+$p = Start-Process $old -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/TASKS=autostart,desktopicon", "/LOG=$env:TEMP\em-050.log" -Wait -PassThru
+if ($p.ExitCode -ne 0) { Fail "0.5.0 install failed ($($p.ExitCode))" }
+Start-Process (Join-Path $App "server\EnergyManagerService.exe") -ArgumentList "--background", "--demo" | Out-Null
+$h = Healthy
+if (-not $h -or $h.version -ne "0.5.0") { Fail "0.5.0 did not start ($($h.version))" }
+Login
+Api "/settings" "PUT" @{ site = @{ name = "Upgradetest 0.5.0" } } | Out-Null
+Start-Sleep -Seconds 25
+$rowsOld = (Api "/history?hours=1&resolution=raw").rows.Count
+$appProc = StartAppDebug
+$n = AppUi "old-0.5.0" @("--prime-old")
+StopApp $appProc
+Pass "0.5.0 installed and used: old wizard opened in the app (its files cached), settings changed, $rowsOld history samples"
+Install
+if (-not (PortClosed 30)) { Fail "installer did not stop the running 0.5.0 EMS" }
+StartFromRunKey
+$h = Healthy
+if (-not $h) { Fail "EMS did not start after the upgrade from 0.5.0" }
+Login
+$installed = (Get-ItemProperty $UninstKey).DisplayVersion
+if ($h.version -ne $installed -or (Api "/system/info").build.version -ne $installed) { Fail "running server $($h.version) is not the installed $installed" }
+if ((Api "/settings").site.name -ne "Upgradetest 0.5.0") { Fail "settings lost in the upgrade from 0.5.0" }
+$rowsNew = (Api "/history?hours=1&resolution=raw").rows.Count
+if ($rowsNew -lt $rowsOld) { Fail "history lost in the upgrade ($rowsNew < $rowsOld)" }
+if (-not (Api "/system/status").database.ok) { Fail "database not ok after the upgrade" }
+$procs = @(Get-Process EnergyManagerService, EnergyManagerServer -ErrorAction SilentlyContinue)
+if ($procs.Count -ne 1) { Fail "expected exactly one EMS server process, found $($procs.Count)" }
+$appProc = StartAppDebug
+$n = AppUi "upgrade-demo" @("--demo")
+StopApp $appProc
+Pass "upgrade 0.5.0 -> $installed: one server process of version $installed, settings and history kept ($rowsOld -> $rowsNew samples); the app shows the NEW wizard (4 methods, all categories) despite the cached 0.5.0 files ($n UI checks)"
 
 Write-Host ""
 Write-Host "WINDOWS ACCEPTANCE: PASS ($($results.Count) checks)" -ForegroundColor Green

@@ -158,7 +158,10 @@ class HomeAssistantDriver(DeviceDriver):
         return False
 
     def simulated_target(self) -> bool:
-        return False
+        """True only for the virtual Home Assistant of the Testomgeving on this computer."""
+        from urllib.parse import urlsplit
+        host = urlsplit(str(self.config.connection.get("url", ""))).hostname or ""
+        return host in ("127.0.0.1", "localhost") and getattr(self.context.simulator, "lab", None) is not None
 
     def documentation_ref(self) -> str | None:
         return HA_DOC
