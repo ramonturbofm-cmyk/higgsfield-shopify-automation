@@ -1,4 +1,76 @@
-# Testresultaten — Energy Manager 0.6.0
+# Testresultaten — Energy Manager 0.6.1
+
+Alles hieronder is echt uitgevoerd. **Niets is met echte hardware getest.** De Windows-test is uitgevoerd op een
+schone Windows-machine in CI (GitHub Actions `windows-latest`) en bedient daar de **geïnstalleerde app zelf**
+(WebView2 via het DevTools-protocol), niet een losse browser. Hij is niet op uw eigen pc uitgevoerd.
+
+## Aanleiding: oude wizard na de upgrade naar 0.6.0
+
+* **Nagebootst** (vóór de reparatie): 0.5.0-server + browser met vast profiel → wizard openen → server vervangen
+  door 0.6.0 → zelfde profiel toont nog steeds `Soort → Merk en model → Gegevens → Testen`. De JavaScript-modules
+  werden zonder `Cache-Control` geleverd en heuristisch gecachet; ze werden niet eens opnieuw opgevraagd.
+* **Na de reparatie**: zelfde scenario toont `Soort → Methode → Gegevens → Testen`; een geopende pagina laadt na
+  een serverupdate vanzelf de nieuwe versie (getest: hash `b6502a93…` → `11bc469b…`).
+
+## Samenvatting
+
+| Suite | Waar | Resultaat |
+|---|---|---|
+| pytest EMS | ontwikkelomgeving (Linux, Python 3.13) | **370 passed, 0 failed** |
+| pytest EMS | CI Linux + CI Windows (commit `0ec388b`) | groen |
+| pytest Cloud | ontwikkelomgeving + CI (SQLite, PostgreSQL 16) | **26 passed** / groen |
+| ruff | ontwikkelomgeving + CI | geen meldingen |
+| Nieuw: `tests/test_build_cache.py` | idem | cache-headers, versie-URL's, build-ID, relatieve imports, hash-wijziging |
+| Nieuw in `tests/test_device_library.py` | idem | catalogus (echte merken, functies, alternatieven, routes), Home Assistant tegen de virtuele HA tot en met volledige regeling |
+| Wizard-acceptatie in Chromium (Testomgeving) | ontwikkelomgeving | **12/12 PASS** |
+| Windows-acceptatie, geïnstalleerde app | CI run 38656575512 | **18/18 PASS** (hieronder) |
+| Linux, Raspberry Pi (arm64 onder QEMU), systemd, cloud | CI run 38656575522 | **alles groen** |
+| Hardware | — | **NOT TESTED** |
+
+## Windows-acceptatie 0.6.1 (schone Windows-runner, CI run 38656575512, commit `0ec388b`)
+
+```
+PASS  install: files, Start menu entries and autostart entry present
+PASS  Windows app launches (WebView2) and stays open
+PASS  background EMS (no window) runs; database created (sqlite, schema v2)
+PASS  build identity: server 0.6.1+0ec388bfc0a3, built 10/14/2026 23:56:44, web assets 2baed9fee086a906
+PASS  live dashboard data: grid 5260 W, EMS status AUTOMATIC
+PASS  optimizer active: 144 planned slots, status optimal
+PASS  installed app (WebView2): frontend = server build, new wizard (Soort -> Methode), 4 methods for all 15 categories, real brands with functions and alternatives (4 UI checks)
+PASS  WebSocket delivers live updates
+PASS  settings saved
+PASS  app closed, EMS keeps running in the background
+PASS  restart via autostart (as after a Windows reboot): settings, mode and history kept (4 -> 6 samples)
+PASS  upgrade over existing install: EMS stopped by installer, data and settings kept
+PASS  version 0.6.1 everywhere; downgrade over a newer version refused (exit code 1), EMS untouched
+PASS  Testomgeving: 9 virtual devices; search recognises exact model; Modbus TCP probe, identity, add, test, shadow and write test OK; SunSpec found
+PASS  installed app, Testomgeving: brand/model with Modbus profile, automatic search, SunSpec, P1, Home Assistant via entity lists, edit form, fault injection (11 UI checks)
+PASS  uninstall: program, autostart entry and background EMS removed; user data kept
+PASS  0.5.0 installed and used: old wizard opened on the app's WebView2 profile (its files cached), settings changed, 4 history samples
+PASS  upgrade 0.5.0 -> 0.6.1: one server process of version 0.6.1, settings and history kept (4 -> 8 samples); the app shows the NEW wizard (4 methods, all categories) despite the cached 0.5.0 files (4 UI checks)
+```
+
+De UI-controles in de geïnstalleerde app: frontend en server zelfde build; stappen `Soort → Methode`; alle 4
+methoden bij alle 15 soorten; echte merken (Fronius, SMA, SolarEdge, Kostal, Growatt, Enphase …) met functies;
+niet-ondersteunde modellen met alternatieve route; Home Assistant/SunSpec als route i.p.v. merk; SunSpec: apparaat
+en verbinding apart, TCP zonder RS485-velden. In de Testomgeving daarnaast: merk/model met Modbus-profiel,
+automatisch zoeken, SunSpec, P1, Home Assistant via keuzelijsten, bewerkformulier, storing.
+
+De 0.5.0-interface is vóór de upgrade geopend met Edge op het WebView2-profiel van de app (de 0.5.0-app heeft geen
+testaansluiting); daarna toont de geïnstalleerde 0.6.1-app de nieuwe wizard.
+
+Installer `EnergyManagerSetup-0.6.1.exe`, 71.890.767 bytes (68,6 MB), SHA-256
+`5c27587d64fd05dbab46c3c3f2bd0d395fa688389a34f045116e925314ff5b93` — na publicatie opnieuw gedownload en
+nagerekend: gelijk aan SHA256SUMS.txt. **UNSIGNED TEST BUILD.**
+
+## Niet getest
+
+* Echte apparaten — BLOCKED BY HARDWARE; een echte Home Assistant; Modbus RTU over een echte seriële poort.
+* Handmatig doorklikken door een mens op een eigen pc (de CI-test bedient wel de echte geïnstalleerde app).
+
+---
+
+# Eerdere release: 0.6.0
 
 Alles hieronder is echt uitgevoerd. **Niets is met echte hardware getest.** De Windows-installatietest is
 uitgevoerd op een schone Windows-runner in CI (GitHub Actions `windows-latest`), **niet** op uw eigen pc.
