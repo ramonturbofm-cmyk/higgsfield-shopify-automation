@@ -187,9 +187,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await page.click('#log-close');
     // jingle category shown
     check('jingle-knop toont categorie', /JINGLES|Jingles/.test(await page.textContent('#cart button.slot')));
-    await page.click('#btn-stop');
+    await page.click('#btn-stop'); await sleep(500);
+    // AUTO: a file that fails while nothing is on air must not leave dead air
+    await page.evaluate((kid) => { S.playlist = []; const by = (t) => [...S.files.values()].find((f) => f.title === t).id; addToPlaylist([kid, by('Track 5')]); cueNext({ startWhenReady: true }); }, kapot.id);
+    check('AUTO na fout: volgende start vanzelf', await waitFor(async () => (await nowTitle()) === 'Track 5', 8000), await nowTitle());
+    await page.click('#btn-stop'); await sleep(500);
+    // logged out: a clear warning, and the playlist is not skipped item by item
+    await page.context().clearCookies();
+    await page.evaluate(() => { blobCache.clear(); S.playlist = []; const by = (t) => [...S.files.values()].find((f) => f.title === t).id; addToPlaylist([by('Track 3'), by('Track 4')]); cueNext({ startWhenReady: true }); });
+    check('uitgelogd: duidelijke melding', await waitFor(() => page.isVisible('[role=alert]:has-text("niet meer ingelogd")'), 5000));
+    const skipped = await page.evaluate(() => S.playlist.filter((i) => i.error).length);
+    check('uitgelogd: playlist niet overgeslagen', skipped === 0, String(skipped));
+    await page.screenshot({ path: path.join(OUT, 'studio-uitgelogd.png') });
   }
-  const realErrors = errors.filter((e) => !/AudioContext encountered an error from the audio device|status of 404/.test(e));
+  const realErrors = errors.filter((e) => !/AudioContext encountered an error from the audio device|status of 40[14]/.test(e));
   check('geen JavaScript-fouten', realErrors.length === 0, realErrors.slice(0, 3).join(' | '));
   await page.screenshot({ path: path.join(OUT, 'studio-end.png') });
   await browser.close(); server.close(); await pool.end();

@@ -76,13 +76,17 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
   const lastSeen = new Map();
   const ACTIVE_MS = 2 * 60 * 1000;
 
-  async function loadSessionUser(req) {
+  async function loadSessionUser(req, res) {
     const session = auth.readSession(sessionSecret, auth.parseCookies(req.headers.cookie)[auth.SESSION_COOKIE]);
     if (!session) return null;
     const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [session.userId]);
     const user = rows[0];
     if (!user || !lib.isActive(user) || user.session_version !== session.sessionVersion) return null;
     lastSeen.set(user.id, Date.now());
+    // Sliding login: a studio that stays open is never logged out. Once a day the
+    // cookie is renewed for another SESSION_DAYS; only a session left unused that
+    // long expires.
+    if (res && session.expires - Date.now() < (auth.SESSION_DAYS - 1) * 24 * 3600 * 1000) setSession(req, res, user);
     return user;
   }
 
@@ -93,7 +97,7 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
   }
 
   const requireUser = wrap(async (req, res, next) => {
-    req.user = await loadSessionUser(req);
+    req.user = await loadSessionUser(req, res);
     if (!req.user) throw new HttpError(401, 'Niet ingelogd');
     next();
   });

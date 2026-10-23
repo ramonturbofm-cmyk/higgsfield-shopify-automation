@@ -38,7 +38,7 @@ function readSession(secret, value) {
   const expected = crypto.createHmac('sha256', secret).update(`${userId}.${sessionVersion}.${expires}`).digest('base64url');
   if (sig.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
   if (Number(expires) < Date.now()) return null;
-  return { userId: Number(userId), sessionVersion: Number(sessionVersion) };
+  return { userId: Number(userId), sessionVersion: Number(sessionVersion), expires: Number(expires) };
 }
 
 function parseCookies(header = '') {

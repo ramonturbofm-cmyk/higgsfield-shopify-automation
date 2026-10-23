@@ -165,7 +165,11 @@ function renderQuality() {
 function fileUrl(file) {
   if (!blobCache.has(file.id)) {
     const p = fetch(`/api/files/${file.id}/stream${useSmall() ? '?format=mp3' : ''}`)
-      .then((r) => { if (!r.ok) throw new Error(`Kan "${file.title}" niet laden (${r.status})`); return r.blob(); })
+      .then((r) => {
+        if (r.status === 401) { showLoggedOut(); throw Object.assign(new Error('niet meer ingelogd'), { loggedOut: true }); }
+        if (!r.ok) throw new Error(`Kan "${file.title}" niet laden (${r.status})`);
+        return r.blob();
+      })
       .then(async (blob) => {
         if (S.settings.autoCue && file.cue_out === null) await analyse(file, blob).catch(() => {});
         return URL.createObjectURL(blob);
@@ -332,16 +336,47 @@ async function loadDeck(deck, item) {
   } catch (e) {
     if (token !== deck.token) return;
     const what = deck.file ? label(deck.file) : 'Bestand';
+    // Read now, not when loading began: AUTO asks a preloading player to start when ready.
+    const wantStart = deck.pendingStart;
+    deck.item = null; deck.file = null; deck.state = 'empty';
+    if (e.loggedOut) {
+      // Not the file's fault: keep it in the playlist and stop trying until logged in again,
+      // instead of skipping every following item.
+      deck.error = { msg: 'Niet meer ingelogd, nummer niet geladen', at: Date.now(), skipped: false };
+      return;
+    }
     deck.error = { msg: `${what}: ${e.message}`, at: Date.now() };
     logEvent('ERROR', `Player ${deck.name}: ${what} kan niet worden geladen (${e.message}) — wordt overgeslagen`);
     setTimeout(render, 20500);
-    item.error = true; deck.item = null; deck.file = null; deck.state = 'empty';
+    item.error = true;
     status(e.message);
-    cueNext();
+    // Nothing on air and this item was meant to start: start the next one as soon as it
+    // is ready, so one bad file never leaves dead air with AUTO on.
+    cueNext({ startWhenReady: wantStart && !S.live });
   } finally {
-    deck.pendingStart = false;
+    // cueNext() above may have reloaded this same player for the next item.
+    if (token === deck.token) deck.pendingStart = false;
     render();
   }
+}
+
+// A login that ran out (or was ended elsewhere): say so loudly instead of failing silently.
+let loggedOutShown = false;
+function showLoggedOut() {
+  if (loggedOutShown) return;
+  loggedOutShown = true;
+  logEvent('ERROR', 'Niet meer ingelogd: nummers kunnen niet worden geladen. Log opnieuw in.');
+  const bar = document.createElement('div');
+  bar.setAttribute('role', 'alert');
+  bar.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:9999;background:#d70015;color:#fff;font:600 16px system-ui,sans-serif;padding:12px 16px;display:flex;gap:16px;align-items:center;justify-content:center';
+  bar.append('Je bent niet meer ingelogd: de studio kan geen nummers laden. Wat nu speelt, speelt door.');
+  const btn = document.createElement('button');
+  btn.textContent = 'Opnieuw inloggen';
+  btn.style.cssText = 'font:inherit;padding:6px 14px;border-radius:8px;border:0;background:#fff;color:#d70015;cursor:pointer';
+  btn.onclick = () => { location.href = '/'; };
+  bar.append(btn);
+  document.body.append(bar);
+  document.body.style.paddingTop = `${bar.offsetHeight}px`;
 }
 
 function unloadDeck(deck) {
@@ -798,7 +833,7 @@ function renderDecks() {
     el.className = `deck ${d.state === 'paused' ? 'playing' : d.state} st-${err && d.state === 'empty' ? 'error' : st}${d === S.live ? ' is-live' : ''}`;
     el.replaceChildren(
       h('div', { class: 'deck-head' }, h('span', {}, `PLAYER ${d.name}`), h('span', { class: 'deck-state' }, stateLabel)),
-      ...(err ? [h('div', { class: 'deck-error', title: err.msg }, `⚠ Overgeslagen: ${err.msg}`)] : []),
+      ...(err ? [h('div', { class: 'deck-error', title: err.msg }, `⚠ ${err.skipped === false ? '' : 'Overgeslagen: '}${err.msg}`)] : []),
       h('div', { class: 'deck-title' }, d.file ? d.file.title : '—'),
       h('div', { class: 'deck-artist' }, d.file ? d.file.artist || ' ' : ' ',
         d.file && S.settings.normalize && (d.chained || d.file.loudness_lufs != null) ? h('span', { class: 'deck-gain', title: d.chained ? 'Naadloos: zelfde volume als het vorige nummer' : 'Gelijk volume' }, `${d.chained ? '⇥ ' : ''}${fmtDb(20 * Math.log10(d.audio._norm || 1))}`) : null),
@@ -1714,7 +1749,7 @@ async function checkSystem() {
   try {
     const r = await fetch('/api/status', { cache: 'no-store', signal: AbortSignal.timeout(6000) });
     const ms = Math.round(performance.now() - t0);
-    if (r.status === 401) server = { ok: false, error: 'niet meer ingelogd' };
+    if (r.status === 401) { server = { ok: false, error: 'niet meer ingelogd' }; showLoggedOut(); }
     else if (!r.ok) server = { ok: false, error: `fout ${r.status}` };
     else { const data = await r.json(); server = { ok: true, ms }; db = data.db; clients = data.active_clients; }
   } catch (e) {

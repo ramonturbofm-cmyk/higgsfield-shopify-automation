@@ -630,3 +630,30 @@ test('studio status, track details and genre filter only report real values', { 
   assert.ok(g.data.files.some((f) => f.id === up.data.file.id));
   assert.ok(g.data.files.every((f) => /polka/i.test(f.genre)));
 });
+
+test('a studio that stays open stays logged in: the login is renewed while in use', { skip: !DB && 'TEST_DATABASE_URL not set' }, async () => {
+  const crypto = require('crypto');
+  const auth = require('../src/auth');
+  const { rows: [user] } = await pool.query("SELECT id, session_version FROM users WHERE role = 'owner'");
+  const day = 24 * 3600 * 1000;
+  const cookieFor = (expires) => {
+    const payload = `${user.id}.${user.session_version}.${expires}`;
+    return `${auth.SESSION_COOKIE}=${payload}.${crypto.createHmac('sha256', 'test-secret').update(payload).digest('base64url')}`;
+  };
+  const expiresOf = (res) => Number(res.headers.get('set-cookie').split(';')[0].split('=')[1].split('.')[2]);
+
+  // Two days left: still valid, and renewed for the full period.
+  const old = await fetch(`${base}/api/me`, { headers: { cookie: cookieFor(Date.now() + 2 * day) } });
+  assert.equal(old.status, 200);
+  assert.ok(expiresOf(old) > Date.now() + (auth.SESSION_DAYS - 1) * day);
+
+  // Fresh login: not renewed on every request.
+  const fresh = await fetch(`${base}/api/me`, { headers: { cookie: cookieFor(Date.now() + auth.SESSION_DAYS * day) } });
+  assert.equal(fresh.status, 200);
+  assert.equal(fresh.headers.get('set-cookie'), null);
+
+  // Expired: logged out, nothing renewed.
+  const gone = await fetch(`${base}/api/me`, { headers: { cookie: cookieFor(Date.now() - 1000) } });
+  assert.equal(gone.status, 401);
+  assert.equal(gone.headers.get('set-cookie'), null);
+});
