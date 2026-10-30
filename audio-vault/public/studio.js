@@ -166,7 +166,7 @@ function fileUrl(file) {
   if (!blobCache.has(file.id)) {
     const p = fetch(`/api/files/${file.id}/stream${useSmall() ? '?format=mp3' : ''}`)
       .then((r) => {
-        if (r.status === 401) { showLoggedOut(); throw Object.assign(new Error('niet meer ingelogd'), { loggedOut: true }); }
+        if (r.status === 401) { r.json().then((d) => showLoggedOut(d && d.error), () => showLoggedOut()); throw Object.assign(new Error('niet meer ingelogd'), { loggedOut: true }); }
         if (!r.ok) throw new Error(`Kan "${file.title}" niet laden (${r.status})`);
         return r.blob();
       })
@@ -362,14 +362,16 @@ async function loadDeck(deck, item) {
 
 // A login that ran out (or was ended elsewhere): say so loudly instead of failing silently.
 let loggedOutShown = false;
-function showLoggedOut() {
+function showLoggedOut(reason) {
   if (loggedOutShown) return;
   loggedOutShown = true;
-  logEvent('ERROR', 'Niet meer ingelogd: nummers kunnen niet worden geladen. Log opnieuw in.');
+  // The server says why, e.g. "Uitgelogd: ingelogd op een ander apparaat".
+  const why = reason && /^Uitgelogd:/.test(reason) ? reason : 'Je bent niet meer ingelogd';
+  logEvent('ERROR', `${why}: nummers kunnen niet worden geladen. Log opnieuw in.`);
   const bar = document.createElement('div');
   bar.setAttribute('role', 'alert');
   bar.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:9999;background:#d70015;color:#fff;font:600 16px system-ui,sans-serif;padding:12px 16px;display:flex;gap:16px;align-items:center;justify-content:center';
-  bar.append('Je bent niet meer ingelogd: de studio kan geen nummers laden. Wat nu speelt, speelt door.');
+  bar.append(`${why} — de studio kan geen nummers laden. Wat nu speelt, speelt door.`);
   const btn = document.createElement('button');
   btn.textContent = 'Opnieuw inloggen';
   btn.style.cssText = 'font:inherit;padding:6px 14px;border-radius:8px;border:0;background:#fff;color:#d70015;cursor:pointer';
@@ -1749,9 +1751,13 @@ async function checkSystem() {
   try {
     const r = await fetch('/api/status', { cache: 'no-store', signal: AbortSignal.timeout(6000) });
     const ms = Math.round(performance.now() - t0);
-    if (r.status === 401) { server = { ok: false, error: 'niet meer ingelogd' }; showLoggedOut(); }
+    if (r.status === 401) { server = { ok: false, error: 'niet meer ingelogd' }; showLoggedOut((await r.json().catch(() => ({}))).error); }
     else if (!r.ok) server = { ok: false, error: `fout ${r.status}` };
-    else { const data = await r.json(); server = { ok: true, ms }; db = data.db; clients = data.active_clients; }
+    else {
+      const data = await r.json(); server = { ok: true, ms }; db = data.db; clients = data.active_clients;
+      if (data.alarms > (sys.alarms || 0)) logEvent('WARNING', `Alarm: ${data.alarms} ${data.alarms === 1 ? 'klant' : 'klanten'} geblokkeerd wegens ongebruikelijk gebruik (zie Bibliotheek → Gebruikers)`);
+      sys.alarms = data.alarms;
+    }
   } catch (e) {
     server = { ok: false, error: e.name === 'TimeoutError' ? 'geen antwoord binnen 6 seconden' : 'niet bereikbaar' };
   } finally { sys.checking = false; }
@@ -1802,7 +1808,8 @@ function renderSystem() {
   setSys('sys-audio', a.level, a.text);
   const c = $('sys-clients');
   c.classList.toggle('hidden', sys.clients === null || sys.clients === undefined);
-  if (sys.clients !== null && sys.clients !== undefined) c.querySelector('b').textContent = String(sys.clients);
+  if (sys.clients !== null && sys.clients !== undefined) c.querySelector('b').textContent = `${sys.clients}${sys.alarms ? ` · ⚠ ${sys.alarms} ALARM` : ''}`;
+  c.classList.toggle('bad', Boolean(sys.alarms));
 }
 async function refreshDevices() {
   try { sys.devices = await listDevices(); } catch { sys.devices = []; }
@@ -1966,6 +1973,7 @@ function renderDashboard() {
   if (s && !s.ok) warnings.push(['ERROR', `Server: ${s.error}`]);
   if (d && !d.ok) warnings.push(['ERROR', `Database: ${d.error}`]);
   if (a.level === 'bad') warnings.push(['ERROR', `Audio: ${a.text}`]);
+  if (sys.alarms) warnings.push(['ERROR', `${sys.alarms} ${sys.alarms === 1 ? 'klant' : 'klanten'} geblokkeerd door het alarm (ongebruikelijk veel nummers opgehaald) — bekijk dit via ☰ Bibliotheek → Gebruikers`]);
   for (const dk of decks) if (dk.error && Date.now() - dk.error.at < 120000) warnings.push(['WARNING', `Player ${dk.name} sloeg over: ${dk.error.msg}`]);
   if (S.settings.auto && !live && list.length === 0) warnings.push(['WARNING', 'Er speelt niets en de playlist is leeg']);
   else if (S.settings.auto && live && list.length === 0 && !nonstopOn()) warnings.push(['WARNING', 'Na dit nummer is de playlist leeg']);

@@ -353,6 +353,39 @@ const planOptions = (none) => [['', none], ...Object.entries(PLAN_LABELS)];
 const dateNl = (iso) => new Date(iso).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long', year: 'numeric' });
 
 // Package and end date of a member: a trial week, a paid month or year, or no end date.
+// Devices: how many at once (package default or a number per person), how many are
+// active, where they logged in, and "log out everywhere".
+function deviceEditor(u) {
+  const box = h('div', { style: 'margin-top:10px' });
+  const sel = h('select', { style: 'width:auto' },
+    h('option', { value: '' }, `Volgens pakket (${u.plan ? PLAN_LABELS[u.plan] : 'geen pakket'}: ${u.max_devices ? '' : u.device_limit})`),
+    [1, 2, 3, 5].map((n) => h('option', { value: String(n) }, `${n} ${n === 1 ? 'apparaat' : 'apparaten'}`)));
+  sel.value = u.max_devices ? String(u.max_devices) : '';
+  sel.addEventListener('change', async () => { await api('PATCH', `/api/users/${u.id}`, { max_devices: sel.value ? Number(sel.value) : null }); renderMain(); });
+  const list = h('div');
+  let open = false;
+  async function toggle() {
+    open = !open;
+    if (!open) { list.replaceChildren(); return; }
+    const { sessions } = await api('GET', `/api/users/${u.id}/sessions`);
+    const when = (t) => new Date(t).toLocaleString('nl-NL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    list.replaceChildren(sessions.length ? h('div', { class: 'table-wrap', style: 'margin-top:8px' }, h('table', {},
+      h('tr', {}, h('th', {}, 'Ingelogd'), h('th', {}, 'Laatst actief'), h('th', {}, 'Apparaat'), h('th', {}, 'IP-adres'), h('th', {}, 'Status')),
+      sessions.map((x) => h('tr', {}, h('td', { class: 'num' }, when(x.created_at)), h('td', { class: 'num' }, when(x.last_seen)), h('td', {}, x.device),
+        h('td', { class: 'num' }, x.last_ip && x.last_ip !== x.ip ? `${x.ip} → ${x.last_ip}` : x.ip || '–'),
+        h('td', {}, x.active ? h('strong', {}, 'actief') : h('span', { class: 'muted' }, x.ended_reason || 'verlopen'))))))
+      : h('p', { class: 'muted' }, 'Nog niet ingelogd.'));
+  }
+  box.append(h('div', { class: 'row', style: 'gap:8px;flex-wrap:wrap' }, h('span', { class: 'muted' }, 'Apparaten tegelijk'), sel,
+    h('span', { class: 'muted', style: 'margin-left:6px' }, `${u.active_devices || 0} actief`),
+    h('button', { class: 'btn small', onclick: toggle }, 'Logins bekijken'),
+    h('button', { class: 'btn small', onclick: async () => {
+      if (!confirm(`${u.name} op alle apparaten uitloggen?`)) return;
+      await api('POST', `/api/users/${u.id}/logout-all`); renderMain();
+    } }, 'Overal uitloggen')), list);
+  return box;
+}
+
 function planEditor(u) {
   const sel = h('select', { style: 'width:auto' }, planOptions('Geen pakket').map(([v, l]) => h('option', { value: v }, l)));
   sel.value = u.plan || '';
@@ -391,7 +424,8 @@ async function renderUsers(root) {
       h('div', { class: 'grow' }, h('strong', {}, u.name), ' ', h('span', { class: 'muted' }, u.email), ' ',
         h('span', { class: 'chip' }, roleLabel[u.role]), ' ', h('span', { class: 'chip' }, status),
         u.role === 'member' && u.plan ? [' ', h('span', { class: 'chip' }, PLAN_LABELS[u.plan])] : null,
-        u.has_api_token && u.can_download ? [' ', h('span', { class: 'chip' }, 'gekoppeld')] : null),
+        u.has_api_token && u.can_download ? [' ', h('span', { class: 'chip' }, 'gekoppeld')] : null,
+        u.disabled && u.disabled_reason ? h('div', { class: 'error', style: 'margin-top:4px;min-height:0' }, `⚠ ${u.disabled_reason}`) : null),
       u.role === 'owner' || (u.role === 'admin' && state.me.role !== 'owner') ? null : [
         h('button', { class: 'btn small', onclick: async () => { const { invite_url } = await api('POST', `/api/users/${u.id}/invite`); showInvite(u.name, invite_url); } }, 'Nieuwe inloglink'),
         h('button', { class: 'btn small', onclick: async () => { await api('PATCH', `/api/users/${u.id}`, { disabled: !u.disabled }); renderMain(); } }, u.disabled ? 'Deblokkeren' : 'Blokkeren'),
@@ -403,6 +437,7 @@ async function renderUsers(root) {
         'Mag downloaden en koppelen aan eigen software (mAirList, M3U, netwerkschijf)'),
       h('p', { class: 'muted', style: 'margin:2px 0 0' }, u.can_download ? '' : 'Uit = alleen afspelen in de studio via deze website.'));
       card.append(planEditor(u));
+      card.append(deviceEditor(u));
       card.append(accessEditor(u, collections));
     }
     else card.append(h('p', { class: 'muted', style: 'margin:6px 0 0' }, 'Heeft toegang tot alle collecties.'));
@@ -500,7 +535,7 @@ async function renderReports(root) {
 
 async function renderActivity(root) {
   const { activity } = await api('GET', '/api/activity');
-  const labels = { play: 'afgespeeld (web)', download: 'gedownload', stream: 'gestreamd (koppeling)', webdav: 'geopend via netwerkschijf', upload: 'geüpload' };
+  const labels = { play: 'afgespeeld (web)', download: 'gedownload', stream: 'gestreamd (koppeling)', webdav: 'geopend via netwerkschijf', upload: 'geüpload', alarm: '🚨 ALARM: geblokkeerd' };
   root.append(h('div', { class: 'card' }, h('h2', {}, 'Recente activiteit'),
     activity.length ? h('div', { class: 'table-wrap' }, h('table', {}, h('tr', {}, h('th', {}, 'Wanneer'), h('th', {}, 'Wie'), h('th', {}, 'Wat'), h('th', {}, 'Bestand')),
       activity.map((a) => h('tr', {}, h('td', { class: 'num' }, new Date(a.created_at).toLocaleString('nl-NL')), h('td', {}, a.user_name || '–'),

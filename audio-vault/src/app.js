@@ -19,12 +19,26 @@ class HttpError extends Error {
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
+// Devices an account may use at the same time, per package (an admin can set another
+// number per person). Owner and admins: no limit.
+const DEVICE_LIMITS = { basis: 1, standaard: 1, pro: 2 };
+const deviceLimit = (u) => (lib.isAdmin(u) ? null : u.max_devices || DEVICE_LIMITS[u.plan] || 1);
+
+// "Chrome op Windows", "Windows-app", … for the login overview.
+function deviceName(ua = '') {
+  if (/Electron|AudioOnAir/i.test(ua)) return 'Audio OnAir Turbo-app (Windows)';
+  const browser = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'Browser';
+  const os = /Windows/.test(ua) ? 'Windows' : /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iPhone/iPad' : /Mac OS X/.test(ua) ? 'Mac' : /Linux/.test(ua) ? 'Linux' : '';
+  return os ? `${browser} op ${os}` : browser;
+}
+
 function publicUser(u) {
   return {
     id: u.id, email: u.email, name: u.name, role: u.role, disabled: u.disabled,
     has_password: Boolean(u.password_hash), has_api_token: Boolean(u.api_token_hash),
     can_download: lib.canDownload(u),
     plan: u.plan || null, access_until: u.access_until || null, expired: lib.isExpired(u),
+    max_devices: u.max_devices ?? null, device_limit: deviceLimit(u), disabled_reason: u.disabled_reason || null,
     invite_pending: Boolean(u.invite_token_hash), created_at: u.created_at,
   };
 }
@@ -44,7 +58,7 @@ function publicFile(f) {
   };
 }
 
-function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 500, cacheMaxBytes = 20e9 }) {
+function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 500, cacheMaxBytes = 20e9, alarmPerHour = Number(process.env.STREAM_ALARM_PER_HOUR) || 150 }) {
   const filesDir = path.join(storageDir, 'files');
   const tmpDir = path.join(storageDir, 'tmp');
   fs.mkdirSync(filesDir, { recursive: true });
@@ -76,29 +90,65 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
   const lastSeen = new Map();
   const ACTIVE_MS = 2 * 60 * 1000;
 
+  // ---------- devices (logins) ----------
+
+  // A new login = a new device. Beyond the account's limit, the oldest logins end
+  // ("ingelogd op een ander apparaat"), so sharing one account becomes unworkable.
+  async function startSession(req, user, sid = auth.randomToken()) {
+    const { rowCount } = await pool.query(
+      `INSERT INTO user_sessions (id, user_id, ip, last_ip, user_agent) VALUES ($1, $2, $3, $3, $4) ON CONFLICT (id) DO NOTHING`,
+      [sid, user.id, req.ip || '', String(req.headers['user-agent'] || '').slice(0, 300)]);
+    const limit = deviceLimit(user);
+    if (rowCount && limit) {
+      await pool.query(
+        `UPDATE user_sessions SET ended_at = now(), ended_reason = 'Ingelogd op een ander apparaat'
+          WHERE id IN (SELECT id FROM user_sessions WHERE user_id = $1 AND ended_at IS NULL ORDER BY created_at DESC, id OFFSET $2)`,
+        [user.id, limit]);
+    }
+    return sid;
+  }
+  const endSessions = (userId, reason, exceptSid = null) => pool.query(
+    'UPDATE user_sessions SET ended_at = now(), ended_reason = $2 WHERE user_id = $1 AND ended_at IS NULL AND id IS DISTINCT FROM $3',
+    [userId, reason, exceptSid]);
+  const sessionTouched = new Map(); // sid -> last time last_seen was written
+
   async function loadSessionUser(req, res) {
-    const session = auth.readSession(sessionSecret, auth.parseCookies(req.headers.cookie)[auth.SESSION_COOKIE]);
+    const cookie = auth.parseCookies(req.headers.cookie)[auth.SESSION_COOKIE];
+    const session = auth.readSession(sessionSecret, cookie);
     if (!session) return null;
     const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [session.userId]);
     const user = rows[0];
     if (!user || !lib.isActive(user) || user.session_version !== session.sessionVersion) return null;
+    // A login from before devices were tracked gets a fixed id derived from its cookie,
+    // so the many parallel requests of a starting studio all agree on one device.
+    const sid = session.sid || auth.sha256(cookie).slice(0, 32);
+    const { rows: [s] } = await pool.query('SELECT user_id, ended_at, ended_reason FROM user_sessions WHERE id = $1', [sid]);
+    if (!s && !session.sid) await startSession(req, user, sid);
+    else if (!s || s.user_id !== user.id || s.ended_at) { req.sessionEnded = s ? s.ended_reason : 'Login beëindigd'; return null; }
+    const now = Date.now();
+    if (now - (sessionTouched.get(sid) || 0) > 60 * 1000) {
+      if (sessionTouched.size > 10000) sessionTouched.clear();
+      sessionTouched.set(sid, now);
+      pool.query('UPDATE user_sessions SET last_seen = now(), last_ip = $2 WHERE id = $1', [sid, req.ip || '']).catch(() => {});
+    }
+    req.sessionId = sid;
     lastSeen.set(user.id, Date.now());
     // Sliding login: a studio that stays open is never logged out. Once a day the
     // cookie is renewed for another SESSION_DAYS; only a session left unused that
     // long expires.
-    if (res && session.expires - Date.now() < (auth.SESSION_DAYS - 1) * 24 * 3600 * 1000) setSession(req, res, user);
+    if (res && session.expires - Date.now() < (auth.SESSION_DAYS - 1) * 24 * 3600 * 1000) setSession(req, res, user, sid);
     return user;
   }
 
-  function setSession(req, res, user) {
-    res.cookie(auth.SESSION_COOKIE, auth.signSession(sessionSecret, user.id, user.session_version), {
+  function setSession(req, res, user, sid) {
+    res.cookie(auth.SESSION_COOKIE, auth.signSession(sessionSecret, user.id, user.session_version, sid), {
       httpOnly: true, sameSite: 'lax', secure: req.secure, maxAge: auth.SESSION_DAYS * 24 * 3600 * 1000, path: '/',
     });
   }
 
   const requireUser = wrap(async (req, res, next) => {
     req.user = await loadSessionUser(req, res);
-    if (!req.user) throw new HttpError(401, 'Niet ingelogd');
+    if (!req.user) throw new HttpError(401, req.sessionEnded ? `Uitgelogd: ${req.sessionEnded.toLowerCase()}` : 'Niet ingelogd');
     next();
   });
   const requireAdmin = (req, res, next) => (lib.isAdmin(req.user) ? next() : next(new HttpError(403, 'Alleen voor beheerders')));
@@ -146,7 +196,7 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
        SELECT $1, $2, 'owner', $3 WHERE NOT EXISTS (SELECT 1 FROM users) RETURNING *`,
       [String(email).trim().toLowerCase(), String(name).trim(), auth.hashPassword(password)]);
     if (!rows.length) throw new HttpError(409, 'Er is al een eigenaar ingesteld');
-    setSession(req, res, rows[0]);
+    setSession(req, res, rows[0], await startSession(req, rows[0]));
     res.json({ user: publicUser(rows[0]) });
   }));
 
@@ -159,7 +209,7 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
       throw new HttpError(401, 'Onjuiste e-mail of wachtwoord');
     }
     if (lib.isExpired(user)) throw new HttpError(403, 'Je proefperiode of abonnement is afgelopen. Neem contact op om verder te gaan.');
-    setSession(req, res, user);
+    setSession(req, res, user, await startSession(req, user));
     res.json({ user: publicUser(user) });
   }));
 
@@ -186,7 +236,7 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
         WHERE invite_token_hash = $2 AND invite_expires_at > now() AND NOT disabled RETURNING *`,
       [auth.hashPassword(req.body.password), auth.sha256(req.params.token)]);
     if (!rows.length) throw new HttpError(404, 'Uitnodiging is ongeldig of verlopen');
-    setSession(req, res, rows[0]);
+    setSession(req, res, rows[0], await startSession(req, rows[0]));
     res.json({ user: publicUser(rows[0]) });
   }));
 
@@ -210,6 +260,8 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
     res.set('Cache-Control', 'no-store').json({
       server_time: new Date().toISOString(), uptime_seconds: Math.round(process.uptime()), db,
       active_clients: lib.isAdmin(req.user) ? lastSeen.size : null,
+      alarms: lib.isAdmin(req.user)
+        ? (await pool.query("SELECT count(*)::int AS n FROM users WHERE disabled AND disabled_reason LIKE 'Alarm%'")).rows[0].n : null,
     });
   }));
 
@@ -220,7 +272,8 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
     const { rows } = await pool.query(
       'UPDATE users SET password_hash = $1, session_version = session_version + 1 WHERE id = $2 RETURNING *',
       [auth.hashPassword(next), req.user.id]);
-    setSession(req, res, rows[0]);
+    await endSessions(req.user.id, 'Wachtwoord gewijzigd', req.sessionId);
+    setSession(req, res, rows[0], req.sessionId);
     res.json({ ok: true });
   }));
 
@@ -242,9 +295,13 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
   app.get('/api/users', requireUser, requireAdmin, wrap(async (req, res) => {
     const { rows: users } = await pool.query('SELECT * FROM users ORDER BY role = \'owner\' DESC, name');
     const { rows: access } = await pool.query('SELECT * FROM collection_access');
+    const { rows: devices } = await pool.query(
+      `SELECT user_id, count(*)::int AS n FROM user_sessions
+        WHERE ended_at IS NULL AND last_seen > now() - interval '14 days' GROUP BY user_id`);
+    const active = new Map(devices.map((d) => [d.user_id, d.n]));
     res.json({
       users: users.map((u) => ({
-        ...publicUser(u),
+        ...publicUser(u), active_devices: active.get(u.id) || 0,
         access: access.filter((a) => a.user_id === u.id).map(({ collection_id, can_upload }) => ({ collection_id, can_upload })),
       })),
     });
@@ -307,6 +364,10 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
     // access_until: null = no end date (paid / unlimited).
     const extendDays = body.extend_days !== undefined ? parseDays(body.extend_days) : null;
     const clearUntil = 'access_until' in body && body.access_until === null;
+    // max_devices: null = what the package allows; otherwise 1–10 devices at once.
+    const setMax = 'max_devices' in body;
+    const maxDevices = setMax && body.max_devices !== null && body.max_devices !== '' ? Number(body.max_devices) : null;
+    if (setMax && maxDevices !== null && (!Number.isInteger(maxDevices) || maxDevices < 1 || maxDevices > 10)) throw new HttpError(400, 'Kies 1 tot 10 apparaten');
     const { rows } = await pool.query(
       `UPDATE users SET name = COALESCE($1, name), role = COALESCE($2, role),
               disabled = COALESCE($3, disabled), can_download = COALESCE($5, can_download),
@@ -314,11 +375,43 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
               access_until = CASE WHEN $9 THEN NULL
                 WHEN $8::int IS NOT NULL THEN greatest(coalesce(access_until, now()), now()) + make_interval(days => $8::int)
                 ELSE access_until END,
+              max_devices = CASE WHEN $10 THEN $11::int ELSE max_devices END,
+              disabled_reason = CASE WHEN $3::boolean IS NOT NULL THEN NULL ELSE disabled_reason END,
               session_version = session_version + CASE WHEN $3::boolean THEN 1 ELSE 0 END
         WHERE id = $4 RETURNING *`,
       [name ?? null, role ?? null, typeof disabled === 'boolean' ? disabled : null, target.id,
-        typeof canDl === 'boolean' ? canDl : null, setPlan, plan, extendDays, clearUntil]);
+        typeof canDl === 'boolean' ? canDl : null, setPlan, plan, extendDays, clearUntil, setMax, maxDevices]);
+    if (disabled === true) await endSessions(target.id, 'Geblokkeerd');
+    if (disabled === false) fetched.delete(target.id);
+    // A lower limit takes effect right away: the newest logins stay.
+    const limit = deviceLimit(rows[0]);
+    if ((setMax || setPlan) && limit) {
+      await pool.query(
+        `UPDATE user_sessions SET ended_at = now(), ended_reason = 'Minder apparaten toegestaan'
+          WHERE id IN (SELECT id FROM user_sessions WHERE user_id = $1 AND ended_at IS NULL ORDER BY created_at DESC, id OFFSET $2)`,
+        [target.id, limit]);
+    }
     res.json({ user: publicUser(rows[0]) });
+  }));
+
+  // Where and when someone logged in (newest first): device, IP address, still active or why it ended.
+  app.get('/api/users/:id/sessions', requireUser, requireAdmin, wrap(async (req, res) => {
+    const target = await loadTarget(req.params.id);
+    if (target.role !== 'member') assertCanManage(req.user, target);
+    const { rows } = await pool.query(
+      `SELECT created_at, last_seen, ip, last_ip, user_agent, ended_at, ended_reason,
+              ended_at IS NULL AND last_seen > now() - interval '14 days' AS active
+         FROM user_sessions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 30`, [target.id]);
+    res.json({ sessions: rows.map(({ user_agent: ua, ...s }) => ({ ...s, device: deviceName(ua) })) });
+  }));
+
+  // "Overal uitloggen": ends every login of this person right away.
+  app.post('/api/users/:id/logout-all', requireUser, requireAdmin, wrap(async (req, res) => {
+    const target = await loadTarget(req.params.id);
+    assertCanManage(req.user, target);
+    await pool.query('UPDATE users SET session_version = session_version + 1 WHERE id = $1', [target.id]);
+    await endSessions(target.id, 'Overal uitgelogd door de beheerder');
+    res.json({ ok: true });
   }));
 
   // New invite link; doubles as "password reset" for someone who is locked out.
@@ -640,9 +733,32 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
 
   const isFirstChunk = (req) => req.method === 'GET' && !/^bytes=(?!0-)/.test(req.headers.range || '');
 
+  // Alarm: an account that fetches far more different tracks than a broadcast can play
+  // (one hour on air is ± 15–20 tracks plus jingles) is most likely being used to copy
+  // the library. Only counted in memory (which file ids, for one hour), never stored;
+  // the account is blocked until an admin has looked at it. Owner/admins are not counted.
+  const ALARM_PER_HOUR = alarmPerHour;
+  const fetched = new Map(); // userId -> Map(fileId -> time)
+  async function countFetch(user, fileId) {
+    if (lib.isAdmin(user)) return;
+    const now = Date.now();
+    let seen = fetched.get(user.id);
+    if (!seen) fetched.set(user.id, (seen = new Map()));
+    seen.set(fileId, now);
+    for (const [id, at] of seen) if (now - at > 3600 * 1000) seen.delete(id);
+    if (seen.size <= ALARM_PER_HOUR) return;
+    const reason = `Alarm: ${seen.size} verschillende nummers binnen een uur opgehaald (een uur uitzenden is ± 15–20)`;
+    fetched.delete(user.id);
+    await pool.query('UPDATE users SET disabled = TRUE, disabled_reason = $2, session_version = session_version + 1 WHERE id = $1', [user.id, reason]);
+    await endSessions(user.id, 'Geblokkeerd door het alarm');
+    await lib.logAccess(pool, user.id, fileId, 'alarm', reason.slice(0, 200));
+    throw new HttpError(403, 'Je account is tijdelijk geblokkeerd wegens ongebruikelijk gebruik. Neem contact op met de beheerder.');
+  }
+
   app.get('/api/files/:id/stream', requireUser, wrap(async (req, res) => {
     const file = await lib.readableFile(pool, req.user, Number(req.params.id));
     if (!file) throw new HttpError(404, 'Bestand niet gevonden');
+    if (isFirstChunk(req)) await countFetch(req.user, file.id);
     const download = req.query.download === '1';
     if (download && !lib.canDownload(req.user)) throw new HttpError(403, 'Downloaden is voor jou niet toegestaan');
     res.set('Cache-Control', 'private, no-store');
@@ -849,7 +965,7 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
   app.get('/m/:token/files/:id/:name?', tokenUser, wrap(async (req, res) => {
     const file = await lib.readableFile(pool, req.user, Number(req.params.id));
     if (!file) throw new HttpError(404, 'Bestand niet gevonden');
-    if (isFirstChunk(req)) lib.logAccess(pool, req.user.id, file.id, 'stream', req.headers['user-agent']);
+    if (isFirstChunk(req)) { await countFetch(req.user, file.id); lib.logAccess(pool, req.user.id, file.id, 'stream', req.headers['user-agent']); }
     sendAudio(req, res, file);
   }));
 

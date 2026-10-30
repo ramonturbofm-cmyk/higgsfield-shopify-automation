@@ -513,6 +513,24 @@ Elke maand nieuwe muziek alleen voor Standaard en Pro: zet nieuwe nummers eerst 
 een collectie *Nieuw* (*Standaard en Pro*) en verplaats ze na een maand naar de
 vaste collecties.
 
+## Apparaten en alarm (inlog delen tegengaan)
+
+- **Apparaten tegelijk**: Basis en Standaard 1, Pro 2 (per klant aan te passen in
+  *Gebruikers*). Logt een klant op een extra apparaat in, dan wordt het oudste
+  apparaat uitgelogd; de studio daar toont *Uitgelogd: ingelogd op een ander
+  apparaat*. Eigenaar en beheerders hebben geen limiet.
+- **Logins bekijken** (per klant): wanneer, laatst actief, apparaat (bijv. *Chrome op
+  Windows*, *Audio OnAir Turbo-app*), IP-adres en waarom een login stopte.
+  **Overal uitloggen** beëindigt alle logins van die klant direct.
+- **Alarm**: haalt een klant binnen een uur meer dan 150 verschillende nummers op
+  (een uur uitzenden is ± 15–20), dan wordt het account direct geblokkeerd. Je ziet
+  het in de studio (statusbalk *⚠ ALARM*, dashboard, logboek), bij de klant onder
+  *Gebruikers* (met de reden) en in *Activiteit*. **Deblokkeren** heft het op.
+  Er wordt alleen geteld, niet opgeslagen wat iemand afspeelt. Drempel aanpassen:
+  `STREAM_ALARM_PER_HOUR` in `.env`.
+- Zet in je voorwaarden dat een account persoonlijk is en niet gedeeld of
+  gekopieerd mag worden.
+
 ## Beveiliging
 
 - Alles via https (op de mini-pc via Caddy, zie hierboven); wachtwoorden worden

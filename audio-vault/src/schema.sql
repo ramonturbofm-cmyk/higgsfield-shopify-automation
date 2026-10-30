@@ -180,3 +180,22 @@ CREATE TABLE IF NOT EXISTS music_wishes (
   handled_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS music_wishes_open_idx ON music_wishes (created_at DESC) WHERE status = 'open';
+
+-- Logins per device: every login gets its own row (the id is in the cookie). Used to
+-- limit how many devices an account may use at once and to show where it logged in.
+CREATE TABLE IF NOT EXISTS user_sessions (
+  id           TEXT PRIMARY KEY,
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  ip           TEXT NOT NULL DEFAULT '',
+  last_ip      TEXT NOT NULL DEFAULT '',
+  user_agent   TEXT NOT NULL DEFAULT '',
+  ended_at     TIMESTAMPTZ,
+  ended_reason TEXT
+);
+CREATE INDEX IF NOT EXISTS user_sessions_user_idx ON user_sessions (user_id, created_at DESC);
+-- Devices at the same time; NULL = the default of the package (owner/admins: no limit).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS max_devices INTEGER;
+-- Why an account is blocked (e.g. the alarm for unusual use); NULL = blocked by hand.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled_reason TEXT;

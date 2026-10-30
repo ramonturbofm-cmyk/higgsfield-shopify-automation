@@ -200,6 +200,28 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     check('uitgelogd: playlist niet overgeslagen', skipped === 0, String(skipped));
     await page.screenshot({ path: path.join(OUT, 'studio-uitgelogd.png') });
   }
+  // Sharing a login: a customer is in the studio, someone else logs in with the same
+  // account (package Basis = 1 device) and the first studio says why it was logged out.
+  {
+    const inv = await api('POST', '/api/users', { name: 'Klant', email: 'klant@example.com', plan: 'basis' });
+    await fetch(`${base}/api/invite/${inv.invite_url.split('#invite=')[1]}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: 'klant-wachtwoord' }) });
+    const ctx2 = await browser.newContext();
+    const p2 = await ctx2.newPage();
+    await p2.goto(base);
+    await p2.fill('input[name=email]', 'klant@example.com');
+    await p2.fill('input[name=password]', 'klant-wachtwoord');
+    await p2.click('button[type=submit]');
+    await p2.waitForTimeout(500);
+    await p2.goto(`${base}/studio.html`);
+    await p2.waitForSelector('#sys-server b');
+    await fetch(`${base}/api/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'klant@example.com', password: 'klant-wachtwoord' }) });
+    await p2.evaluate(() => checkSystem());
+    await p2.waitForTimeout(800);
+    const bar = await p2.evaluate(() => (document.querySelector('[role=alert]') || {}).textContent || '');
+    check('gedeelde login: eerste studio krijgt de reden te zien', /ander apparaat/.test(bar), bar.slice(0, 120));
+    await p2.screenshot({ path: path.join(OUT, 'studio-elders-ingelogd.png') });
+    await ctx2.close();
+  }
   const realErrors = errors.filter((e) => !/AudioContext encountered an error from the audio device|status of 40[14]/.test(e));
   check('geen JavaScript-fouten', realErrors.length === 0, realErrors.slice(0, 3).join(' | '));
   await page.screenshot({ path: path.join(OUT, 'studio-end.png') });

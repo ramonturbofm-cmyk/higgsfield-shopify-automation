@@ -7,6 +7,7 @@ const os = require('os');
 const path = require('path');
 const { createPool, migrate } = require('../src/db');
 const { createApp } = require('../src/app');
+const auth = require('../src/auth');
 
 const DB = process.env.TEST_DATABASE_URL;
 const hasFfmpeg = (() => { try { require('child_process').execFileSync('ffmpeg', ['-version']); return true; } catch { return false; } })();
@@ -23,13 +24,13 @@ function wav() {
   return buf;
 }
 
-function client() {
+function client(at) {
   let cookie = '';
   const call = async (method, url, body, headers = {}) => {
     const opts = { method, headers: { ...headers, cookie } };
     if (body instanceof FormData) opts.body = body;
     else if (body !== undefined) { opts.body = JSON.stringify(body); opts.headers['content-type'] = 'application/json'; }
-    const res = await fetch(base + url, opts);
+    const res = await fetch((at || base) + url, opts);
     const set = res.headers.get('set-cookie');
     if (set) cookie = set.split(';')[0];
     const type = res.headers.get('content-type') || '';
@@ -39,6 +40,8 @@ function client() {
   call.cookie = () => cookie;
   return call;
 }
+
+const clientAt = (at) => client(at);
 
 before(async () => {
   if (!DB) return;
@@ -656,4 +659,129 @@ test('a studio that stays open stays logged in: the login is renewed while in us
   const gone = await fetch(`${base}/api/me`, { headers: { cookie: cookieFor(Date.now() - 1000) } });
   assert.equal(gone.status, 401);
   assert.equal(gone.headers.get('set-cookie'), null);
+});
+
+// A second app on the same database: its own login throttle (and options).
+async function freshApp(opts = {}) {
+  const app2 = createApp({ pool, storageDir, sessionSecret: 'test-secret', ...opts });
+  const srv = await new Promise((r) => { const x = app2.listen(0, () => r(x)); });
+  return { base: `http://127.0.0.1:${srv.address().port}`, close: () => srv.close() };
+}
+
+test('devices: limit per account, ended logins, legacy cookies, overview, logout everywhere', { skip: !DB && 'TEST_DATABASE_URL not set' }, async () => {
+  const fresh = await freshApp();
+  const base = fresh.base;
+  const client = (b) => clientAt(b || base);
+  try {
+  const owner = client();
+  assert.equal((await owner('POST', '/api/login', { email: 'owner@example.com', password: 'supergeheim1' })).status, 200);
+  const inv = await owner('POST', '/api/users', { name: 'Zender Oost', email: 'oost@example.com', plan: 'basis' });
+  const id = inv.data.user.id;
+  assert.equal(inv.data.user.device_limit, 1);
+  assert.equal((await client()('POST', `/api/invite/${inv.data.invite_url.split('#invite=')[1]}`, { password: 'oost-wachtwoord' })).status, 200);
+  const login = async () => { const c = client(); assert.equal((await c('POST', '/api/login', { email: 'oost@example.com', password: 'oost-wachtwoord' })).status, 200); return c; };
+
+  // Basis = 1 device: logging in on a second PC ends the first one, with the reason.
+  const pc1 = await login();
+  assert.equal((await pc1('GET', '/api/me')).status, 200);
+  const pc2 = await login();
+  const kicked = await pc1('GET', '/api/me');
+  assert.equal(kicked.status, 401);
+  assert.match(kicked.data.error, /ander apparaat/);
+  assert.equal((await pc2('GET', '/api/me')).status, 200);
+
+  // Pro = 2 devices; a per-person number overrides the package.
+  assert.equal((await owner('PATCH', `/api/users/${id}`, { plan: 'pro' })).data.user.device_limit, 2);
+  const pc3 = await login();
+  assert.equal((await pc2('GET', '/api/me')).status, 200);
+  assert.equal((await pc3('GET', '/api/me')).status, 200);
+  const one = await owner('PATCH', `/api/users/${id}`, { max_devices: 1 });
+  assert.equal(one.data.user.device_limit, 1);
+  assert.equal((await pc2('GET', '/api/me')).status, 401, 'lower limit: the older login ends at once');
+  assert.equal((await pc3('GET', '/api/me')).status, 200);
+  assert.equal((await owner('PATCH', `/api/users/${id}`, { max_devices: 11 })).status, 400);
+  assert.equal((await owner('PATCH', `/api/users/${id}`, { max_devices: null })).data.user.device_limit, 2);
+
+  // The overview: device, IP and why a login ended.
+  const list = (await owner('GET', `/api/users/${id}/sessions`)).data.sessions;
+  assert.ok(list.length >= 4);
+  assert.ok(list.some((s) => s.active));
+  assert.ok(list.some((s) => /ander apparaat/.test(s.ended_reason || '')));
+  assert.ok(list.every((s) => typeof s.device === 'string' && 'ip' in s));
+  const users = (await owner('GET', '/api/users')).data.users;
+  assert.equal(users.find((u) => u.id === id).active_devices, 1);
+
+  // A cookie from before 2.17 (no device id) keeps working and counts as one device,
+  // also when a starting studio fires many requests at once.
+  const { rows: [row] } = await pool.query('SELECT session_version FROM users WHERE id = $1', [id]);
+  const legacy = `${auth.SESSION_COOKIE}=${encodeURIComponent(auth.signSession('test-secret', id, row.session_version))}`;
+  const results = await Promise.all(Array.from({ length: 8 }, () => fetch(`${base}/api/me`, { headers: { cookie: legacy } })));
+  assert.ok(results.every((r) => r.status === 200), 'parallel requests of one old login do not end each other');
+  assert.equal((await fetch(`${base}/api/me`, { headers: { cookie: legacy } })).status, 200);
+
+  // Changing the password keeps this login and ends the others.
+  const pcA = await login();
+  assert.equal((await pcA('POST', '/api/me/password', { current_password: 'oost-wachtwoord', new_password: 'nieuw-wachtwoord1' })).status, 200);
+  assert.equal((await pcA('GET', '/api/me')).status, 200);
+  assert.equal((await pc3('GET', '/api/me')).status, 401);
+
+  // Logout everywhere.
+  assert.equal((await owner('POST', `/api/users/${id}/logout-all`)).status, 200);
+  assert.equal((await pcA('GET', '/api/me')).status, 401);
+  // The owner has no device limit.
+  const owner2 = client();
+  assert.equal((await owner2('POST', '/api/login', { email: 'owner@example.com', password: 'supergeheim1' })).status, 200);
+  assert.equal((await owner('GET', '/api/me')).status, 200);
+  } finally { fresh.close(); }
+});
+
+test('alarm: an account that fetches far more tracks than it can play is blocked', { skip: !DB && 'TEST_DATABASE_URL not set' }, async () => {
+  // A second app on the same database with a low alarm threshold.
+  const app2 = createApp({ pool, storageDir, sessionSecret: 'test-secret', alarmPerHour: 3 });
+  const srv = await new Promise((r) => { const s = app2.listen(0, () => r(s)); });
+  const base2 = `http://127.0.0.1:${srv.address().port}`;
+  try {
+    const call = (cookie) => async (method, url, body) => {
+      const opts = { method, headers: { cookie: cookie.v } };
+      if (body instanceof FormData) opts.body = body;
+      else if (body !== undefined) { opts.body = JSON.stringify(body); opts.headers['content-type'] = 'application/json'; }
+      const r = await fetch(base2 + url, opts);
+      const set = r.headers.get('set-cookie'); if (set) cookie.v = set.split(';')[0];
+      const type = r.headers.get('content-type') || '';
+      return { status: r.status, data: type.includes('json') ? await r.json() : await r.text() };
+    };
+    const owner = call({ v: '' });
+    await owner('POST', '/api/login', { email: 'owner@example.com', password: 'supergeheim1' });
+    const col = (await owner('POST', '/api/collections', { name: 'Alarmtest', min_plan: 'basis' })).data.collection;
+    const ids = [];
+    for (let i = 0; i < 5; i++) {
+      const fd = new FormData(); fd.append('collection_id', String(col.id)); fd.append('title', `Alarm ${i}`);
+      fd.append('file', new Blob([wav()]), `alarm${i}.wav`);
+      ids.push((await owner('POST', '/api/files', fd)).data.file.id);
+    }
+    // The owner is never counted.
+    for (const fid of ids) assert.equal((await owner('GET', `/api/files/${fid}/stream`)).status, 200);
+    const inv = await owner('POST', '/api/users', { name: 'Kopieer FM', email: 'kopie@example.com', plan: 'basis' });
+    const m = call({ v: '' });
+    assert.equal((await m('POST', `/api/invite/${inv.data.invite_url.split('#invite=')[1]}`, { password: 'kopie-wachtwoord' })).status, 200);
+    for (const fid of ids.slice(0, 3)) assert.equal((await m('GET', `/api/files/${fid}/stream`)).status, 200);
+    // Same tracks again (a re-cue) do not count twice.
+    assert.equal((await m('GET', `/api/files/${ids[0]}/stream`)).status, 200);
+    const blocked = await m('GET', `/api/files/${ids[3]}/stream`);
+    assert.equal(blocked.status, 403);
+    assert.match(blocked.data.error, /geblokkeerd/);
+    assert.equal((await m('GET', '/api/me')).status, 401);
+    const u = (await owner('GET', '/api/users')).data.users.find((x) => x.id === inv.data.user.id);
+    assert.equal(u.disabled, true);
+    assert.match(u.disabled_reason, /^Alarm: 4 verschillende nummers/);
+    assert.equal((await owner('GET', '/api/status')).data.alarms, 1);
+    const act = (await owner('GET', '/api/activity')).data.activity;
+    assert.ok(act.some((a) => a.action === 'alarm'));
+    // Unblocking by hand clears the reason and the count.
+    assert.equal((await owner('PATCH', `/api/users/${inv.data.user.id}`, { disabled: false })).data.user.disabled_reason, null);
+    assert.equal((await owner('GET', '/api/status')).data.alarms, 0);
+    const m2 = call({ v: '' });
+    assert.equal((await m2('POST', '/api/login', { email: 'kopie@example.com', password: 'kopie-wachtwoord' })).status, 200);
+    assert.equal((await m2('GET', `/api/files/${ids[4]}/stream`)).status, 200);
+  } finally { srv.close(); }
 });
