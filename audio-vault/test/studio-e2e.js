@@ -194,7 +194,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await page.click('#btn-stop'); await sleep(500);
     // mix editor (admin): move the beginning and the end, save; the studio uses it at once
     const t1 = await page.evaluate(() => [...S.files.values()].find((f) => f.title === 'Track 1').id);
-    await page.evaluate((id) => openMixEditor(id), t1);
+    const scissors = await page.$$eval('#library .lib-row .lib-actions button', (b) => b.filter((x) => x.textContent === '✂').length);
+    check('mix-editor: ✂-knop direct in elke databaserij', scissors >= 6, String(scissors));
+    await page.click('#library .lib-row:has-text("Track 1") .lib-actions button:has-text("✂")');
     check('mix-editor: golfvorm geladen', await waitFor(() => page.evaluate(() => Boolean(mix.pts)), 8000));
     const before = await page.evaluate(() => mix.pts.cue_in);
     await page.click('.mix-point[data-key=cue_in] button:has-text("+1")');
@@ -210,6 +212,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const row = (await pool.query('SELECT cue_in, cues_manual FROM audio_files WHERE id = $1', [t1])).rows[0];
     check('mix-editor: in de database, met de hand', Math.abs(Number(row.cue_in) - (before + 1)) < 0.02 && row.cues_manual, JSON.stringify(row));
     await page.evaluate((id) => { S.playlist = []; addToPlaylist([id]); cueNext({ startWhenReady: true }); }, t1);
+    check('mix-editor: ✂ MIX-knop bij de speler', await page.isVisible('.deck .deck-mix'));
     check('mix-editor: speelt vanaf het nieuwe begin', await waitFor(() => page.evaluate((b) => Boolean(S.live && S.live.audio.currentTime >= b - 0.05), before + 1), 8000));
     await page.click('#btn-stop'); await sleep(500);
     // logged out: a clear warning, and the playlist is not skipped item by item

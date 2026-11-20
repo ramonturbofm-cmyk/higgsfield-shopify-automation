@@ -832,7 +832,9 @@ function renderDecks() {
     const stateLabel = err && d.state === 'empty' ? 'FOUT' : { empty: 'LEEG', loading: 'LADEN…', cued: 'KLAAR', playing: d === S.live ? 'ON AIR' : 'UITLOOP', paused: 'PAUZE' }[d.state];
     el.className = `deck ${d.state === 'paused' ? 'playing' : d.state} st-${err && d.state === 'empty' ? 'error' : st}${d === S.live ? ' is-live' : ''}`;
     el.replaceChildren(
-      h('div', { class: 'deck-head' }, h('span', {}, `PLAYER ${d.name}`), h('span', { class: 'deck-state' }, stateLabel)),
+      h('div', { class: 'deck-head' }, h('span', {}, `PLAYER ${d.name}`),
+        d.file && isAdminUser() ? h('button', { class: 'deck-mix', title: 'Mix van dit nummer bewerken', onclick: () => openMixEditor(d.file.id) }, '✂ MIX') : null,
+        h('span', { class: 'deck-state' }, stateLabel)),
       ...(err ? [h('div', { class: 'deck-error', title: err.msg }, `⚠ ${err.skipped === false ? '' : 'Overgeslagen: '}${err.msg}`)] : []),
       h('div', { class: 'deck-title' }, d.file ? d.file.title : '—'),
       h('div', { class: 'deck-artist' }, d.file ? d.file.artist || ' ' : ' ',
@@ -1106,7 +1108,8 @@ function libraryRow(f) {
   h('div', { class: 'lib-actions' },
     h('button', { title: 'Voorbeluisteren', 'data-pfl': f.id, class: S.pfl.fileId === f.id ? 'pfl-on' : '', onclick: () => togglePfl(f) }, '🎧'),
     h('button', { title: 'Als volgende afspelen', onclick: (e) => { addNext(targetIds(f)); flashRow(e.target); clearSelection(); } }, '⤴'),
-    h('button', { title: 'Achteraan de playlist', onclick: (e) => { addToPlaylist(targetIds(f)); flashRow(e.target); clearSelection(); } }, '+')));
+    h('button', { title: 'Achteraan de playlist', onclick: (e) => { addToPlaylist(targetIds(f)); flashRow(e.target); clearSelection(); } }, '+'),
+    isAdminUser() ? h('button', { class: f.cues_manual ? 'mix-set' : '', title: f.cues_manual ? 'Mix bewerken (met de hand ingesteld)' : 'Mix bewerken: begin, mixpunt en einde', onclick: (e) => { e.stopPropagation(); openMixEditor(f.id); } }, '✂') : null));
 }
 function flashRow(el) {
   const row = el.closest('.lib-row');
@@ -1636,6 +1639,7 @@ function setupReports() {
 async function boot() {
   setupUpdateButton();
   try { S.me = (await api('GET', '/api/me')).user; } catch { location.href = '/'; return; }
+  document.body.classList.toggle('is-admin', isAdminUser());
   const [{ settings }, { collections }] = await Promise.all([api('GET', '/api/me/settings'), api('GET', '/api/collections')]);
   S.settings = { ...DEFAULT_SETTINGS, ...settings };
   S.collections = collections;
