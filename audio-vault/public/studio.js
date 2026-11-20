@@ -2162,11 +2162,11 @@ function replaceSlot(index, id) {
   const f = S.files.get(id);
   logEvent('INFO', `Jingle-knop ${index + 1}: ${old ? old.title : '—'} → ${f ? f.title : id}`);
 }
-function renameSlotCategory(index) {
+async function renameSlotCategory(index) {
   const slot = cartSlots()[index];
   const f = slot && S.files.get(slot.id);
   if (!slot || !f) return;
-  const v = prompt('Categorie op deze knop (leeg = naam van de collectie)', slot.cat || '');
+  const v = await askText('Categorie op deze knop (leeg = naam van de collectie)', slot.cat || '');
   if (v === null) return;
   slot.cat = v.trim().slice(0, 30) || undefined;
   saveSettingsSoon(); renderCart();

@@ -69,6 +69,7 @@
 <div id="app"></div>
 <div class="player" id="player"><strong id="now-playing" class="grow" style="flex:0 1 auto;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></strong><audio id="audio" controls></audio></div>
 
+<script src="ask.js"></script>
 <script>
 const $app = document.getElementById('app');
 const state = { me: null, tab: 'library', collections: [], files: [], selected: null, q: '', token: sessionStorage.getItem('av_token') };
@@ -208,7 +209,7 @@ async function renderLibrary(root) {
 
   const head = h('div', { class: 'row' }, h('h2', { class: 'grow', style: 'margin:0' }, selected.name),
     isAdmin() ? h('button', { class: 'btn small', onclick: async () => {
-      const name = prompt('Nieuwe naam voor de collectie', selected.name);
+      const name = await askText('Nieuwe naam voor de collectie', selected.name);
       if (name) { try { await api('PATCH', `/api/collections/${selected.id}`, { name }); renderMain(); } catch (e) { alert(e.message); } }
     } }, 'Hernoemen') : null,
     isAdmin() ? h('button', { class: 'btn small danger', onclick: async () => {
@@ -290,10 +291,15 @@ function play(f) {
 }
 
 async function editFile(f) {
-  const title = prompt('Titel', f.title); if (title === null) return;
-  const artist = prompt('Artiest', f.artist); if (artist === null) return;
-  const tags = prompt('Tags (komma-gescheiden)', f.tags.join(', ')); if (tags === null) return;
-  await api('PATCH', `/api/files/${f.id}`, { title, artist, tags: tags.split(',').map((t) => t.trim()).filter(Boolean) });
+  const v = await askForm('Nummer bewerken', [
+    { name: 'title', label: 'Titel', value: f.title },
+    { name: 'artist', label: 'Artiest', value: f.artist },
+    { name: 'tags', label: 'Tags (komma-gescheiden)', value: f.tags.join(', ') },
+  ]);
+  if (!v) return;
+  try {
+    await api('PATCH', `/api/files/${f.id}`, { title: v.title, artist: v.artist, tags: v.tags.split(',').map((t) => t.trim()).filter(Boolean) });
+  } catch (e) { alert(e.message); return; }
   renderMain();
 }
 
@@ -477,7 +483,7 @@ async function renderReports(root) {
   const { wishes } = await api('GET', `/api/wishes${done ? '?status=handled' : ''}`);
   const statusLabel = { open: 'aangevraagd', added: '✓ toegevoegd', rejected: 'niet mogelijk' };
   const handle = async (w, status) => {
-    const reply = status === 'open' ? '' : prompt(status === 'added' ? 'Bericht voor de aanvrager (optioneel)' : 'Waarom niet? (optioneel, de aanvrager ziet dit)', status === 'added' ? 'Staat erin!' : '');
+    const reply = status === 'open' ? '' : await askText(status === 'added' ? 'Bericht voor de aanvrager (optioneel)' : 'Waarom niet? (optioneel, de aanvrager ziet dit)', status === 'added' ? 'Staat erin!' : '');
     if (reply === null) return;
     await api('POST', `/api/wishes/${w.id}`, { status, reply });
     renderMain();

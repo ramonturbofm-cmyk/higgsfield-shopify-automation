@@ -293,7 +293,7 @@ async function boot() {
   if (!isAdmin()) document.body.classList.add('readonly');
 
   $('btn-new').addEventListener('click', async () => {
-    const name = prompt('Naam van de nieuwe klok', `Klok ${K.clocks.length + 1}`);
+    const name = await askText('Naam van de nieuwe klok', `Klok ${K.clocks.length + 1}`);
     if (!name) return;
     const colors = ['#2f7bff', '#30d158', '#ff8a00', '#b06cff', '#32d2ff', '#ff4fa3', '#ffd60a'];
     try {
