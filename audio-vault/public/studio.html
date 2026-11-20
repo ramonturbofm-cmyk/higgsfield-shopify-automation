@@ -156,6 +156,30 @@
   </form>
 </dialog>
 
+<dialog id="mixedit" class="mixedit">
+  <form method="dialog" class="settings mix-form">
+    <h2>✂ Mix bewerken</h2>
+    <p class="report-track" id="mix-track"></p>
+    <p class="muted mix-note hidden" id="mix-segue">Naadloos aansluiten staat aan: dit nummer speelt van het allereerste tot het allerlaatste moment. Begin en einde gelden pas als je naadloos uitzet.</p>
+    <div class="mix-wave-wrap"><canvas id="mix-wave" height="120"></canvas></div>
+    <div class="mix-zoom-head"><span id="mix-zoom-label">Ingezoomd</span><span class="muted">klik of sleep om het gekozen punt te verplaatsen</span></div>
+    <div class="mix-wave-wrap"><canvas id="mix-zoom" height="90"></canvas></div>
+    <div class="mix-points" id="mix-points"></div>
+    <div class="mix-play">
+      <button type="button" class="tbtn" id="mix-stop">■ Stop</button>
+      <span class="muted" id="mix-pos"></span>
+      <span class="muted mix-out">via de voorbeluister-uitgang</span>
+    </div>
+    <p class="muted mix-msg" id="mix-msg"></p>
+    <div class="dialog-actions mix-actions">
+      <button type="button" class="tbtn" id="mix-auto" title="Vergeet de handmatige punten; de studio meet het nummer opnieuw">↺ Automatisch</button>
+      <span class="mix-spacer"></span>
+      <button type="button" class="tbtn" id="mix-cancel">Annuleren</button>
+      <button type="button" class="tbtn start" id="mix-save">Opslaan</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="wishes">
   <form method="dialog" class="settings wish-form">
     <h2>♪ Muziek wensen</h2>

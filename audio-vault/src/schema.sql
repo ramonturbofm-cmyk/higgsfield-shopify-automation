@@ -145,6 +145,10 @@ CREATE TABLE IF NOT EXISTS nonstop_blocks (
 -- exactly where it ends: no silence skipped, no overlap, no fade.
 ALTER TABLE audio_files ADD COLUMN IF NOT EXISTS segue BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- Begin, mix and end set by hand in the mix editor (admins): the studio's automatic
+-- silence analysis never overwrites them.
+ALTER TABLE audio_files ADD COLUMN IF NOT EXISTS cues_manual BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- Packages (Basis / Standaard / Pro). A member with a plan also sees every collection
 -- whose min_plan is at or below that plan, on top of the collections ticked by hand.
 -- access_until ends a trial week or a paid period: after it the account stops working.

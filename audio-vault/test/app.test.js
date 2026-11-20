@@ -197,6 +197,19 @@ test('full flow: owner, upload, invite member, permissions, mAirList links, WebD
   assert.equal(cued.status, 200);
   assert.equal(cued.data.file.mix_out, 0.8);
   assert.equal((await sam('PUT', `/api/files/${file.id}/cues`, { cue_in: 0, mix_out: 0, cue_out: 0 })).status, 400);
+  // Mix editor: only admins set points by hand, and the automatic analysis then leaves them alone.
+  assert.equal((await sam('PUT', `/api/files/${file.id}/cues`, { cue_in: 0.1, mix_out: 0.5, cue_out: 0.9, manual: true })).status, 403);
+  assert.equal((await sam('DELETE', `/api/files/${file.id}/cues`)).status, 403);
+  assert.equal((await owner('PUT', `/api/files/${file.id}/cues`, { cue_in: 0.1, mix_out: 0.5, cue_out: 99, manual: true })).status, 400);
+  const manual = await owner('PUT', `/api/files/${file.id}/cues`, { cue_in: 0.12, mix_out: 0.5, cue_out: 0.9, manual: true });
+  assert.equal(manual.status, 200);
+  assert.equal(manual.data.file.cues_manual, true);
+  const auto = await sam('PUT', `/api/files/${file.id}/cues`, { cue_in: 0.05, mix_out: 0.8, cue_out: 0.95 });
+  assert.equal(auto.status, 200);
+  assert.deepEqual([auto.data.file.cue_in, auto.data.file.mix_out, auto.data.file.cue_out, auto.data.file.cues_manual], [0.12, 0.5, 0.9, true]);
+  const reset = await owner('DELETE', `/api/files/${file.id}/cues`);
+  assert.deepEqual([reset.data.file.cue_in, reset.data.file.cues_manual], [null, false]);
+  assert.equal((await sam('PUT', `/api/files/${file.id}/cues`, { cue_in: 0.05, mix_out: 0.8, cue_out: 0.95 })).data.file.cue_in, 0.05);
   // Every customer has their own station: what Sam plays shows on Sam's page only.
   assert.equal((await client()('GET', '/api/now-playing')).data.now_playing, null);
   assert.equal((await sam('POST', '/api/now-playing', { file_id: file.id })).status, 200);

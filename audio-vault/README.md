@@ -382,6 +382,24 @@ je een heel album tegelijk selecteren.
 - Aanzetten mag de beheerder, of iemand met uploadrechten op die collectie. Het
   geldt voor iedereen die het nummer draait.
 
+## Mix bewerken (alleen beheerders)
+
+Klik met rechts op een nummer in de database of de playlist → **✂ Mix bewerken…**
+(of de knop **✂ Mix** bij de details). Je ziet de golfvorm van het hele nummer en
+daaronder 10 seconden ingezoomd, met drie punten:
+
+- **Begin** (groen): hier start het nummer.
+- **Mix** (oranje): hier start het volgende nummer al.
+- **Einde** (rood): hier stopt het nummer.
+
+Klik of sleep in de golfvorm om het gekozen punt te verplaatsen, of gebruik
+−1 / −0,1 / +0,1 / +1 seconde. **▶** beluistert vanaf dat punt via de
+voorbeluister-uitgang (niet on air); **⌖ hier** zet het punt op de plek die nu
+speelt. **Opslaan** geldt meteen voor iedereen, en de automatische meting
+overschrijft het niet meer. **↺ Automatisch** vergeet de handmatige punten en meet
+het nummer opnieuw. Vervang je de audio van een nummer, dan wordt ook opnieuw
+gemeten.
+
 ## Probleem melden (feedback op nummers)
 
 Klanten en dj's kunnen in de studio een nummer dat niet goed is **doorgeven aan de

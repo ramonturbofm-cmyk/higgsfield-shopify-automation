@@ -192,6 +192,26 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await page.evaluate((kid) => { S.playlist = []; const by = (t) => [...S.files.values()].find((f) => f.title === t).id; addToPlaylist([kid, by('Track 5')]); cueNext({ startWhenReady: true }); }, kapot.id);
     check('AUTO na fout: volgende start vanzelf', await waitFor(async () => (await nowTitle()) === 'Track 5', 8000), await nowTitle());
     await page.click('#btn-stop'); await sleep(500);
+    // mix editor (admin): move the beginning and the end, save; the studio uses it at once
+    const t1 = await page.evaluate(() => [...S.files.values()].find((f) => f.title === 'Track 1').id);
+    await page.evaluate((id) => openMixEditor(id), t1);
+    check('mix-editor: golfvorm geladen', await waitFor(() => page.evaluate(() => Boolean(mix.pts)), 8000));
+    const before = await page.evaluate(() => mix.pts.cue_in);
+    await page.click('.mix-point[data-key=cue_in] button:has-text("+1")');
+    await page.click('.mix-point[data-key=cue_out]');
+    const wave = await page.locator('#mix-wave').boundingBox();
+    await page.mouse.click(wave.x + wave.width * 0.8, wave.y + wave.height / 2);
+    await sleep(300);
+    await page.screenshot({ path: path.join(OUT, 'studio-mix.png') });
+    await page.click('#mix-save'); await sleep(800);
+    const saved = await page.evaluate((id) => { const f = S.files.get(id); return { cue_in: f.cue_in, cue_out: f.cue_out, mix_out: f.mix_out, manual: f.cues_manual, open: $('mixedit').open }; }, t1);
+    const dur = 7;
+    check('mix-editor: begin en einde opgeslagen', Math.abs(saved.cue_in - (before + 1)) < 0.02 && Math.abs(saved.cue_out - dur * 0.8) < 0.1 && saved.mix_out <= saved.cue_out && saved.manual && !saved.open, JSON.stringify(saved));
+    const row = (await pool.query('SELECT cue_in, cues_manual FROM audio_files WHERE id = $1', [t1])).rows[0];
+    check('mix-editor: in de database, met de hand', Math.abs(Number(row.cue_in) - (before + 1)) < 0.02 && row.cues_manual, JSON.stringify(row));
+    await page.evaluate((id) => { S.playlist = []; addToPlaylist([id]); cueNext({ startWhenReady: true }); }, t1);
+    check('mix-editor: speelt vanaf het nieuwe begin', await waitFor(() => page.evaluate((b) => Boolean(S.live && S.live.audio.currentTime >= b - 0.05), before + 1), 8000));
+    await page.click('#btn-stop'); await sleep(500);
     // logged out: a clear warning, and the playlist is not skipped item by item
     await page.context().clearCookies();
     await page.evaluate(() => { blobCache.clear(); S.playlist = []; const by = (t) => [...S.files.values()].find((f) => f.title === t).id; addToPlaylist([by('Track 3'), by('Track 4')]); cueNext({ startWhenReady: true }); });

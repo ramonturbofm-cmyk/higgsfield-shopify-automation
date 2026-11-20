@@ -1160,6 +1160,7 @@ function fileMenu(e, f, { playlist = false } = {}) {
       item('✕  Selectie opheffen', clearSelection));
   } else if (playlist) menu.replaceChildren(
     h('div', { class: 'ctx-title' }, label(f)),
+    ...(isAdminUser() ? [item('✂  Mix bewerken…', () => openMixEditor(f.id))] : []),
     item('⚑  Probleem melden…', () => openReport(f.id)),
     ...nonstopMenuItems(f, item));
   else menu.replaceChildren(
@@ -1170,6 +1171,7 @@ function fileMenu(e, f, { playlist = false } = {}) {
     item('🎧  Voorbeluisteren', () => togglePfl(f)),
     item('🎵  Op een jingle-knop zetten', () => assignToCart([f.id])),
     item(isFav(f.id) ? '☆  Uit favorieten' : '★  Favoriet', () => setFav([f.id], !isFav(f.id))),
+    ...(isAdminUser() ? [item('✂  Mix bewerken…', () => openMixEditor(f.id))] : []),
     item('⚑  Probleem melden…', () => openReport(f.id)),
     ...nonstopMenuItems(f, item));
   menu.style.left = `${Math.min(e.clientX, innerWidth - 240)}px`;
@@ -1609,6 +1611,7 @@ function setupReports() {
   });
   $('report-send').addEventListener('click', sendReport);
   $('report-cancel').addEventListener('click', () => $('report').close());
+  initMixEditor();
   if (!S.me || !['owner', 'admin'].includes(S.me.role)) return;
   // Admins: badge with the number of open reports, and a notice when a new one comes in.
   let last = null;
@@ -1886,10 +1889,262 @@ function renderDetails() {
   box.replaceChildren(
     h('div', { class: 'd-head' }, h('span', { class: 'd-title' }, label(f)),
       h('button', { class: 'mini', title: 'Favoriet aan/uit', onclick: () => setFav([f.id], !isFav(f.id)) }, isFav(f.id) ? '★ Favoriet' : '☆ Favoriet'),
+      isAdminUser() ? h('button', { class: 'mini', title: 'Begin, mixpunt en einde zelf instellen', onclick: () => openMixEditor(f.id) }, '✂ Mix') : null,
       h('button', { class: 'mini', title: 'Sluiten (Esc)', onclick: clearSelection }, '✕')),
     details.data && details.data.error ? h('div', { class: 'muted' }, `Details niet beschikbaar: ${details.data.error}`)
       : h('dl', {}, detailRows(file, d).filter(([k]) => k !== 'Artiest' && k !== 'Titel').map(([k, v]) => [h('dt', {}, k), h('dd', { title: String(v) }, String(v))])),
     ...(!details.data ? [h('div', { class: 'muted' }, 'Bestandsgegevens lezen…')] : []));
+}
+
+// ---------- mix editor (admins): begin, mix point and end by hand ----------
+// What is set here is stored for everyone and the automatic silence analysis never
+// overwrites it. "Automatisch" forgets it and measures the track again.
+const isAdminUser = () => Boolean(S.me && ['owner', 'admin'].includes(S.me.role));
+const MIX_POINTS = [
+  { key: 'cue_in', name: 'Begin', color: '#30d158', lead: 0, hint: 'hier begint het nummer' },
+  { key: 'mix_out', name: 'Mix', color: '#ff9f0a', lead: 6, hint: 'hier start het volgende nummer' },
+  { key: 'cue_out', name: 'Einde', color: '#ff453a', lead: 6, hint: 'hier stopt het nummer' },
+];
+const MIX_ZOOM = 10; // seconds shown in the zoomed view
+const MIX_RATE = 100; // waveform blocks per second
+const mix = { file: null, url: null, peaks: null, duration: 0, pts: null, sel: 'cue_in', audio: null, raf: 0, drag: null, zoomFrom: 0 };
+
+function fmtPrecise(sec) {
+  const s = Math.max(0, sec || 0);
+  const m = Math.floor(s / 60);
+  return `${m}:${(s - m * 60).toFixed(2).padStart(5, '0')}`;
+}
+function mixPeaks(buffer) {
+  const block = Math.max(1, Math.round(buffer.sampleRate / MIX_RATE));
+  const channels = Array.from({ length: buffer.numberOfChannels }, (_, i) => buffer.getChannelData(i));
+  const n = Math.floor(buffer.length / block);
+  const peaks = new Float32Array(n);
+  let top = 0;
+  for (let b = 0; b < n; b++) {
+    let m = 0;
+    for (const c of channels) for (let i = b * block, e = i + block; i < e; i++) { const v = c[i] < 0 ? -c[i] : c[i]; if (v > m) m = v; }
+    peaks[b] = m; if (m > top) top = m;
+  }
+  if (top) for (let b = 0; b < n; b++) peaks[b] /= top;
+  return peaks;
+}
+function mixPointsFrom(f) {
+  const dur = mix.duration;
+  const end = Math.min(f.cue_out ?? dur, dur);
+  const begin = Math.min(f.cue_in ?? 0, end);
+  const mixAt = Math.min(end, Math.max(begin, f.mix_out ?? end - S.settings.crossfade));
+  return { cue_in: begin, mix_out: mixAt, cue_out: end };
+}
+
+async function openMixEditor(fileId) {
+  if (!isAdminUser()) return;
+  const f = S.files.get(fileId);
+  if (!f) return;
+  mixStop();
+  Object.assign(mix, { file: f, peaks: null, pts: null, sel: 'cue_in', drag: null });
+  $('mix-track').textContent = label(f);
+  $('mix-segue').classList.toggle('hidden', !f.segue);
+  $('mix-msg').textContent = 'Golfvorm laden…';
+  $('mix-points').replaceChildren();
+  $('mix-save').disabled = true;
+  $('mixedit').showModal();
+  mixRender();
+  try {
+    const url = await fileUrl(f);
+    const data = await (await fetch(url)).arrayBuffer();
+    if (mix.file !== f) return;
+    const buffer = await new OfflineAudioContext(1, 1, 22050).decodeAudioData(data);
+    if (mix.file !== f) return;
+    mix.url = url; mix.duration = buffer.duration; mix.peaks = mixPeaks(buffer);
+    mix.pts = mixPointsFrom(f);
+    if (!mix.audio) { mix.audio = new Audio(); mix.audio.preload = 'auto'; }
+    mix.audio.src = url;
+    route(mix.audio, 'pfl');
+    setNormalization(mix.audio, f);
+    $('mix-msg').textContent = f.cues_manual ? 'Deze punten zijn met de hand gezet.' : 'Automatisch gemeten. Verschuif wat je wilt en klik op Opslaan.';
+    $('mix-save').disabled = false;
+    mixRender();
+  } catch (e) {
+    if (mix.file === f) $('mix-msg').textContent = `Kan het nummer niet laden: ${e.message}`;
+  }
+}
+
+function mixSetPoint(key, value) {
+  const p = mix.pts;
+  if (!p) return;
+  const v = Math.round(Math.min(mix.duration, Math.max(0, value)) * 100) / 100;
+  if (key === 'cue_in') p.cue_in = Math.min(v, p.cue_out - 0.5);
+  else if (key === 'cue_out') p.cue_out = Math.max(v, p.cue_in + 0.5);
+  else p.mix_out = v;
+  p.mix_out = Math.min(p.cue_out, Math.max(p.cue_in, p.mix_out));
+  mixRender();
+}
+
+function mixCanvas(id) {
+  const c = $(id);
+  const w = Math.max(1, Math.round(c.clientWidth * devicePixelRatio));
+  const hgt = Math.round(Number(c.getAttribute('height')) * devicePixelRatio);
+  if (c.width !== w || c.height !== hgt) { c.width = w; c.height = hgt; }
+  return c;
+}
+function mixZoomFrom() {
+  if (mix.drag && mix.drag.canvas === 'mix-zoom') return mix.zoomFrom;
+  const at = mix.pts ? mix.pts[mix.sel] : 0;
+  mix.zoomFrom = Math.min(Math.max(0, mix.duration - MIX_ZOOM), Math.max(0, at - MIX_ZOOM / 2));
+  return mix.zoomFrom;
+}
+function drawMixWave(id, from, to) {
+  const c = mixCanvas(id);
+  const g = c.getContext('2d');
+  const css = getComputedStyle(document.documentElement);
+  const W = c.width, H = c.height, mid = H / 2, dpr = devicePixelRatio;
+  g.clearRect(0, 0, W, H);
+  if (!mix.peaks || !(to > from)) return;
+  const x = (t) => ((t - from) / (to - from)) * W;
+  const p = mix.pts;
+  // Played part bright, the cut-off start and end dim.
+  for (let px = 0; px < W; px++) {
+    const t0 = from + (px / W) * (to - from), t1 = from + ((px + 1) / W) * (to - from);
+    let m = 0;
+    for (let b = Math.floor(t0 * MIX_RATE), e = Math.max(b + 1, Math.ceil(t1 * MIX_RATE)); b < e && b < mix.peaks.length; b++) if (mix.peaks[b] > m) m = mix.peaks[b];
+    const inside = t1 > p.cue_in && t0 < p.cue_out;
+    g.fillStyle = inside ? css.getPropertyValue('--text').trim() || '#ddd' : css.getPropertyValue('--line').trim() || '#444';
+    const hh = Math.max(1, m * (mid - 4 * dpr));
+    g.fillRect(px, mid - hh, 1, hh * 2);
+  }
+  // From the mix point the next track already plays: tint that stretch.
+  g.fillStyle = 'rgba(255,159,10,0.14)';
+  g.fillRect(x(p.mix_out), 0, Math.max(0, x(p.cue_out) - x(p.mix_out)), H);
+  g.font = `600 ${11 * dpr}px system-ui, sans-serif`;
+  for (const pt of MIX_POINTS) {
+    const px = Math.round(x(p[pt.key]));
+    if (px < -2 || px > W + 2) continue;
+    g.fillStyle = pt.color;
+    g.fillRect(px - (pt.key === mix.sel ? dpr : dpr / 2), 0, pt.key === mix.sel ? 2 * dpr : dpr, H);
+    const tw = g.measureText(pt.name).width;
+    const lx = Math.min(W - tw - 6 * dpr, Math.max(2 * dpr, px + 4 * dpr));
+    g.fillText(pt.name, lx, (pt.key === 'mix_out' ? 28 : 14) * dpr);
+  }
+  if (mix.audio && !mix.audio.paused) {
+    const px = x(mix.audio.currentTime);
+    g.fillStyle = css.getPropertyValue('--cued').trim() || '#2f7bff';
+    g.fillRect(px - dpr / 2, 0, dpr, H);
+  }
+}
+function mixRender() {
+  if (!$('mixedit').open) return;
+  drawMixWave('mix-wave', 0, mix.duration || 1);
+  const from = mixZoomFrom();
+  drawMixWave('mix-zoom', from, from + Math.min(MIX_ZOOM, mix.duration || MIX_ZOOM));
+  const cur = MIX_POINTS.find((pt) => pt.key === mix.sel);
+  $('mix-zoom-label').textContent = `Ingezoomd op ${cur.name.toLowerCase()} (${MIX_ZOOM} s)`;
+  $('mix-pos').textContent = mix.audio && !mix.audio.paused ? `▶ ${fmtPrecise(mix.audio.currentTime)}` : '';
+  if (!mix.pts) return;
+  const box = $('mix-points');
+  if (box.children.length !== MIX_POINTS.length) {
+    box.replaceChildren(...MIX_POINTS.map((pt) => {
+      const step = (d) => h('button', { type: 'button', onclick: (e) => { e.stopPropagation(); mix.sel = pt.key; mixSetPoint(pt.key, mix.pts[pt.key] + d); } }, `${d > 0 ? '+' : '−'}${Math.abs(d)}`);
+      return h('div', { class: 'mix-point', 'data-key': pt.key, style: `--pc:${pt.color}`, title: pt.hint, onclick: () => { mix.sel = pt.key; mixRender(); } },
+        h('div', { class: 'mp-name' }, pt.name),
+        h('div', { class: 'mp-time' }),
+        h('div', { class: 'mp-btns' }, step(-1), step(-0.1), step(0.1), step(1),
+          h('button', { type: 'button', title: 'Beluisteren vanaf hier', onclick: (e) => { e.stopPropagation(); mix.sel = pt.key; mixPlayFrom(mix.pts[pt.key] - pt.lead); } }, '▶'),
+          h('button', { type: 'button', title: 'Zet op de plek die nu speelt', onclick: (e) => { e.stopPropagation(); if (mix.audio && !mix.audio.paused) { mix.sel = pt.key; mixSetPoint(pt.key, mix.audio.currentTime); } } }, '⌖ hier')));
+    }));
+  }
+  for (const el of box.children) {
+    el.classList.toggle('sel', el.dataset.key === mix.sel);
+    el.querySelector('.mp-time').textContent = fmtPrecise(mix.pts[el.dataset.key]);
+  }
+}
+
+function mixPlayFrom(t) {
+  if (!mix.audio || !mix.pts) return;
+  mix.audio.currentTime = Math.max(0, Math.min(mix.duration - 0.05, t));
+  mix.audio.play().catch((e) => { $('mix-msg').textContent = `Afspelen lukt niet: ${e.message}`; });
+  cancelAnimationFrame(mix.raf);
+  const tick = () => {
+    if (!mix.audio || mix.audio.paused) { mixRender(); return; }
+    // Stop at the end point, like on air.
+    if (mix.audio.currentTime >= mix.pts.cue_out) { mix.audio.pause(); mixRender(); return; }
+    mixRender();
+    mix.raf = requestAnimationFrame(tick);
+  };
+  mix.raf = requestAnimationFrame(tick);
+}
+function mixStop() {
+  cancelAnimationFrame(mix.raf);
+  if (mix.audio) mix.audio.pause();
+  mixRender();
+}
+
+function mixPointer(id) {
+  const c = $(id);
+  const timeAt = (e) => {
+    const r = c.getBoundingClientRect();
+    const frac = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+    if (id === 'mix-wave') return frac * mix.duration;
+    return mix.zoomFrom + frac * Math.min(MIX_ZOOM, mix.duration);
+  };
+  c.addEventListener('pointerdown', (e) => {
+    if (!mix.pts) return;
+    const t = timeAt(e);
+    if (id === 'mix-wave') {
+      // Grab the nearest marker if the click is close to one (10 px).
+      const r = c.getBoundingClientRect();
+      const near = MIX_POINTS.map((pt) => ({ key: pt.key, d: Math.abs(((mix.pts[pt.key] - t) / mix.duration) * r.width) }))
+        .sort((a, b) => a.d - b.d)[0];
+      if (near.d <= 10) mix.sel = near.key;
+    }
+    mix.drag = { canvas: id };
+    c.setPointerCapture(e.pointerId);
+    mixSetPoint(mix.sel, t);
+  });
+  c.addEventListener('pointermove', (e) => { if (mix.drag && mix.drag.canvas === id) mixSetPoint(mix.sel, timeAt(e)); });
+  const end = () => { if (mix.drag && mix.drag.canvas === id) { mix.drag = null; mixRender(); } };
+  c.addEventListener('pointerup', end);
+  c.addEventListener('pointercancel', end);
+}
+
+async function saveMix() {
+  const f = mix.file;
+  if (!f || !mix.pts) return;
+  const p = { ...mix.pts };
+  try {
+    const { file } = await api('PUT', `/api/files/${f.id}/cues`, { ...p, manual: true });
+    Object.assign(f, file);
+    // A player that already holds this track starts it at the new beginning.
+    for (const d of decks) if (d.file && d.file.id === f.id && d.state === 'cued') d.audio.currentTime = cueIn(f);
+    logEvent('INFO', `Mix aangepast: ${label(f)} (begin ${fmtPrecise(p.cue_in)}, mix ${fmtPrecise(p.mix_out)}, einde ${fmtPrecise(p.cue_out)})`);
+    status(`Mix opgeslagen: ${label(f)}`);
+    $('mixedit').close();
+    render();
+  } catch (e) { $('mix-msg').textContent = `Opslaan lukt niet: ${e.message}`; }
+}
+async function resetMix() {
+  const f = mix.file;
+  if (!f || !mix.url) return;
+  if (!confirm('De handmatige punten vergeten en het nummer opnieuw automatisch laten meten?')) return;
+  try {
+    const { file } = await api('DELETE', `/api/files/${f.id}/cues`);
+    Object.assign(f, file);
+    await analyse(f, await (await fetch(mix.url)).blob());
+    mix.pts = mixPointsFrom(f);
+    $('mix-msg').textContent = 'Opnieuw automatisch gemeten (al opgeslagen).';
+    logEvent('INFO', `Mix terug naar automatisch: ${label(f)}`);
+    mixRender(); render();
+  } catch (e) { $('mix-msg').textContent = `Lukt niet: ${e.message}`; }
+}
+
+function initMixEditor() {
+  mixPointer('mix-wave');
+  mixPointer('mix-zoom');
+  $('mix-stop').addEventListener('click', mixStop);
+  $('mix-save').addEventListener('click', saveMix);
+  $('mix-cancel').addEventListener('click', () => $('mixedit').close());
+  $('mix-auto').addEventListener('click', resetMix);
+  $('mixedit').addEventListener('close', () => { mixStop(); mix.file = null; });
+  window.addEventListener('resize', mixRender);
 }
 
 // ---------- jingle buttons ----------

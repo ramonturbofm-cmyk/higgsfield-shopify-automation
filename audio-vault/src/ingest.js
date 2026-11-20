@@ -136,7 +136,7 @@ async function replaceAudio({ pool, filesDir, file, source, move, originalName }
   try {
     const { rows } = await pool.query(
       `UPDATE audio_files SET storage_key = $1, mime_type = $2, size_bytes = $3, duration_seconds = $4, original_name = $5,
-              cue_in = NULL, mix_out = NULL, cue_out = NULL, loudness_lufs = NULL, true_peak_db = NULL,
+              cue_in = NULL, mix_out = NULL, cue_out = NULL, cues_manual = FALSE, loudness_lufs = NULL, true_peak_db = NULL,
               loudness_checked = FALSE, genre = NULL WHERE id = $6 RETURNING *`,
       [path.basename(target), AUDIO_TYPES[storedExt], fs.statSync(target).size,
         meta.format && meta.format.duration ? meta.format.duration : null, originalName, file.id]);

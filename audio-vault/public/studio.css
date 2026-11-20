@@ -403,3 +403,24 @@ dialog::backdrop { background: rgba(0, 0, 0, .7); }
 .wish-status.added { background: var(--ok); color: #000; }
 .wish-status.rejected { background: var(--line); color: var(--text); }
 .wish-reply { font-size: 12px; color: var(--cued); }
+
+/* mix editor (admins) */
+dialog.mixedit { width: min(860px, 96vw); }
+.mix-wave-wrap { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.mix-wave-wrap canvas { display: block; width: 100%; cursor: crosshair; touch-action: none; }
+.mix-zoom-head { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; margin: 12px 0 4px; }
+.mix-points { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px; }
+.mix-point { border: 2px solid var(--line); border-radius: 10px; padding: 10px; background: var(--panel2); cursor: pointer; }
+.mix-point.sel { border-color: var(--pc); }
+.mix-point .mp-name { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--pc); font-weight: 600; }
+.mix-point .mp-time { font: 600 22px/1.2 ui-monospace, "Cascadia Mono", Consolas, monospace; margin: 4px 0 8px; }
+.mix-point .mp-btns { display: flex; flex-wrap: wrap; gap: 4px; }
+.mix-point .mp-btns button { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 3px 7px; cursor: pointer; font-size: 12px; }
+.mix-point .mp-btns button:hover { border-color: var(--pc); }
+.mix-play { display: flex; gap: 14px; align-items: center; margin-top: 12px; }
+.mix-play .tbtn { padding: 6px 14px; }
+.mix-play .mix-out { margin-left: auto; font-size: 12px; }
+.mix-msg { min-height: 1.2em; margin: 8px 0 0; color: var(--warn); }
+.mix-actions { gap: 8px; align-items: center; }
+.mix-spacer { flex: 1; }
+@media (max-width: 700px) { .mix-points { grid-template-columns: 1fr; } }

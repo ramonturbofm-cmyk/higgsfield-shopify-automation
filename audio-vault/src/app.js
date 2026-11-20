@@ -39,7 +39,7 @@ function publicFile(f) {
     tags: f.tags, created_at: f.created_at,
     cue_in: num(f.cue_in), mix_out: num(f.mix_out), cue_out: num(f.cue_out),
     loudness_lufs: num(f.loudness_lufs), true_peak_db: num(f.true_peak_db),
-    genre: f.genre || '', segue: Boolean(f.segue),
+    genre: f.genre || '', segue: Boolean(f.segue), cues_manual: Boolean(f.cues_manual),
     ...(f.nonstop_blocked === undefined ? {} : { nonstop_blocked: Boolean(f.nonstop_blocked) }),
   };
 }
@@ -688,18 +688,33 @@ function createApp({ pool, storageDir, sessionSecret, publicUrl, maxUploadMb = 5
     res.json({ file: publicFile(file), details, size_bytes: Number(file.size_bytes) });
   }));
 
-  // Cue points found by the studio's silence analysis. Anyone who may play the file
-  // may store them: they are derived from the audio itself, not editorial data.
+  // Cue points. The studio's silence analysis stores what it finds: anyone who may play
+  // the file may do that, as it is derived from the audio itself. With manual: true they
+  // come from the mix editor: admins only, and the analysis never overwrites them.
   app.put('/api/files/:id/cues', requireUser, wrap(async (req, res) => {
     const file = await lib.readableFile(pool, req.user, Number(req.params.id));
     if (!file) throw new HttpError(404, 'Bestand niet gevonden');
-    const { cue_in: cueIn, mix_out: mixOut, cue_out: cueOut } = req.body || {};
+    const { cue_in: cueIn, mix_out: mixOut, cue_out: cueOut, manual } = req.body || {};
+    if (manual && !lib.isAdmin(req.user)) throw new HttpError(403, 'Alleen voor beheerders');
     const values = [cueIn, mixOut, cueOut].map(Number);
     if (values.some((v) => !Number.isFinite(v) || v < 0) || !(values[0] <= values[1] && values[1] <= values[2] && values[0] < values[2])) {
       throw new HttpError(400, 'Ongeldige cue-punten');
     }
+    const duration = file.duration_seconds === null ? null : Number(file.duration_seconds);
+    if (manual && duration !== null && values[2] > duration + 0.5) throw new HttpError(400, 'Einde ligt na het einde van het bestand');
+    // The analysis never replaces points set by hand (an older studio may still try).
     const { rows } = await pool.query(
-      'UPDATE audio_files SET cue_in = $1, mix_out = $2, cue_out = $3 WHERE id = $4 RETURNING *', [...values, file.id]);
+      `UPDATE audio_files SET cue_in = $1, mix_out = $2, cue_out = $3, cues_manual = $5
+        WHERE id = $4 AND ($5 OR NOT cues_manual) RETURNING *`, [...values, file.id, Boolean(manual)]);
+    res.json({ file: publicFile(rows[0] || file) });
+  }));
+
+  // Back to automatic: the next time the track is loaded, the studio measures it again.
+  app.delete('/api/files/:id/cues', requireUser, requireAdmin, wrap(async (req, res) => {
+    const file = await lib.readableFile(pool, req.user, Number(req.params.id));
+    if (!file) throw new HttpError(404, 'Bestand niet gevonden');
+    const { rows } = await pool.query(
+      'UPDATE audio_files SET cue_in = NULL, mix_out = NULL, cue_out = NULL, cues_manual = FALSE WHERE id = $1 RETURNING *', [file.id]);
     res.json({ file: publicFile(rows[0]) });
   }));
 
